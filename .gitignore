@@ -1,0 +1,23 @@
+# Node
+node_modules/
+dist/
+
+# Rust
+src-tauri/target/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Tauri updater private keys
+*.key
+
+# Logs
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Game Manager",
+  "version": "0.2.0",
+  "identifier": "com.spicyplantlady.gamemanager",
+
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+
+  "app": {
+    "windows": [
+      {
+        "title": "Game Manager",
+        "width": 1200,
+        "height": 800,
+        "maximized": true
+      }
+    ],
+
+    "security": {
+      "csp": null
+    }
+  },
+
+  "bundle": {
+    "active": true,
+
+    "targets": [
+      "nsis"
+    ],
+
+    "createUpdaterArtifacts": true,
+
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUxMTYwRjg2MzNFREI0QkUKUldTK3RPMHpoZzhXNGUxa3hnSk1lbUNzS0taeUl1VVVnVDBydTZmdWwyd2RwMndyU0VKcG9ZY0oK",
+
+      "endpoints": [
+        "https://github.com/GreatDanish1026/GameManager/releases/latest/download/latest.json"
+      ],
+
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}
