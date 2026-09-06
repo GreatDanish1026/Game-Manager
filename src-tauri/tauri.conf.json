@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Game Manager",
-  "version": "0.2.0",
-  "identifier": "com.spicyplantlady.gamemanager",
+  "version": "0.2.1",
+  "identifier": "com.greatdanish.gamemanager",
 
   "build": {
     "beforeDevCommand": "npm run dev",
