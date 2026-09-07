@@ -1,12 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
+  "description": "Default capability for Game Manager",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
-    "opener:default"
-	"updater:default",
-	"process:allow-restart"
+    "opener:default",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

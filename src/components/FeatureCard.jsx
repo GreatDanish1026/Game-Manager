@@ -1,135 +1,322 @@
 import {
   Check,
-  HelpCircle,
-  Wrench,
+  CircleHelp,
   X,
 } from "lucide-react";
 
+
+function normalizeDisplayValue(value) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return {
+      label: "Unknown",
+      state: "unknown",
+    };
+  }
+
+  if (
+    typeof value === "boolean"
+  ) {
+    return value
+      ? {
+          label: "Supported",
+          state: "supported",
+        }
+      : {
+          label: "Not Supported",
+          state: "unsupported",
+        };
+  }
+
+  const text =
+    String(value).trim();
+
+  if (!text) {
+    return {
+      label: "Unknown",
+      state: "unknown",
+    };
+  }
+
+  const normalized =
+    text.toLowerCase();
+
+  if (
+    normalized === "true" ||
+    normalized === "yes" ||
+    normalized === "supported" ||
+    normalized === "native"
+  ) {
+    return {
+      label: "Supported",
+      state: "supported",
+    };
+  }
+
+  if (
+    normalized === "false" ||
+    normalized === "no" ||
+    normalized === "none" ||
+    normalized === "unsupported"
+  ) {
+    return {
+      label: "Not Supported",
+      state: "unsupported",
+    };
+  }
+
+  if (
+    normalized === "unknown" ||
+    normalized === "n/a" ||
+    normalized === "na"
+  ) {
+    return {
+      label: "Unknown",
+      state: "unknown",
+    };
+  }
+
+  /*
+   * Preserve meaningful PCGamingWiki values such as:
+   *
+   * limited
+   * partial
+   * hackable
+   * always on
+   * forced
+   */
+  return {
+    label:
+      text
+        .split(" ")
+        .map((word) => {
+          if (!word) {
+            return word;
+          }
+
+          return (
+            word.charAt(0).toUpperCase() +
+            word.slice(1)
+          );
+        })
+        .join(" "),
+
+    state: "custom",
+  };
+}
+
+
+function StatusIcon({
+  state,
+}) {
+  if (
+    state === "supported"
+  ) {
+    return (
+      <Check
+        className="h-4 w-4"
+      />
+    );
+  }
+
+  if (
+    state === "unsupported"
+  ) {
+    return (
+      <X
+        className="h-4 w-4"
+      />
+    );
+  }
+
+  return (
+    <CircleHelp
+      className="h-4 w-4"
+    />
+  );
+}
+
+
 export default function FeatureCard({
   icon: Icon,
+
+  /*
+   * Support both the existing GameDetails prop
+   * and the newer label prop.
+   */
   title,
-  supported,
+  label,
+  name,
+
+  value,
+  description,
 }) {
-  const unknown =
-    supported === null ||
-    supported === undefined;
+  const cardTitle =
+    title ??
+    label ??
+    name ??
+    "Feature";
 
-  const customState =
-    typeof supported ===
-    "string";
+  const status =
+    normalizeDisplayValue(
+      value
+    );
 
-  let statusText =
-    "Unknown";
-
-  let StatusIcon =
-    HelpCircle;
-
-  let statusClasses =
-    "bg-gray-500/10 text-gray-500";
-
-  if (supported === true) {
-    statusText =
-      "Supported";
-
-    StatusIcon =
-      Check;
-
-    statusClasses =
-      "bg-emerald-500/10 text-emerald-400";
-  } else if (
-    supported === false
-  ) {
-    statusText =
-      "Not supported";
-
-    StatusIcon =
-      X;
-
-    statusClasses =
-      "bg-red-500/10 text-red-400";
-  } else if (
-    customState
-  ) {
-    statusText =
-      supported;
-
-    StatusIcon =
-      Wrench;
-
-    statusClasses =
-      "bg-amber-500/10 text-amber-400";
-  }
+  console.log(
+    `[FeatureCard] ${cardTitle}:`,
+    {
+      rawValue: value,
+      normalized: status,
+    }
+  );
 
   return (
     <div
       className="
-        group rounded-xl
-        border border-white/[0.06]
-        bg-white/[0.025]
-        p-4 transition
-        hover:border-white/[0.10]
-        hover:bg-white/[0.04]
+        rounded-xl
+        border
+        border-white/10
+        bg-white/[0.03]
+        p-4
+        transition
+        hover:border-white/20
+        hover:bg-white/[0.05]
       "
     >
       <div
         className="
-          mb-4 flex
+          mb-4
+          flex
           items-start
           justify-between
+          gap-4
         "
       >
         <div
           className="
-            flex h-9 w-9
+            flex
+            h-10
+            w-10
+            shrink-0
             items-center
             justify-center
             rounded-lg
-            bg-white/[0.05]
-            text-gray-400
+            bg-white/[0.06]
           "
         >
-          <Icon
-            size={18}
-            strokeWidth={
-              1.8
-            }
-          />
+          {Icon ? (
+            <Icon
+              className="
+                h-5
+                w-5
+                text-white/80
+              "
+            />
+          ) : (
+            <CircleHelp
+              className="
+                h-5
+                w-5
+                text-white/80
+              "
+            />
+          )}
         </div>
 
         <div
           className={`
-            flex h-6 w-6
+            inline-flex
             items-center
-            justify-center
+            gap-1.5
             rounded-full
-            ${statusClasses}
+            border
+            px-2.5
+            py-1
+            text-xs
+            font-medium
+
+            ${
+              status.state ===
+              "supported"
+                ? `
+                  border-emerald-500/30
+                  bg-emerald-500/10
+                  text-emerald-300
+                `
+                : ""
+            }
+
+            ${
+              status.state ===
+              "unsupported"
+                ? `
+                  border-red-500/30
+                  bg-red-500/10
+                  text-red-300
+                `
+                : ""
+            }
+
+            ${
+              status.state ===
+              "custom"
+                ? `
+                  border-amber-500/30
+                  bg-amber-500/10
+                  text-amber-300
+                `
+                : ""
+            }
+
+            ${
+              status.state ===
+              "unknown"
+                ? `
+                  border-white/10
+                  bg-white/[0.04]
+                  text-white/50
+                `
+                : ""
+            }
           `}
         >
           <StatusIcon
-            size={14}
+            state={
+              status.state
+            }
           />
+
+          <span>
+            {status.label}
+          </span>
         </div>
       </div>
 
-      <div
-        className="
-          text-sm
-          font-medium
-          text-gray-200
-        "
-      >
-        {title}
-      </div>
+      <div>
+        <div
+          className="
+            text-sm
+            font-semibold
+            text-white
+          "
+        >
+          {cardTitle}
+        </div>
 
-      <div
-        className="
-          mt-1
-          text-xs
-          capitalize
-          text-gray-500
-        "
-      >
-        {statusText}
+        {description ? (
+          <div
+            className="
+              mt-1
+              text-xs
+              leading-relaxed
+              text-white/45
+            "
+          >
+            {description}
+          </div>
+        ) : null}
       </div>
     </div>
   );

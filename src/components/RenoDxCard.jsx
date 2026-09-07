@@ -1,21 +1,291 @@
 import {
+  AlertCircle,
+  Check,
+  ExternalLink,
+  Loader2,
+  Play,
+  Sparkles,
+  X,
+} from "lucide-react";
+
+import {
   useEffect,
   useState,
 } from "react";
 
 import {
-  CheckCircle2,
-  CircleHelp,
-  Construction,
-  ExternalLink,
-  Gamepad2,
-  MonitorUp,
-} from "lucide-react";
-
-import {
   getRhiStatus,
   launchRhi,
 } from "../services/rhi";
+
+import {
+  openUrl,
+} from "@tauri-apps/plugin-opener";
+
+const RENODX_MODS_URL =
+  "https://github.com/clshortfuse/renodx/wiki/Mods";
+
+
+function getStatusDisplay(
+  renodx
+) {
+  if (!renodx) {
+    return {
+      label: "Unknown",
+      state: "unknown",
+    };
+  }
+
+  if (renodx.available) {
+    return {
+      label: "Available",
+      state: "available",
+    };
+  }
+
+  const status =
+    renodx.status
+      ?.trim()
+      .toLowerCase();
+
+  if (
+    status === "in_progress" ||
+    status === "in progress"
+  ) {
+    return {
+      label: "In Progress",
+      state: "progress",
+    };
+  }
+
+  if (
+    status === "listed"
+  ) {
+    return {
+      label: "Listed",
+      state: "listed",
+    };
+  }
+
+  if (
+    status === "not_found" ||
+    status === "not found"
+  ) {
+    return {
+      label: "Not Available",
+      state: "unavailable",
+    };
+  }
+
+  if (renodx.status) {
+    return {
+      label:
+        renodx.status
+          .replaceAll("_", " ")
+          .split(" ")
+          .map((word) => {
+            if (!word) {
+              return word;
+            }
+
+            return (
+              word.charAt(0).toUpperCase() +
+              word.slice(1).toLowerCase()
+            );
+          })
+          .join(" "),
+
+      state: "unknown",
+    };
+  }
+
+  return {
+    label:
+      renodx.available
+        ? "Available"
+        : "Not Available",
+
+    state:
+      renodx.available
+        ? "available"
+        : "unavailable",
+  };
+}
+
+
+function StatusBadge({
+  renodx,
+}) {
+  const status =
+    getStatusDisplay(
+      renodx
+    );
+
+  if (
+    status.state === "available"
+  ) {
+    return (
+      <div
+        className="
+          inline-flex
+          items-center
+          gap-1.5
+          rounded-full
+          border
+          border-emerald-500/30
+          bg-emerald-500/10
+          px-2.5
+          py-1
+          text-xs
+          font-semibold
+          text-emerald-300
+        "
+      >
+        <Check
+          className="h-3.5 w-3.5"
+        />
+
+        {status.label}
+      </div>
+    );
+  }
+
+  if (
+    status.state === "progress" ||
+    status.state === "listed"
+  ) {
+    return (
+      <div
+        className="
+          inline-flex
+          items-center
+          gap-1.5
+          rounded-full
+          border
+          border-amber-500/30
+          bg-amber-500/10
+          px-2.5
+          py-1
+          text-xs
+          font-semibold
+          text-amber-300
+        "
+      >
+        <AlertCircle
+          className="h-3.5 w-3.5"
+        />
+
+        {status.label}
+      </div>
+    );
+  }
+
+  if (
+    status.state === "unavailable"
+  ) {
+    return (
+      <div
+        className="
+          inline-flex
+          items-center
+          gap-1.5
+          rounded-full
+          border
+          border-red-500/30
+          bg-red-500/10
+          px-2.5
+          py-1
+          text-xs
+          font-semibold
+          text-red-300
+        "
+      >
+        <X
+          className="h-3.5 w-3.5"
+        />
+
+        {status.label}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="
+        inline-flex
+        items-center
+        gap-1.5
+        rounded-full
+        border
+        border-white/10
+        bg-white/[0.04]
+        px-2.5
+        py-1
+        text-xs
+        font-semibold
+        text-white/45
+      "
+    >
+      <AlertCircle
+        className="h-3.5 w-3.5"
+      />
+
+      {status.label}
+    </div>
+  );
+}
+
+
+function DetailRow({
+  label,
+  value,
+}) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return null;
+  }
+
+  return (
+    <div
+      className="
+        flex
+        items-start
+        justify-between
+        gap-4
+        border-t
+        border-white/[0.06]
+        py-3
+        first:border-t-0
+      "
+    >
+      <span
+        className="
+          shrink-0
+          text-sm
+          text-white/40
+        "
+      >
+        {label}
+      </span>
+
+      <span
+        className="
+          max-w-[65%]
+          text-right
+          text-sm
+          leading-relaxed
+          text-white/75
+        "
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
 
 export default function RenoDxCard({
   game,
@@ -23,69 +293,78 @@ export default function RenoDxCard({
   const renodx =
     game?.renodx;
 
-  const [
-    rhiInstalled,
-    setRhiInstalled,
-  ] =
-    useState(false);
+  const available =
+    renodx?.available ??
+    false;
 
   const [
     rhiChecking,
     setRhiChecking,
-  ] =
-    useState(true);
+  ] = useState(true);
+
+  const [
+    rhiInstalled,
+    setRhiInstalled,
+  ] = useState(false);
+
+  const [
+    rhiPath,
+    setRhiPath,
+  ] = useState(null);
 
   const [
     rhiLaunching,
     setRhiLaunching,
-  ] =
-    useState(false);
+  ] = useState(false);
 
   const [
     rhiError,
     setRhiError,
-  ] =
-    useState(null);
+  ] = useState(null);
 
-  // =========================================================
-  // Check for ReShade HDR Installer
-  // =========================================================
 
   useEffect(() => {
-    let active = true;
+    let cancelled =
+      false;
 
     async function checkRhi() {
       setRhiChecking(true);
       setRhiError(null);
 
       try {
-        const status =
+        const result =
           await getRhiStatus();
 
-        if (!active) {
+        if (cancelled) {
           return;
         }
 
         setRhiInstalled(
-          status.installed
+          result?.installed ??
+          false
+        );
+
+        setRhiPath(
+          result?.path ??
+          null
         );
       } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
         console.error(
           "[RHI] Status check failed:",
           error
         );
 
-        if (!active) {
-          return;
-        }
-
         setRhiInstalled(false);
 
         setRhiError(
-          "Could not check RHI installation."
+          String(error)
         );
       } finally {
-        if (active) {
+        if (!cancelled) {
           setRhiChecking(false);
         }
       }
@@ -94,17 +373,16 @@ export default function RenoDxCard({
     checkRhi();
 
     return () => {
-      active = false;
+      cancelled =
+        true;
     };
   }, []);
 
-  // =========================================================
-  // Launch RHI
-  // =========================================================
 
   async function handleLaunchRhi() {
     if (
       !rhiInstalled ||
+      !available ||
       rhiLaunching
     ) {
       return;
@@ -124,261 +402,75 @@ export default function RenoDxCard({
       setRhiError(
         String(error)
       );
-
-      // Check again in case the executable
-      // was removed after the first check.
-      try {
-        const status =
-          await getRhiStatus();
-
-        setRhiInstalled(
-          status.installed
-        );
-      } catch {
-        setRhiInstalled(false);
-      }
     } finally {
       setRhiLaunching(false);
     }
   }
 
-  // =========================================================
-  // RenoDX loading state
-  // =========================================================
 
-  if (game?.renodxLoading) {
-    return (
-      <div
-        className="
-          rounded-xl
-          border border-white/[0.06]
-          bg-white/[0.025]
-          p-5
-        "
-      >
-        <div
-          className="
-            flex
-            items-center
-            gap-3
-          "
-        >
-          <div
-            className="
-              flex h-10 w-10
-              items-center
-              justify-center
-              rounded-lg
-              bg-sky-500/10
-              text-sky-400
-            "
-          >
-            <Gamepad2
-              size={20}
-            />
-          </div>
-
-          <div>
-            <div
-              className="
-                text-sm
-                font-semibold
-                text-white
-              "
-            >
-              RenoDX
-            </div>
-
-            <div
-              className="
-                mt-0.5
-                text-xs
-                text-gray-500
-              "
-            >
-              Checking compatibility...
-            </div>
-          </div>
-        </div>
-      </div>
+async function handleViewMods() {
+  try {
+    await openUrl(
+      "https://github.com/clshortfuse/renodx/wiki/Mods"
+    );
+  } catch (error) {
+    console.error(
+      "[RenoDX] Failed to open mods page:",
+      error
     );
   }
-
-  // =========================================================
-  // RenoDX error state
-  // =========================================================
-
-  if (game?.renodxError) {
-    return (
-      <div
-        className="
-          rounded-xl
-          border border-amber-500/10
-          bg-amber-500/[0.04]
-          p-5
-        "
-      >
-        <div
-          className="
-            flex
-            items-center
-            gap-3
-          "
-        >
-          <CircleHelp
-            size={20}
-            className="
-              text-amber-400
-            "
-          />
-
-          <div>
-            <div
-              className="
-                text-sm
-                font-semibold
-                text-white
-              "
-            >
-              RenoDX
-            </div>
-
-            <div
-              className="
-                mt-1
-                text-xs
-                text-amber-300
-              "
-            >
-              {game.renodxError}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // =========================================================
-  // Determine RenoDX status
-  // =========================================================
-
-  const status =
-    renodx?.status;
-
-  const working =
-    status === "working";
-
-  const inProgress =
-    status ===
-    "in_progress";
-
-  const listed =
-    status === "listed";
-
-  const available =
-    working ||
-    inProgress ||
-    listed;
-
-  let Icon =
-    CircleHelp;
-
-  let statusText =
-    "Not Listed";
-
-  let iconClass =
-    "bg-gray-500/10 text-gray-400";
-
-  let badgeClass =
-    "border-gray-500/10 bg-gray-500/10 text-gray-400";
-
-  if (working) {
-    Icon =
-      CheckCircle2;
-
-    statusText =
-      "Available";
-
-    iconClass =
-      "bg-emerald-500/10 text-emerald-400";
-
-    badgeClass =
-      "border-emerald-500/10 bg-emerald-500/10 text-emerald-400";
-  } else if (
-    inProgress
-  ) {
-    Icon =
-      Construction;
-
-    statusText =
-      "In Progress";
-
-    iconClass =
-      "bg-amber-500/10 text-amber-400";
-
-    badgeClass =
-      "border-amber-500/10 bg-amber-500/10 text-amber-400";
-  } else if (
-    listed
-  ) {
-    Icon =
-      CheckCircle2;
-
-    statusText =
-      "Listed";
-
-    iconClass =
-      "bg-sky-500/10 text-sky-400";
-
-    badgeClass =
-      "border-sky-500/10 bg-sky-500/10 text-sky-400";
-  }
-
-  // =========================================================
-  // RHI button text
-  // =========================================================
-
-  let rhiButtonText =
-  "RHI Not Found";
-
-if (rhiChecking) {
-  rhiButtonText =
-    "Checking RHI...";
-} else if (
-  !rhiInstalled
-) {
-  rhiButtonText =
-    "RHI Not Found";
-} else if (
-  !available
-) {
-  rhiButtonText =
-    "RenoDX Not Available";
-} else if (
-  rhiLaunching
-) {
-  rhiButtonText =
-    "Launching...";
-} else {
-  rhiButtonText =
-    "Launch RHI";
 }
 
-const rhiDisabled =
-  rhiChecking ||
-  rhiLaunching ||
-  !rhiInstalled ||
-  !available;
 
-  // =========================================================
-  // Render
-  // =========================================================
+  let rhiButtonText =
+    "RHI Not Found";
+
+  if (rhiChecking) {
+    rhiButtonText =
+      "Checking RHI...";
+  } else if (!rhiInstalled) {
+    rhiButtonText =
+      "RHI Not Found";
+  } else if (!available) {
+    rhiButtonText =
+      "RenoDX Not Available";
+  } else if (rhiLaunching) {
+    rhiButtonText =
+      "Launching...";
+  } else {
+    rhiButtonText =
+      "Launch RHI";
+  }
+
+
+  const rhiDisabled =
+    rhiChecking ||
+    rhiLaunching ||
+    !rhiInstalled ||
+    !available;
+
+
+  let rhiTitle =
+    "Launch ReShade HDR Installer";
+
+  if (rhiChecking) {
+    rhiTitle =
+      "Checking for ReShade HDR Installer";
+  } else if (!rhiInstalled) {
+    rhiTitle =
+      "ReShade HDR Installer was not found";
+  } else if (!available) {
+    rhiTitle =
+      "RHI can only be launched when a RenoDX mod is available for this game";
+  }
+
 
   return (
     <div
       className="
         rounded-xl
-        border border-white/[0.06]
+        border
+        border-white/10
         bg-white/[0.025]
         p-5
       "
@@ -395,260 +487,266 @@ const rhiDisabled =
           className="
             flex
             items-start
-            gap-3
+            gap-4
           "
         >
           <div
-            className={`
-              flex h-10 w-10
+            className="
+              flex
+              h-12
+              w-12
               shrink-0
               items-center
               justify-center
-              rounded-lg
-              ${iconClass}
-            `}
+              rounded-xl
+              bg-violet-500/10
+              text-violet-300
+            "
           >
-            <Icon
-              size={20}
+            <Sparkles
+              className="h-6 w-6"
             />
           </div>
 
           <div>
-            <div
+            <h3
               className="
-                flex
-                flex-wrap
-                items-center
-                gap-2
+                text-base
+                font-semibold
+                text-white
               "
             >
-              <div
-                className="
-                  text-sm
-                  font-semibold
-                  text-white
-                "
-              >
-                RenoDX
-              </div>
+              RenoDX
+            </h3>
 
-              <span
-                className={`
-                  rounded-full
-                  border
-                  px-2
-                  py-0.5
-                  text-[10px]
-                  font-medium
-                  uppercase
-                  tracking-wide
-                  ${badgeClass}
-                `}
-              >
-                {statusText}
-              </span>
-            </div>
-
-            {available ? (
-              <>
-                <div
-                  className="
-                    mt-2
-                    text-sm
-                    text-gray-300
-                  "
-                >
-                  RenoDX support is listed
-                  for this game.
-                </div>
-
-                {renodx
-                  ?.matchedName && (
-                  <div
-                    className="
-                      mt-2
-                      text-xs
-                      text-gray-500
-                    "
-                  >
-                    Match:{" "}
-                    <span
-                      className="
-                        text-gray-400
-                      "
-                    >
-                      {
-                        renodx
-                          .matchedName
-                      }
-                    </span>
-                  </div>
-                )}
-
-                {renodx
-                  ?.category && (
-                  <div
-                    className="
-                      mt-1
-                      text-xs
-                      text-gray-500
-                    "
-                  >
-                    Type:{" "}
-                    <span
-                      className="
-                        text-gray-400
-                      "
-                    >
-                      {
-                        renodx
-                          .category
-                      }
-                    </span>
-                  </div>
-                )}
-
-                {renodx?.notes && (
-                  <div
-                    className="
-                      mt-3
-                      max-w-2xl
-                      text-xs
-                      leading-5
-                      text-gray-500
-                    "
-                  >
-                    {renodx.notes}
-                  </div>
-                )}
-              </>
-            ) : (
-              <div
-                className="
-                  mt-2
-                  text-sm
-                  text-gray-500
-                "
-              >
-                This game is not
-                currently listed on the
-                RenoDX Mods page.
-              </div>
-            )}
-
-            {rhiError && (
-              <div
-                className="
-                  mt-3
-                  text-xs
-                  text-red-400
-                "
-              >
-                {rhiError}
-              </div>
-            )}
+            <p
+              className="
+                mt-1
+                text-sm
+                text-white/40
+              "
+            >
+              HDR enhancement and
+              game modification support
+            </p>
           </div>
         </div>
 
-        {/* -----------------------------------------------
-            Action buttons
-        ------------------------------------------------ */}
-
-        <div
-          className="
-            flex
-            shrink-0
-            items-center
-            gap-2
-          "
-        >
-          <button
-            type="button"
-            onClick={
-              handleLaunchRhi
-            }
-            disabled={
-              rhiDisabled
-            }
-title={
-  !rhiInstalled
-    ? "ReShade HDR Installer was not found"
-    : !available
-      ? "No RenoDX mod is available for this game"
-      : "Open ReShade HDR Installer"
-}
-            className={`
-              flex
+        {game?.renodxLoading ? (
+          <div
+            className="
+              inline-flex
               items-center
               gap-2
-              rounded-lg
+              rounded-full
               border
-              px-3
-              py-2
+              border-white/10
+              bg-white/[0.04]
+              px-2.5
+              py-1
               text-xs
-              font-medium
-              transition
-
-              ${
-                rhiDisabled
-                  ? `
-                    cursor-not-allowed
-                    border-white/[0.04]
-                    bg-white/[0.02]
-                    text-gray-600
-                  `
-                  : `
-                    border-sky-500/20
-                    bg-sky-500/10
-                    text-sky-300
-                    hover:border-sky-400/30
-                    hover:bg-sky-500/20
-                    hover:text-sky-200
-                  `
-              }
-            `}
+              text-white/45
+            "
           >
-            <MonitorUp
-              size={14}
+            <Loader2
+              className="
+                h-3.5
+                w-3.5
+                animate-spin
+              "
             />
 
-            {rhiButtonText}
-          </button>
-
-          {renodx?.pageUrl && (
-            <button
-              type="button"
-              onClick={() => {
-                window.open(
-                  renodx.pageUrl,
-                  "_blank"
-                );
-              }}
-              className="
-                flex
-                items-center
-                gap-2
-                rounded-lg
-                border border-white/[0.06]
-                bg-white/[0.03]
-                px-3
-                py-2
-                text-xs
-                text-gray-400
-                transition
-                hover:bg-white/[0.06]
-                hover:text-white
-              "
-            >
-              <ExternalLink
-                size={14}
-              />
-
-              View Mods
-            </button>
-          )}
-        </div>
+            Checking
+          </div>
+        ) : (
+          <StatusBadge
+            renodx={
+              renodx
+            }
+          />
+        )}
       </div>
+
+
+      {game?.renodxError ? (
+        <div
+          className="
+            mt-5
+            rounded-lg
+            border
+            border-red-500/20
+            bg-red-500/[0.06]
+            px-4
+            py-3
+            text-sm
+            text-red-300
+          "
+        >
+          {game.renodxError}
+        </div>
+      ) : null}
+
+
+      {!game?.renodxLoading &&
+      !game?.renodxError ? (
+        <div
+          className="
+            mt-5
+          "
+        >
+          <DetailRow
+            label="Matched Game"
+            value={
+              renodx?.matchedName
+            }
+          />
+
+          <DetailRow
+            label="Category"
+            value={
+              renodx?.category
+            }
+          />
+
+          <DetailRow
+            label="Notes"
+            value={
+              renodx?.notes
+            }
+          />
+        </div>
+      ) : null}
+
+
+      {rhiError ? (
+        <div
+          className="
+            mt-4
+            rounded-lg
+            border
+            border-red-500/20
+            bg-red-500/[0.06]
+            px-4
+            py-3
+            text-xs
+            leading-relaxed
+            text-red-300
+          "
+        >
+          {rhiError}
+        </div>
+      ) : null}
+
+
+      <div
+        className="
+          mt-5
+          flex
+          flex-wrap
+          gap-3
+        "
+      >
+        <button
+          type="button"
+          onClick={
+            handleViewMods
+          }
+          className="
+            inline-flex
+            items-center
+            gap-2
+            rounded-lg
+            border
+            border-white/10
+            bg-white/[0.04]
+            px-4
+            py-2
+            text-sm
+            font-medium
+            text-white/75
+            transition
+            hover:border-white/20
+            hover:bg-white/[0.08]
+            hover:text-white
+          "
+        >
+          <ExternalLink
+            className="h-4 w-4"
+          />
+
+          View Mods
+        </button>
+
+
+        <button
+          type="button"
+          onClick={
+            handleLaunchRhi
+          }
+          disabled={
+            rhiDisabled
+          }
+          title={
+            rhiTitle
+          }
+          className="
+            inline-flex
+            items-center
+            gap-2
+            rounded-lg
+            border
+            border-violet-500/20
+            bg-violet-500/10
+            px-4
+            py-2
+            text-sm
+            font-medium
+            text-violet-200
+            transition
+            hover:border-violet-500/30
+            hover:bg-violet-500/15
+            disabled:cursor-not-allowed
+            disabled:border-white/[0.06]
+            disabled:bg-white/[0.025]
+            disabled:text-white/25
+          "
+        >
+          {rhiChecking ||
+          rhiLaunching ? (
+            <Loader2
+              className="
+                h-4
+                w-4
+                animate-spin
+              "
+            />
+          ) : (
+            <Play
+              className="h-4 w-4"
+            />
+          )}
+
+          {rhiButtonText}
+        </button>
+      </div>
+
+
+      {rhiInstalled &&
+      rhiPath ? (
+        <div
+          className="
+            mt-3
+            truncate
+            text-[11px]
+            text-white/20
+          "
+          title={
+            rhiPath
+          }
+        >
+          RHI: {rhiPath}
+        </div>
+      ) : null}
     </div>
   );
 }

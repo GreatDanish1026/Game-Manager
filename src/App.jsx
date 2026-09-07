@@ -8,10 +8,6 @@ import Sidebar from "./components/Sidebar";
 import GameDetails from "./components/GameDetails";
 
 import {
-  checkForUpdates,
-} from "./services/updater";
-
-import {
   getInstalledGames,
 } from "./services/gameLibrary";
 
@@ -23,13 +19,112 @@ import {
   getRenoDxModStatus,
 } from "./services/renodx";
 
+
+const HIDDEN_GAMES_STORAGE_KEY =
+  "game-manager-hidden-games";
+
+
+function loadHiddenGameIds() {
+  try {
+    const stored =
+      localStorage.getItem(
+        HIDDEN_GAMES_STORAGE_KEY
+      );
+
+    if (!stored) {
+      return [];
+    }
+
+    const parsed =
+      JSON.parse(stored);
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.filter(
+      (id) =>
+        typeof id === "string"
+    );
+  } catch (error) {
+    console.error(
+      "[Hidden Games] Failed to load:",
+      error
+    );
+
+    return [];
+  }
+}
+
+
+function saveHiddenGameIds(ids) {
+  try {
+    localStorage.setItem(
+      HIDDEN_GAMES_STORAGE_KEY,
+      JSON.stringify(ids)
+    );
+  } catch (error) {
+    console.error(
+      "[Hidden Games] Failed to save:",
+      error
+    );
+  }
+}
+
+
+function normalizePcgwSupport(value) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return null;
+  }
+
+  if (
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  const normalized =
+    String(value)
+      .trim()
+      .toLowerCase();
+
+  if (
+    normalized === "" ||
+    normalized === "unknown" ||
+    normalized === "n/a" ||
+    normalized === "na"
+  ) {
+    return null;
+  }
+
+  if (
+    normalized === "true" ||
+    normalized === "yes" ||
+    normalized === "supported" ||
+    normalized === "native"
+  ) {
+    return true;
+  }
+
+  if (
+    normalized === "false" ||
+    normalized === "no" ||
+    normalized === "none" ||
+    normalized === "unsupported"
+  ) {
+    return false;
+  }
+
+  return value;
+}
+
+
 function prepareGameForUi(game) {
   return {
     ...game,
-
-    // ---------------------------------------------------------
-    // PCGamingWiki state
-    // ---------------------------------------------------------
 
     pcgwLoaded: false,
     pcgwLoading: false,
@@ -37,10 +132,6 @@ function prepareGameForUi(game) {
 
     pcgwPageName: null,
     pcgwPageUrl: null,
-
-    // ---------------------------------------------------------
-    // RenoDX state
-    // ---------------------------------------------------------
 
     renodxLoaded: false,
     renodxLoading: false,
@@ -55,10 +146,6 @@ function prepareGameForUi(game) {
       pageUrl: null,
     },
 
-    // ---------------------------------------------------------
-    // General game information
-    // ---------------------------------------------------------
-
     developer: null,
     publisher: null,
     releaseDate: null,
@@ -67,10 +154,6 @@ function prepareGameForUi(game) {
 
     description:
       "PCGamingWiki information has not been loaded yet.",
-
-    // ---------------------------------------------------------
-    // PC feature information
-    // ---------------------------------------------------------
 
     features: {
       hdr: null,
@@ -82,9 +165,34 @@ function prepareGameForUi(game) {
       dlss: null,
     },
 
-    // ---------------------------------------------------------
-    // Technical information
-    // ---------------------------------------------------------
+    controllerCompatibility: {
+      xbox: {
+        supported: null,
+        models: null,
+      },
+
+      playstation: {
+        supported: null,
+        models: null,
+        prompts: null,
+        connectionModes: null,
+        motionSensors: null,
+        lightBar: null,
+
+        dualsense: {
+          adaptiveTriggers: null,
+          adaptiveTriggerModes: null,
+          haptics: null,
+        },
+      },
+
+      nintendo: {
+        supported: null,
+        models: null,
+      },
+
+      hotplug: null,
+    },
 
     technical: {
       engine: null,
@@ -95,56 +203,16 @@ function prepareGameForUi(game) {
   };
 }
 
-function normalizePcgwSupport(value) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return null;
-  }
-
-  const normalized =
-    String(value)
-      .trim()
-      .toLowerCase();
-
-  if (
-    normalized === "true" ||
-    normalized === "native" ||
-    normalized === "yes"
-  ) {
-    return true;
-  }
-
-  if (
-    normalized === "false" ||
-    normalized === "none" ||
-    normalized === "no"
-  ) {
-    return false;
-  }
-
-  if (
-    normalized === "unknown" ||
-    normalized === ""
-  ) {
-    return null;
-  }
-
-  // Preserve PCGamingWiki states such as:
-  //
-  // hackable
-  // limited
-  // always on
-  //
-  // FeatureCard can display these as custom states.
-  return value;
-}
 
 function mergePcgwData(
   game,
   data
 ) {
+  console.log(
+    "[PCGW MERGE] Raw data:",
+    data
+  );
+
   if (!data) {
     return {
       ...game,
@@ -163,16 +231,132 @@ function mergePcgwData(
 
       pcgwLoaded: true,
       pcgwLoading: false,
+      pcgwError: null,
 
-      pcgwError:
-        "No matching PCGamingWiki page was found.",
+      pcgwPageName: null,
+      pcgwPageUrl: null,
 
       description:
-        "Game Manager could not find a matching PCGamingWiki page for this title.",
+        "No PCGamingWiki information was found for this game.",
     };
   }
 
-  return {
+  const mergedFeatures = {
+    ...game.features,
+
+    hdr:
+      normalizePcgwSupport(
+        data.hdr
+      ),
+
+    ultrawide:
+      normalizePcgwSupport(
+        data.ultrawide
+      ),
+
+    controller:
+      normalizePcgwSupport(
+        data.controllerSupport
+      ),
+
+    rayTracing:
+      normalizePcgwSupport(
+        data.rayTracing
+      ),
+
+    frameGeneration:
+      normalizePcgwSupport(
+        data.frameGeneration
+      ),
+
+    upscaling:
+      normalizePcgwSupport(
+        data.upscaling
+      ),
+
+    dlss:
+      game.features?.dlss ??
+      null,
+  };
+
+
+  const mergedControllerCompatibility = {
+    xbox: {
+      supported:
+        normalizePcgwSupport(
+          data.xboxControllerSupport
+        ),
+
+      models:
+        data.xboxControllerModels ??
+        null,
+    },
+
+    playstation: {
+      supported:
+        normalizePcgwSupport(
+          data.playstationControllerSupport
+        ),
+
+      models:
+        data.playstationControllerModels ??
+        null,
+
+      prompts:
+        normalizePcgwSupport(
+          data.playstationPrompts
+        ),
+
+      connectionModes:
+        data.playstationConnectionModes ??
+        null,
+
+      motionSensors:
+        normalizePcgwSupport(
+          data.playstationMotionSensors
+        ),
+
+      lightBar:
+        normalizePcgwSupport(
+          data.playstationLightBar
+        ),
+
+      dualsense: {
+        adaptiveTriggers:
+          normalizePcgwSupport(
+            data.dualsenseAdaptiveTriggers
+          ),
+
+        adaptiveTriggerModes:
+          data.dualsenseAdaptiveTriggerModes ??
+          null,
+
+        haptics:
+          normalizePcgwSupport(
+            data.dualsenseHaptics
+          ),
+      },
+    },
+
+    nintendo: {
+      supported:
+        normalizePcgwSupport(
+          data.nintendoControllerSupport
+        ),
+
+      models:
+        data.nintendoControllerModels ??
+        null,
+    },
+
+    hotplug:
+      normalizePcgwSupport(
+        data.controllerHotplug
+      ),
+  };
+
+
+  const mergedGame = {
     ...game,
 
     pcgwLoaded: true,
@@ -180,67 +364,69 @@ function mergePcgwData(
     pcgwError: null,
 
     pcgwPageName:
-      data.pageName,
+      data.pageName ??
+      null,
 
     pcgwPageUrl:
-      data.pageUrl,
+      data.pageUrl ??
+      null,
 
     developer:
-      data.developer,
+      data.developer ??
+      null,
 
     publisher:
-      data.publisher,
+      data.publisher ??
+      null,
 
     releaseDate:
-      data.releaseDate,
+      data.releaseDate ??
+      null,
 
     description:
-      data.pageName
-        ? `PCGamingWiki data loaded from ${data.pageName}.`
-        : "PCGamingWiki data loaded.",
+      "PCGamingWiki information loaded.",
 
-    features: {
-      ...game.features,
+    features:
+      mergedFeatures,
 
-      hdr:
-        normalizePcgwSupport(
-          data.hdr
-        ),
+    controllerCompatibility:
+      mergedControllerCompatibility,
 
-      ultrawide:
-        normalizePcgwSupport(
-          data.ultrawide
-        ),
-
-      controller:
-        normalizePcgwSupport(
-          data.controllerSupport
-        ),
-
-      rayTracing:
-        normalizePcgwSupport(
-          data.rayTracing
-        ),
-
-      frameGeneration:
-        normalizePcgwSupport(
-          data.frameGeneration
-        ),
-
-      upscaling:
-        normalizePcgwSupport(
-          data.upscaling
-        ),
-    },
-
+    /*
+     * ============================================================
+     * TECHNICAL INFORMATION
+     * ============================================================
+     */
     technical: {
       ...game.technical,
 
       engine:
-        data.engine,
+        data.engine ??
+        null,
+
+      api:
+        data.graphicsApi ??
+        null,
+
+      configLocation:
+        data.configLocation ??
+        null,
+
+      saveLocation:
+        data.saveLocation ??
+        null,
     },
   };
+
+
+  console.log(
+    "[PCGW MERGE] Technical Information:",
+    mergedGame.technical
+  );
+
+  return mergedGame;
 }
+
 
 function mergeRenoDxData(
   game,
@@ -267,64 +453,76 @@ function mergeRenoDxData(
 
     renodx: {
       available:
-        data.available,
+        data.available ??
+        false,
 
       status:
-        data.status,
+        data.status ??
+        null,
 
       matchedName:
-        data.matchedName,
+        data.matchedName ??
+        null,
 
       category:
-        data.category,
+        data.category ??
+        null,
 
       notes:
-        data.notes,
+        data.notes ??
+        null,
 
       pageUrl:
-        data.pageUrl,
+        data.pageUrl ??
+        null,
     },
   };
 }
+
 
 export default function App() {
   const [
     games,
     setGames,
-  ] =
-    useState([]);
+  ] = useState([]);
 
   const [
     selectedGame,
     setSelectedGame,
-  ] =
-    useState(null);
+  ] = useState(null);
 
   const [
     search,
     setSearch,
-  ] =
-    useState("");
+  ] = useState("");
 
   const [
     loading,
     setLoading,
-  ] =
-    useState(true);
+  ] = useState(false);
 
   const [
     scanError,
     setScanError,
-  ] =
-    useState(null);
+  ] = useState(null);
 
-  // =========================================================
-  // Installed-game scanner
-  // =========================================================
+  const [
+    hiddenGameIds,
+    setHiddenGameIds,
+  ] = useState(
+    () =>
+      loadHiddenGameIds()
+  );
+
+  const [
+    showHiddenGames,
+    setShowHiddenGames,
+  ] = useState(false);
+
 
   async function scanGames() {
     console.log(
-      "[Game Manager] Starting installed-game scan"
+      "[Game Manager] Calling Rust game scanner..."
     );
 
     setLoading(true);
@@ -334,13 +532,31 @@ export default function App() {
       const installedGames =
         await getInstalledGames();
 
-      console.log(
-        "[Game Manager] Installed games:",
-        installedGames
-      );
+      const uniqueGames =
+        Array.from(
+          new Map(
+            installedGames.map(
+              (game) => [
+                game.id,
+                game,
+              ]
+            )
+          ).values()
+        );
+
+      if (
+        installedGames.length !==
+        uniqueGames.length
+      ) {
+        console.warn(
+          "[Game Manager] Duplicate games removed:",
+          installedGames.length -
+            uniqueGames.length
+        );
+      }
 
       const preparedGames =
-        installedGames.map(
+        uniqueGames.map(
           prepareGameForUi
         );
 
@@ -348,81 +564,101 @@ export default function App() {
         preparedGames
       );
 
-      // Reset selection after a complete rescan.
       setSelectedGame(
         null
       );
     } catch (error) {
       console.error(
-        "[Game Manager] Installed-game scan failed:",
+        "[Game Manager] Game scan failed:",
         error
       );
 
-      setGames([]);
-
-      setSelectedGame(
-        null
-      );
-
       setScanError(
-        "Game Manager could not scan the installed game libraries."
+        String(error)
       );
+
+      setGames([]);
+      setSelectedGame(null);
     } finally {
       setLoading(false);
     }
   }
 
-  // =========================================================
-  // Initial scan
-  // =========================================================
 
-useEffect(() => {
-  console.log(
-    "[Game Manager] App mounted"
-  );
+  useEffect(() => {
+    scanGames();
+  }, []);
 
-  scanGames();
 
-  async function checkUpdates() {
-    try {
-      const update =
-        await checkForUpdates();
+  function hideGame(game) {
+    setHiddenGameIds(
+      (current) => {
+        if (
+          current.includes(
+            game.id
+          )
+        ) {
+          return current;
+        }
 
-      if (update) {
-        console.log(
-          `[Updater] Version ${update.version} is available`
+        const next = [
+          ...current,
+          game.id,
+        ];
+
+        saveHiddenGameIds(
+          next
         );
 
-        // We'll add the visible update dialog next.
+        return next;
       }
-    } catch (error) {
-      console.error(
-        "[Updater] Update check failed:",
-        error
-      );
-    }
+    );
+
+    setSelectedGame(
+      (current) =>
+        current?.id === game.id
+          ? null
+          : current
+    );
   }
 
-  checkUpdates();
-}, []);
 
-  // =========================================================
-  // Game selection
-  // =========================================================
+  function restoreGame(game) {
+    setHiddenGameIds(
+      (current) => {
+        const next =
+          current.filter(
+            (id) =>
+              id !== game.id
+          );
+
+        saveHiddenGameIds(
+          next
+        );
+
+        return next;
+      }
+    );
+  }
+
+
+  function restoreAllHiddenGames() {
+    saveHiddenGameIds([]);
+
+    setHiddenGameIds([]);
+  }
+
 
   async function selectGame(game) {
     console.log(
-      "[Game Manager] Selected:",
-      game.name
+      "[Game Manager] Selected game:",
+      game
     );
 
-    // Show the game immediately.
     setSelectedGame(
       game
     );
 
-    // If both external services have already been loaded,
-    // there is nothing else to request.
     if (
       game.pcgwLoaded &&
       game.renodxLoaded
@@ -436,39 +672,25 @@ useEffect(() => {
       pcgwLoading:
         !game.pcgwLoaded,
 
-      pcgwError:
-        game.pcgwLoaded
-          ? game.pcgwError
-          : null,
-
       renodxLoading:
         !game.renodxLoaded,
-
-      renodxError:
-        game.renodxLoaded
-          ? game.renodxError
-          : null,
     };
-
-    // Immediately update the UI so loading indicators appear.
-    setSelectedGame(
-      loadingGame
-    );
 
     setGames(
       (currentGames) =>
         currentGames.map(
           (currentGame) =>
             currentGame.id ===
-            game.id
+            loadingGame.id
               ? loadingGame
               : currentGame
         )
     );
 
-    // -------------------------------------------------------
-    // Build the requests
-    // -------------------------------------------------------
+    setSelectedGame(
+      loadingGame
+    );
+
 
     const pcgwPromise =
       game.pcgwLoaded
@@ -477,6 +699,7 @@ useEffect(() => {
             game
           );
 
+
     const renodxPromise =
       game.renodxLoaded
         ? Promise.resolve(null)
@@ -484,7 +707,7 @@ useEffect(() => {
             game
           );
 
-    // Run both requests at the same time.
+
     const [
       pcgwResult,
       renodxResult,
@@ -494,14 +717,10 @@ useEffect(() => {
         renodxPromise,
       ]);
 
-    // Only one declaration of updatedGame.
-    // We modify this variable as each result is processed.
+
     let updatedGame =
       loadingGame;
 
-    // -------------------------------------------------------
-    // PCGamingWiki result
-    // -------------------------------------------------------
 
     if (!game.pcgwLoaded) {
       if (
@@ -509,7 +728,7 @@ useEffect(() => {
         "fulfilled"
       ) {
         console.log(
-          "[PCGW] Loaded:",
+          "[PCGW FRONTEND] Rust returned:",
           pcgwResult.value
         );
 
@@ -527,28 +746,23 @@ useEffect(() => {
         updatedGame = {
           ...updatedGame,
 
+          pcgwLoaded: true,
           pcgwLoading: false,
 
           pcgwError:
-            "PCGamingWiki data could not be loaded.",
+            String(
+              pcgwResult.reason
+            ),
         };
       }
     }
 
-    // -------------------------------------------------------
-    // RenoDX result
-    // -------------------------------------------------------
 
     if (!game.renodxLoaded) {
       if (
         renodxResult.status ===
         "fulfilled"
       ) {
-        console.log(
-          "[RenoDX] Loaded:",
-          renodxResult.value
-        );
-
         updatedGame =
           mergeRenoDxData(
             updatedGame,
@@ -563,37 +777,80 @@ useEffect(() => {
         updatedGame = {
           ...updatedGame,
 
+          renodxLoaded: true,
           renodxLoading: false,
 
           renodxError:
-            "RenoDX compatibility could not be checked.",
+            String(
+              renodxResult.reason
+            ),
         };
       }
     }
 
-    // -------------------------------------------------------
-    // Save final merged game
-    // -------------------------------------------------------
+
+    console.log(
+      "[Game Manager] Final game:",
+      updatedGame
+    );
+
+    console.log(
+      "[Game Manager] Technical:",
+      updatedGame.technical
+    );
+
 
     setGames(
       (currentGames) =>
         currentGames.map(
           (currentGame) =>
             currentGame.id ===
-            game.id
+            updatedGame.id
               ? updatedGame
               : currentGame
         )
     );
 
+
     setSelectedGame(
-      updatedGame
+      (currentSelected) => {
+        if (!currentSelected) {
+          return currentSelected;
+        }
+
+        if (
+          currentSelected.id !==
+          updatedGame.id
+        ) {
+          return currentSelected;
+        }
+
+        return updatedGame;
+      }
     );
   }
 
-  // =========================================================
-  // Search/filter
-  // =========================================================
+
+  const hiddenInstalledCount =
+    useMemo(
+      () =>
+        games.filter(
+          (game) =>
+            hiddenGameIds.includes(
+              game.id
+            )
+        ).length,
+      [
+        games,
+        hiddenGameIds,
+      ]
+    );
+
+
+  const visibleInstalledCount =
+    games.length -
+    hiddenInstalledCount;
+
 
   const filteredGames =
     useMemo(
@@ -603,64 +860,116 @@ useEffect(() => {
             .trim()
             .toLowerCase();
 
-        if (!query) {
-          return games;
-        }
-
         return games.filter(
-          (game) =>
-            game.name
-              .toLowerCase()
-              .includes(query)
+          (game) => {
+            const isHidden =
+              hiddenGameIds.includes(
+                game.id
+              );
+
+            if (showHiddenGames) {
+              if (!isHidden) {
+                return false;
+              }
+            } else if (isHidden) {
+              return false;
+            }
+
+            if (!query) {
+              return true;
+            }
+
+            const name =
+              game.name
+                ?.toLowerCase() ??
+              "";
+
+            const store =
+              game.store
+                ?.toLowerCase() ??
+              "";
+
+            return (
+              name.includes(query) ||
+              store.includes(query)
+            );
+          }
         );
       },
       [
         games,
         search,
+        hiddenGameIds,
+        showHiddenGames,
       ]
     );
 
-  // =========================================================
-  // UI
-  // =========================================================
 
   return (
-    <div
-      className="
-        flex
-        h-screen
-        w-screen
-        overflow-hidden
-        bg-[#090b10]
-      "
-    >
+    <div className="flex h-screen overflow-hidden bg-[#0b0f17] text-white">
       <Sidebar
         games={
           filteredGames
         }
+
         totalGames={
           games.length
         }
+
+        visibleGameCount={
+          visibleInstalledCount
+        }
+
+        hiddenGameCount={
+          hiddenInstalledCount
+        }
+
         selectedGame={
           selectedGame
         }
+
         onSelectGame={
           selectGame
         }
+
         search={
           search
         }
+
         onSearchChange={
           setSearch
         }
+
         loading={
           loading
         }
+
         scanError={
           scanError
         }
+
         onRescan={
           scanGames
+        }
+
+        showHiddenGames={
+          showHiddenGames
+        }
+
+        onShowHiddenGamesChange={
+          setShowHiddenGames
+        }
+
+        onHideGame={
+          hideGame
+        }
+
+        onRestoreGame={
+          restoreGame
+        }
+
+        onRestoreAllHiddenGames={
+          restoreAllHiddenGames
         }
       />
 
