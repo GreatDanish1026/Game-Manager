@@ -1,7 +1,5 @@
-# Tauri + Vanilla
+# Game Manager
 
-This template should help get you started developing with Tauri in vanilla HTML, CSS and Javascript.
+This app was created to give gamers a way to access a plethora of information from PCGamingWiki including DualSense capabilities if applicable. 
 
-## Recommended IDE Setup
-
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+Users can also directly access RHI if a RenoDx mod is found for the given game.
