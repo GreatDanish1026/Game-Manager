@@ -24,10 +24,6 @@ import {
 } from "./services/vortex";
 
 import {
-  getFluffySupport,
-} from "./services/fluffy";
-
-import {
   checkForUpdates,
 } from "./services/updater";
 
@@ -213,29 +209,6 @@ function createEmptyVortexResult() {
 }
 
 
-function createEmptyFluffyResult() {
-  return {
-    supported:
-      false,
-
-    matchedGameName:
-      null,
-
-    managerName:
-      "Fluffy Mod Manager",
-
-    notes:
-      null,
-
-    pageUrl:
-      "https://www.nexusmods.com/site/mods/818",
-
-    matchScore:
-      0,
-  };
-}
-
-
 function prepareGameForUi(
   game
 ) {
@@ -260,9 +233,6 @@ function prepareGameForUi(
       null,
 
     pcgwPageUrl:
-      null,
-
-    coverImageUrl:
       null,
 
     essentialImprovementsHtml:
@@ -316,23 +286,6 @@ function prepareGameForUi(
 
     vortex:
       createEmptyVortexResult(),
-
-
-    // ============================================================
-    // FLUFFY MOD MANAGER
-    // ============================================================
-
-    fluffyLoaded:
-      false,
-
-    fluffyLoading:
-      false,
-
-    fluffyError:
-      null,
-
-    fluffy:
-      createEmptyFluffyResult(),
 
 
     // ============================================================
@@ -601,9 +554,6 @@ function mergePcgwData(
       pcgwPageUrl:
         null,
 
-      coverImageUrl:
-        null,
-
       essentialImprovementsHtml:
         null,
     };
@@ -831,10 +781,6 @@ function mergePcgwData(
 
     pcgwPageUrl:
       data.pageUrl ??
-      null,
-
-    coverImageUrl:
-      data.coverImageUrl ??
       null,
 
     essentialImprovementsHtml:
@@ -1169,67 +1115,6 @@ function mergeVortexData(
 }
 
 
-function mergeFluffyData(
-  game,
-  data
-) {
-  if (!data) {
-    return {
-      ...game,
-
-      fluffyLoaded:
-        true,
-
-      fluffyLoading:
-        false,
-
-      fluffyError:
-        "Fluffy Mod Manager lookup returned no data.",
-    };
-  }
-
-
-  return {
-    ...game,
-
-    fluffyLoaded:
-      true,
-
-    fluffyLoading:
-      false,
-
-    fluffyError:
-      null,
-
-    fluffy: {
-      supported:
-        data.supported ??
-        false,
-
-      matchedGameName:
-        data.matchedGameName ??
-        null,
-
-      managerName:
-        data.managerName ??
-        "Fluffy Mod Manager",
-
-      notes:
-        data.notes ??
-        null,
-
-      pageUrl:
-        data.pageUrl ??
-        "https://www.nexusmods.com/site/mods/818",
-
-      matchScore:
-        data.matchScore ??
-        0,
-    },
-  };
-}
-
-
 export default function App() {
   const [
     games,
@@ -1462,6 +1347,17 @@ export default function App() {
   }
 
 
+  function showDashboard() {
+    setSelectedGame(
+      null
+    );
+
+    setShowHiddenGames(
+      false
+    );
+  }
+
+
   async function selectGame(
     game
   ) {
@@ -1473,8 +1369,7 @@ export default function App() {
     if (
       game.pcgwLoaded &&
       game.renodxLoaded &&
-      game.vortexLoaded &&
-      game.fluffyLoaded
+      game.vortexLoaded
     ) {
       return;
     }
@@ -1491,9 +1386,6 @@ export default function App() {
 
       vortexLoading:
         !game.vortexLoaded,
-
-      fluffyLoading:
-        !game.fluffyLoaded,
     };
 
 
@@ -1514,13 +1406,12 @@ export default function App() {
 
 
     /*
-     * All external lookups run in parallel.
+     * All three external lookups run in parallel.
      */
     const [
       pcgwResult,
       hdrModsResult,
       vortexResult,
-      fluffyResult,
     ] =
       await Promise.allSettled([
         game.pcgwLoaded
@@ -1544,14 +1435,6 @@ export default function App() {
               null
             )
           : getVortexSupport(
-              game
-            ),
-
-        game.fluffyLoaded
-          ? Promise.resolve(
-              null
-            )
-          : getFluffySupport(
               game
             ),
       ]);
@@ -1666,53 +1549,6 @@ export default function App() {
           vortexError:
             String(
               vortexResult.reason
-            ),
-        };
-      }
-    }
-
-
-
-
-    // ============================================================
-    // FLUFFY MOD MANAGER
-    // ============================================================
-
-    if (!game.fluffyLoaded) {
-      if (
-        fluffyResult.status ===
-        "fulfilled"
-      ) {
-        console.log(
-          "[Fluffy Frontend] Rust returned:",
-          fluffyResult.value
-        );
-
-
-        updatedGame =
-          mergeFluffyData(
-            updatedGame,
-            fluffyResult.value
-          );
-      } else {
-        console.error(
-          "[Fluffy] Lookup failed:",
-          fluffyResult.reason
-        );
-
-
-        updatedGame = {
-          ...updatedGame,
-
-          fluffyLoaded:
-            true,
-
-          fluffyLoading:
-            false,
-
-          fluffyError:
-            String(
-              fluffyResult.reason
             ),
         };
       }
@@ -1853,6 +1689,10 @@ export default function App() {
 
         onSelectGame={
           selectGame
+        }
+
+        onShowDashboard={
+          showDashboard
         }
 
         search={

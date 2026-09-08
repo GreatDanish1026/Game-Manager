@@ -2,6 +2,7 @@ import {
   EyeOff,
   Eye,
   Filter,
+  LayoutDashboard,
   RefreshCcw,
   RotateCcw,
   Search,
@@ -27,6 +28,13 @@ import {
   isGameFavorite,
 } from "../services/userGameMetadata";
 
+import {
+  getGameInsight,
+  getLibraryInsights,
+  insightMatchesFilter,
+  saveLibrarySnapshot,
+} from "../services/libraryInsights";
+
 
 const FILTER_STORAGE_KEY =
   "game-manager-library-filters";
@@ -45,6 +53,9 @@ function loadLibraryPreferences() {
           false,
 
         selectedTag:
+          "",
+
+        selectedInsight:
           "",
 
         sortMode:
@@ -69,6 +80,12 @@ function loadLibraryPreferences() {
           ? parsed.selectedTag
           : "",
 
+      selectedInsight:
+        typeof parsed?.selectedInsight
+          === "string"
+          ? parsed.selectedInsight
+          : "",
+
       sortMode:
         [
           "name",
@@ -86,6 +103,9 @@ function loadLibraryPreferences() {
         false,
 
       selectedTag:
+        "",
+
+      selectedInsight:
         "",
 
       sortMode:
@@ -335,6 +355,7 @@ export default function Sidebar({
   hiddenGameCount,
   selectedGame,
   onSelectGame,
+  onShowDashboard,
   search: _externalSearch,
   onSearchChange: _onExternalSearchChange,
   loading,
@@ -372,6 +393,15 @@ export default function Sidebar({
     );
 
   const [
+    selectedInsight,
+    setSelectedInsight,
+  ] =
+    useState(
+      initial.selectedInsight
+      ?? ""
+    );
+
+  const [
     sortMode,
     setSortMode,
   ] =
@@ -401,6 +431,11 @@ export default function Sidebar({
       );
 
       window.addEventListener(
+        "game-manager-library-insights-changed",
+        refresh
+      );
+
+      window.addEventListener(
         "storage",
         refresh
       );
@@ -408,6 +443,11 @@ export default function Sidebar({
       return () => {
         window.removeEventListener(
           "game-manager-user-metadata-changed",
+          refresh
+        );
+
+        window.removeEventListener(
+          "game-manager-library-insights-changed",
           refresh
         );
 
@@ -427,6 +467,7 @@ export default function Sidebar({
         {
           favoritesOnly,
           selectedTag,
+          selectedInsight,
           sortMode,
         }
       );
@@ -434,10 +475,35 @@ export default function Sidebar({
     [
       favoritesOnly,
       selectedTag,
+      selectedInsight,
       sortMode,
     ]
   );
 
+
+  useEffect(
+    () => {
+      saveLibrarySnapshot(
+        games,
+        totalGames
+      );
+    },
+    [
+      games,
+      totalGames,
+    ]
+  );
+
+  const analyzedCount =
+    useMemo(
+      () =>
+        Object.keys(
+          getLibraryInsights()
+        ).length,
+      [
+        metadataRevision,
+      ]
+    );
 
   const availableTags =
     useMemo(
@@ -503,6 +569,16 @@ export default function Sidebar({
                   && !gameHasTag(
                     game,
                     selectedTag
+                  )
+                ) {
+                  return false;
+                }
+
+                if (
+                  selectedInsight
+                  && !insightMatchesFilter(
+                    getGameInsight(game),
+                    selectedInsight
                   )
                 ) {
                   return false;
@@ -619,6 +695,7 @@ export default function Sidebar({
         query,
         favoritesOnly,
         selectedTag,
+        selectedInsight,
         sortMode,
         metadataRevision,
       ]
@@ -630,6 +707,9 @@ export default function Sidebar({
     || Boolean(
       selectedTag
     )
+    || Boolean(
+      selectedInsight
+    )
     || sortMode
       !== "name";
 
@@ -640,6 +720,10 @@ export default function Sidebar({
     );
 
     setSelectedTag(
+      ""
+    );
+
+    setSelectedInsight(
       ""
     );
 
@@ -744,10 +828,92 @@ export default function Sidebar({
         </div>
 
 
+        <button
+          type="button"
+          onClick={
+            () => {
+              onShowHiddenGamesChange(
+                false
+              );
+
+              onShowDashboard();
+            }
+          }
+          className={`
+            mt-4
+            flex
+            w-full
+            items-center
+            gap-3
+            rounded-xl
+            border
+            px-3
+            py-2.5
+            text-left
+            transition
+            ${
+              !selectedGame
+              && !showHiddenGames
+                ? "border-cyan-500/30 bg-cyan-500/[0.08] text-cyan-100"
+                : "border-white/[0.07] bg-white/[0.02] text-white/45 hover:border-white/[0.11] hover:bg-white/[0.045] hover:text-white/75"
+            }
+          `}
+          title="Return to Library Overview"
+        >
+          <div
+            className={`
+              flex
+              h-8
+              w-8
+              shrink-0
+              items-center
+              justify-center
+              rounded-lg
+              ${
+                !selectedGame
+                && !showHiddenGames
+                  ? "bg-cyan-500/10 text-cyan-300"
+                  : "bg-white/[0.035] text-white/35"
+              }
+            `}
+          >
+            <LayoutDashboard
+              className="h-4 w-4"
+            />
+          </div>
+
+          <div
+            className="
+              min-w-0
+              flex-1
+            "
+          >
+            <div
+              className="
+                text-sm
+                font-semibold
+              "
+            >
+              Library Overview
+            </div>
+
+            <div
+              className="
+                mt-0.5
+                text-[10px]
+                opacity-55
+              "
+            >
+              Dashboard & library statistics
+            </div>
+          </div>
+        </button>
+
+
         <div
           className="
             relative
-            mt-4
+            mt-3
           "
         >
           <Search
@@ -1130,6 +1296,140 @@ export default function Sidebar({
                 </select>
               </label>
             </div>
+
+            <label
+              className="
+                mt-2
+                block
+              "
+            >
+              <div
+                className="
+                  mb-1
+                  flex
+                  items-center
+                  justify-between
+                  gap-2
+                  text-[9px]
+                  font-semibold
+                  uppercase
+                  tracking-wide
+                  text-white/25
+                "
+              >
+                <span>
+                  Capability
+                </span>
+
+                <span
+                  className="
+                    normal-case
+                    font-normal
+                    tracking-normal
+                    text-white/18
+                  "
+                >
+                  {analyzedCount} analyzed
+                </span>
+              </div>
+
+              <select
+                value={
+                  selectedInsight
+                }
+                onChange={
+                  (event) =>
+                    setSelectedInsight(
+                      event.target.value
+                    )
+                }
+                className="
+                  w-full
+                  rounded-lg
+                  border
+                  border-white/[0.08]
+                  bg-[#111823]
+                  px-2
+                  py-1.5
+                  text-[11px]
+                  text-white/60
+                  outline-none
+                "
+              >
+                <option value="">
+                  All capabilities
+                </option>
+
+                <optgroup label="Graphics">
+                  <option value="hdr">
+                    HDR
+                  </option>
+
+                  <option value="ray-tracing">
+                    Ray Tracing
+                  </option>
+
+                  <option value="upscaling">
+                    Upscaling
+                  </option>
+
+                  <option value="dlss">
+                    DLSS
+                  </option>
+
+                  <option value="frame-generation">
+                    Frame Generation
+                  </option>
+
+                  <option value="dlss-frame-generation">
+                    DLSS Frame Generation
+                  </option>
+
+                  <option value="ultrawide">
+                    Ultrawide
+                  </option>
+
+                  <option value="4k">
+                    4K
+                  </option>
+
+                  <option value="120fps">
+                    120+ FPS
+                  </option>
+                </optgroup>
+
+                <optgroup label="Mods & Enhancements">
+                  <option value="renodx">
+                    RenoDX
+                  </option>
+
+                  <option value="luma">
+                    Luma
+                  </option>
+
+                  <option value="vortex">
+                    Vortex Supported
+                  </option>
+
+                  <option value="fluffy">
+                    Fluffy Supported
+                  </option>
+                </optgroup>
+              </select>
+
+              {selectedInsight ? (
+                <div
+                  className="
+                    mt-1
+                    text-[9px]
+                    leading-relaxed
+                    text-white/18
+                  "
+                >
+                  Capability filters match analyzed games only.
+                </div>
+              ) : null}
+            </label>
           </div>
         ) : null}
       </div>

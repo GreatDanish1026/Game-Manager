@@ -351,7 +351,11 @@ export default function LocalInstallationPanel({
     try {
       const result =
         await inspectLocalInstallation(
-          game
+          game,
+          {
+            force:
+              true,
+          }
         );
 
       setData(

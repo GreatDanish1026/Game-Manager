@@ -8,6 +8,8 @@ mod local_paths;
 mod save_backups;
 mod game_launcher;
 mod local_installation;
+mod system_hardware;
+mod pcgw_issues;
 
 
 #[cfg_attr(
@@ -53,7 +55,11 @@ pub fn run() {
 
                 game_launcher::launch_game,
 
-                local_installation::inspect_local_installation
+                local_installation::inspect_local_installation,
+
+                system_hardware::get_system_hardware,
+
+                pcgw_issues::get_pcgw_known_issues
             ]
         )
 

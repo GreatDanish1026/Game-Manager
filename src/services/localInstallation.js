@@ -3,17 +3,88 @@ import {
 } from "@tauri-apps/api/core";
 
 
-export async function inspectLocalInstallation(
+const cache =
+  new Map();
+
+
+function cacheKey(
   game
 ) {
-  return invoke(
-    "inspect_local_installation",
-    {
-      gameName:
-        game.name,
+  return [
+    game?.id
+      ?? "",
+    game?.installPath
+      ?? "",
+  ].join(
+    "::"
+  );
+}
 
-      installPath:
-        game.installPath,
-    }
+
+export async function inspectLocalInstallation(
+  game,
+  {
+    force = false,
+  } = {}
+) {
+  const key =
+    cacheKey(
+      game
+    );
+
+  if (
+    !force
+    && cache.has(
+      key
+    )
+  ) {
+    return cache.get(
+      key
+    );
+  }
+
+  const promise =
+    invoke(
+      "inspect_local_installation",
+      {
+        gameName:
+          game.name,
+
+        installPath:
+          game.installPath,
+      }
+    )
+    .catch(
+      (error) => {
+        cache.delete(
+          key
+        );
+
+        throw error;
+      }
+    );
+
+  cache.set(
+    key,
+    promise
+  );
+
+  return promise;
+}
+
+
+export function clearLocalInstallationCache(
+  game
+) {
+  if (!game) {
+    cache.clear();
+
+    return;
+  }
+
+  cache.delete(
+    cacheKey(
+      game
+    )
   );
 }

@@ -8,6 +8,8 @@ import {
   FolderOpen,
   Gamepad2,
   HardDrive,
+  HeartPulse,
+  MonitorCog,
   Info,
   Monitor,
   Package,
@@ -17,11 +19,13 @@ import {
   Radio,
   Settings2,
   Store,
+  TriangleAlert,
   UserRoundCog,
   Wrench,
 } from "lucide-react";
 
 import {
+  useEffect,
   useState,
 } from "react";
 
@@ -39,6 +43,10 @@ import QuickStatusBar from "./QuickStatusBar";
 import SaveBackupPanel from "./SaveBackupPanel";
 import GamePersonalization from "./GamePersonalization";
 import LocalInstallationPanel from "./LocalInstallationPanel";
+import GameHealthPanel from "./GameHealthPanel";
+import HardwareCapabilityPanel from "./HardwareCapabilityPanel";
+import KnownIssuesPanel from "./KnownIssuesPanel";
+import LibraryDashboard from "./LibraryDashboard";
 
 import {
   openGamePath,
@@ -47,6 +55,10 @@ import {
 import {
   launchGame,
 } from "../services/gameLaunch";
+
+import {
+  storeGameInsight,
+} from "../services/libraryInsights";
 
 
 function InfoRow({
@@ -549,76 +561,6 @@ function modSummary(
 export default function GameDetails({
   game,
 }) {
-  if (!game) {
-    return (
-      <main
-        className="
-          flex
-          min-w-0
-          flex-1
-          items-center
-          justify-center
-          overflow-y-auto
-          bg-[#0b0f17]
-        "
-      >
-        <div
-          className="
-            max-w-md
-            px-8
-            text-center
-          "
-        >
-          <div
-            className="
-              mx-auto
-              flex
-              h-16
-              w-16
-              items-center
-              justify-center
-              rounded-2xl
-              bg-cyan-500/10
-              text-cyan-400
-            "
-          >
-            <Gamepad2
-              className="h-8 w-8"
-            />
-          </div>
-
-          <h1
-            className="
-              mt-5
-              text-2xl
-              font-semibold
-              text-white
-            "
-          >
-            Select a Game
-          </h1>
-
-          <p
-            className="
-              mt-2
-              text-sm
-              text-white/40
-            "
-          >
-            Choose an installed game
-            from the sidebar.
-          </p>
-        </div>
-      </main>
-    );
-  }
-
-
-  const features =
-    game.features
-    ?? {};
-
-
   const [
     pathError,
     setPathError,
@@ -636,6 +578,40 @@ export default function GameDetails({
     setLaunchError,
   ] =
     useState(null);
+
+
+  useEffect(
+    () => {
+      if (game) {
+        storeGameInsight(
+          game
+        );
+      }
+    },
+    [
+      game?.id,
+      game?.pcgwLoaded,
+      game?.renodxLoaded,
+      game?.vortexLoaded,
+      game?.fluffyLoaded,
+      game?.features,
+      game?.renodx,
+      game?.vortex,
+      game?.fluffy,
+    ]
+  );
+
+
+  if (!game) {
+    return (
+      <LibraryDashboard />
+    );
+  }
+
+
+  const features =
+    game.features
+    ?? {};
 
 
   async function handleLaunchGame() {
@@ -1104,6 +1080,54 @@ export default function GameDetails({
           }
         >
           <EssentialImprovements
+            game={
+              game
+            }
+          />
+        </CollapsibleSection>
+
+
+        <CollapsibleSection
+          id="known-issues"
+          title="Known Issues & Fixes"
+          description="Unresolved and fixed issues from the matched PCGamingWiki page."
+          icon={TriangleAlert}
+          defaultOpen={false}
+          summary="PCGamingWiki issue tracking"
+        >
+          <KnownIssuesPanel
+            game={
+              game
+            }
+          />
+        </CollapsibleSection>
+
+
+        <CollapsibleSection
+          id="installation-health"
+          title="Installation Health"
+          description="A setup-readiness checklist based on what Game Manager can verify."
+          icon={HeartPulse}
+          defaultOpen={true}
+          summary="Readiness score & checks"
+        >
+          <GameHealthPanel
+            game={
+              game
+            }
+          />
+        </CollapsibleSection>
+
+
+        <CollapsibleSection
+          id="hardware-capabilities"
+          title="Hardware Compatibility"
+          description="Compare game capabilities with conservatively detected local hardware families."
+          icon={MonitorCog}
+          defaultOpen={false}
+          summary="CPU, GPU, RAM & capability checks"
+        >
+          <HardwareCapabilityPanel
             game={
               game
             }
