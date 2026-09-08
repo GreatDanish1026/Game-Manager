@@ -14,6 +14,12 @@ use std::{
 
 use serde::Serialize;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 
 const MAX_SCAN_DEPTH: usize = 5;
 const MAX_FILES_VISITED: usize = 25000;
@@ -751,9 +757,14 @@ fn file_version(
         Command::new(
             "powershell.exe"
         )
+        .creation_flags(
+            CREATE_NO_WINDOW
+        )
         .args([
             "-NoProfile",
             "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
             "-Command",
             "$v = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($env:GM_FILE_VERSION_PATH); if ($v.FileVersion) { $v.FileVersion } elseif ($v.ProductVersion) { $v.ProductVersion }",
         ])

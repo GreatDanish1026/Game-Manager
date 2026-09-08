@@ -7,6 +7,12 @@ use serde::{
     Serialize,
 };
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -224,9 +230,14 @@ where
         Command::new(
             "powershell.exe"
         )
+        .creation_flags(
+            CREATE_NO_WINDOW
+        )
         .args([
             "-NoProfile",
             "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
             "-Command",
             script,
         ])

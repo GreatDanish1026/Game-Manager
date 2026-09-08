@@ -1,11 +1,11 @@
 ﻿{
     "platforms":  {
                       "windows-x86_64":  {
-                                             "signature":  "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTK2dVZHZhY0J4akMxM1Z1SUoxWG9acjBYeTJDK2RodTc1bVRJQjFGNWs3WXZXRjRWaFFKeDVMRlRhUDZsTDNBQWxuV0kvRDcrWHkvT1hmd2VLblFXYkY5R0oxaFRaSGdvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODkzNzk0CWZpbGU6R2FtZSBNYW5hZ2VyXzEuMC4wX3g2NC1zZXR1cC5leGUKUmE3bTIwSDQyNDQ1aFJqRTlyQUZDVjZKSjZYcmFFUmM4REpQaWxjOXVmcU1Tc1EzSWF4ekhOU0JqQUg2SXFCSlRVL3E5VlcxKzhZV1dvYmFTZTE4QUE9PQo=",
+                                             "signature":  "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTK2dVZHZhY0J4akF0M1Z3aVlwRjQ5RnJFWWx0RjVEVG5RS2xUQUJUMHR3WHNtTmUxZGJMUGFiQWUwaWRGMURxbGU5Y1NpeGJiZXBocnpOUU85SVcvUGFIU0QyV2tGUEEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODk1MzU3CWZpbGU6R2FtZSBNYW5hZ2VyXzEuMC4wX3g2NC1zZXR1cC5leGUKWEJaa1FJS1FZaW8vVnJTZDIxMlRVd2tIQUlRWXk4MTZYa1NqOWZQamF4S2xtejNyaHVFMVJpaDlMUFBmT1NPc08rRW1wV09KUmJpbWxHc3VqNnJOREE9PQo=",
                                              "url":  "https://github.com/GreatDanish1026/Game-Manager/releases/download/v1.0.0/GameManager_1.0.0_x64-setup.exe"
                                          }
                   },
-    "pub_date":  "2026-09-08T19:02:48Z",
+    "pub_date":  "2026-09-08T19:23:06Z",
     "version":  "1.0.0",
     "notes":  "Game Manager v1.0.0"
 }
