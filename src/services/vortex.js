@@ -3,27 +3,30 @@ import {
 } from "@tauri-apps/api/core";
 
 
-export async function getRenoDxModStatus(
+export async function getVortexSupport(
   game
 ) {
   console.log(
-    "[HDR Mods] Checking:",
+    "[Vortex] Checking:",
     game.name
   );
 
+
   const result =
     await invoke(
-      "get_renodx_mod_status",
+      "get_vortex_support",
       {
         name:
           game.name,
       }
     );
 
+
   console.log(
-    "[HDR Mods] Result:",
+    "[Vortex] Result:",
     result
   );
+
 
   return result;
 }

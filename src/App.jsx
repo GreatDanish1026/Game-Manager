@@ -20,6 +20,14 @@ import {
 } from "./services/renodx";
 
 import {
+  getVortexSupport,
+} from "./services/vortex";
+
+import {
+  getFluffySupport,
+} from "./services/fluffy";
+
+import {
   checkForUpdates,
 } from "./services/updater";
 
@@ -39,17 +47,19 @@ function loadHiddenGameIds() {
       return [];
     }
 
+
     const parsed =
-      JSON.parse(stored);
+      JSON.parse(
+        stored
+      );
 
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
 
-    return parsed.filter(
-      (id) =>
-        typeof id === "string"
-    );
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (id) =>
+            typeof id === "string"
+        )
+      : [];
   } catch (error) {
     console.error(
       "[Hidden Games] Failed to load:",
@@ -61,11 +71,15 @@ function loadHiddenGameIds() {
 }
 
 
-function saveHiddenGameIds(ids) {
+function saveHiddenGameIds(
+  ids
+) {
   try {
     localStorage.setItem(
       HIDDEN_GAMES_STORAGE_KEY,
-      JSON.stringify(ids)
+      JSON.stringify(
+        ids
+      )
     );
   } catch (error) {
     console.error(
@@ -76,7 +90,9 @@ function saveHiddenGameIds(ids) {
 }
 
 
-function normalizePcgwSupport(value) {
+function normalizePcgwSupport(
+  value
+) {
   if (
     value === null ||
     value === undefined
@@ -84,16 +100,19 @@ function normalizePcgwSupport(value) {
     return null;
   }
 
+
   if (
     typeof value === "boolean"
   ) {
     return value;
   }
 
+
   const normalized =
     String(value)
       .trim()
       .toLowerCase();
+
 
   if (
     normalized === "" ||
@@ -104,6 +123,7 @@ function normalizePcgwSupport(value) {
     return null;
   }
 
+
   if (
     normalized === "true" ||
     normalized === "yes" ||
@@ -112,6 +132,7 @@ function normalizePcgwSupport(value) {
   ) {
     return true;
   }
+
 
   if (
     normalized === "false" ||
@@ -122,87 +143,420 @@ function normalizePcgwSupport(value) {
     return false;
   }
 
+
   return value;
 }
 
 
-function prepareGameForUi(game) {
+function createEmptyModSource(
+  pageUrl
+) {
+  return {
+    found: false,
+    available: false,
+
+    status:
+      "not_found",
+
+    matchedName:
+      null,
+
+    category:
+      null,
+
+    notes:
+      null,
+
+    pageUrl,
+
+    downloadUrl:
+      null,
+  };
+}
+
+
+function createEmptyVortexResult() {
+  return {
+    supported:
+      false,
+
+    supportType:
+      "none",
+
+    matchedGameName:
+      null,
+
+    extensionName:
+      null,
+
+    description:
+      null,
+
+    author:
+      null,
+
+    version:
+      null,
+
+    pageUrl:
+      null,
+
+    modId:
+      null,
+
+    gameId:
+      null,
+
+    matchScore:
+      0,
+  };
+}
+
+
+function createEmptyFluffyResult() {
+  return {
+    supported:
+      false,
+
+    matchedGameName:
+      null,
+
+    managerName:
+      "Fluffy Mod Manager",
+
+    notes:
+      null,
+
+    pageUrl:
+      "https://www.nexusmods.com/site/mods/818",
+
+    matchScore:
+      0,
+  };
+}
+
+
+function prepareGameForUi(
+  game
+) {
   return {
     ...game,
 
-    pcgwLoaded: false,
-    pcgwLoading: false,
-    pcgwError: null,
 
-    pcgwPageName: null,
-    pcgwPageUrl: null,
+    // ============================================================
+    // PCGAMINGWIKI
+    // ============================================================
 
-    renodxLoaded: false,
-    renodxLoading: false,
-    renodxError: null,
+    pcgwLoaded:
+      false,
+
+    pcgwLoading:
+      false,
+
+    pcgwError:
+      null,
+
+    pcgwPageName:
+      null,
+
+    pcgwPageUrl:
+      null,
+
+    coverImageUrl:
+      null,
+
+    essentialImprovementsHtml:
+      null,
+
+
+    // ============================================================
+    // HDR MOD SUPPORT
+    // ============================================================
+
+    renodxLoaded:
+      false,
+
+    renodxLoading:
+      false,
+
+    renodxError:
+      null,
 
     renodx: {
-      available: false,
-      status: null,
-      matchedName: null,
-      category: null,
-      notes: null,
-      pageUrl: null,
+      available:
+        false,
+
+      preferredSource:
+        "none",
+
+      renodx:
+        createEmptyModSource(
+          "https://github.com/clshortfuse/renodx/wiki/Mods"
+        ),
+
+      luma:
+        createEmptyModSource(
+          "https://github.com/Filoppi/Luma-Framework/wiki/Mods-List"
+        ),
     },
 
-    developer: null,
-    publisher: null,
-    releaseDate: null,
 
-    genres: [],
+    // ============================================================
+    // VORTEX
+    // ============================================================
 
-    description:
-      "PCGamingWiki information has not been loaded yet.",
+    vortexLoaded:
+      false,
+
+    vortexLoading:
+      false,
+
+    vortexError:
+      null,
+
+    vortex:
+      createEmptyVortexResult(),
+
+
+    // ============================================================
+    // FLUFFY MOD MANAGER
+    // ============================================================
+
+    fluffyLoaded:
+      false,
+
+    fluffyLoading:
+      false,
+
+    fluffyError:
+      null,
+
+    fluffy:
+      createEmptyFluffyResult(),
+
+
+    // ============================================================
+    // OVERVIEW
+    // ============================================================
+
+    developer:
+      null,
+
+    publisher:
+      null,
+
+    releaseDate:
+      null,
+
+    genres:
+      [],
+
+
+    // ============================================================
+    // PCGW VIDEO
+    // ============================================================
 
     features: {
-      hdr: null,
-      ultrawide: null,
-      controller: null,
-      rayTracing: null,
-      frameGeneration: null,
-      upscaling: null,
-      dlss: null,
+      widescreen:
+        null,
+
+      widescreenNotes:
+        null,
+
+      multimonitor:
+        null,
+
+      multimonitorNotes:
+        null,
+
+      ultrawide:
+        null,
+
+      ultrawideNotes:
+        null,
+
+      fourK:
+        null,
+
+      fourKNotes:
+        null,
+
+      fov:
+        null,
+
+      fovNotes:
+        null,
+
+      windowed:
+        null,
+
+      windowedNotes:
+        null,
+
+      borderless:
+        null,
+
+      borderlessNotes:
+        null,
+
+      anisotropic:
+        null,
+
+      anisotropicNotes:
+        null,
+
+      antialiasing:
+        null,
+
+      antialiasingNotes:
+        null,
+
+      upscaling:
+        null,
+
+      upscalingTech:
+        null,
+
+      upscalingNotes:
+        null,
+
+      frameGeneration:
+        null,
+
+      frameGenerationTech:
+        null,
+
+      frameGenerationNotes:
+        null,
+
+      vsync:
+        null,
+
+      vsyncNotes:
+        null,
+
+      sixtyFps:
+        null,
+
+      sixtyFpsNotes:
+        null,
+
+      oneTwentyFps:
+        null,
+
+      oneTwentyFpsNotes:
+        null,
+
+      hdr:
+        null,
+
+      hdrNotes:
+        null,
+
+      rayTracing:
+        null,
+
+      rayTracingNotes:
+        null,
+
+      colorBlind:
+        null,
+
+      colorBlindNotes:
+        null,
+
+      wsgfLink:
+        null,
+
+      wsgfAwards: {
+        widescreen:
+          null,
+
+        multimonitor:
+          null,
+
+        ultrawide:
+          null,
+
+        fourK:
+          null,
+      },
     },
+
+
+    // ============================================================
+    // CONTROLLERS
+    // ============================================================
 
     controllerCompatibility: {
       xbox: {
-        supported: null,
-        models: null,
+        supported:
+          null,
+
+        models:
+          null,
       },
 
       playstation: {
-        supported: null,
-        models: null,
-        prompts: null,
-        connectionModes: null,
-        motionSensors: null,
-        lightBar: null,
+        supported:
+          null,
+
+        models:
+          null,
+
+        prompts:
+          null,
+
+        connectionModes:
+          null,
+
+        motionSensors:
+          null,
+
+        lightBar:
+          null,
 
         dualsense: {
-          adaptiveTriggers: null,
-          adaptiveTriggerModes: null,
-          haptics: null,
+          adaptiveTriggers:
+            null,
+
+          adaptiveTriggerModes:
+            null,
+
+          haptics:
+            null,
         },
       },
 
       nintendo: {
-        supported: null,
-        models: null,
+        supported:
+          null,
+
+        models:
+          null,
       },
 
-      hotplug: null,
+      hotplug:
+        null,
     },
 
+
+    // ============================================================
+    // TECHNICAL
+    // ============================================================
+
     technical: {
-      engine: null,
-      api: null,
-      saveLocation: null,
-      configLocation: null,
+      engine:
+        null,
+
+      api:
+        null,
+
+      saveLocation:
+        null,
+
+      configLocation:
+        null,
     },
   };
 }
@@ -212,160 +566,264 @@ function mergePcgwData(
   game,
   data
 ) {
-  console.log(
-    "[PCGW MERGE] Raw data:",
-    data
-  );
-
   if (!data) {
     return {
       ...game,
 
-      pcgwLoaded: true,
-      pcgwLoading: false,
+      pcgwLoaded:
+        true,
+
+      pcgwLoading:
+        false,
 
       pcgwError:
         "PCGamingWiki returned no data.",
     };
   }
 
+
   if (!data.found) {
     return {
       ...game,
 
-      pcgwLoaded: true,
-      pcgwLoading: false,
-      pcgwError: null,
+      pcgwLoaded:
+        true,
 
-      pcgwPageName: null,
-      pcgwPageUrl: null,
+      pcgwLoading:
+        false,
 
-      description:
-        "No PCGamingWiki information was found for this game.",
+      pcgwError:
+        null,
+
+      pcgwPageName:
+        null,
+
+      pcgwPageUrl:
+        null,
+
+      coverImageUrl:
+        null,
+
+      essentialImprovementsHtml:
+        null,
     };
   }
 
-  const mergedFeatures = {
-    ...game.features,
 
-    hdr:
+  const features = {
+    widescreen:
       normalizePcgwSupport(
-        data.hdr
+        data.widescreenResolution
       ),
+
+    widescreenNotes:
+      data.widescreenResolutionNotes ??
+      null,
+
+
+    multimonitor:
+      normalizePcgwSupport(
+        data.multimonitor
+      ),
+
+    multimonitorNotes:
+      data.multimonitorNotes ??
+      null,
+
 
     ultrawide:
       normalizePcgwSupport(
-        data.ultrawide
+        data.ultrawidescreen
       ),
 
-    controller:
+    ultrawideNotes:
+      data.ultrawidescreenNotes ??
+      null,
+
+
+    fourK:
       normalizePcgwSupport(
-        data.controllerSupport
+        data.fourKUltraHd
       ),
 
-    rayTracing:
+    fourKNotes:
+      data.fourKUltraHdNotes ??
+      null,
+
+
+    fov:
       normalizePcgwSupport(
-        data.rayTracing
+        data.fov
       ),
 
-    frameGeneration:
+    fovNotes:
+      data.fovNotes ??
+      null,
+
+
+    windowed:
       normalizePcgwSupport(
-        data.frameGeneration
+        data.windowed
       ),
+
+    windowedNotes:
+      data.windowedNotes ??
+      null,
+
+
+    borderless:
+      normalizePcgwSupport(
+        data.borderlessWindowed
+      ),
+
+    borderlessNotes:
+      data.borderlessWindowedNotes ??
+      null,
+
+
+    anisotropic:
+      normalizePcgwSupport(
+        data.anisotropic
+      ),
+
+    anisotropicNotes:
+      data.anisotropicNotes ??
+      null,
+
+
+    antialiasing:
+      normalizePcgwSupport(
+        data.antialiasing
+      ),
+
+    antialiasingNotes:
+      data.antialiasingNotes ??
+      null,
+
 
     upscaling:
       normalizePcgwSupport(
         data.upscaling
       ),
 
-    dlss:
-      game.features?.dlss ??
+    upscalingTech:
+      data.upscalingTech ??
       null,
-  };
+
+    upscalingNotes:
+      data.upscalingNotes ??
+      null,
 
 
-  const mergedControllerCompatibility = {
-    xbox: {
-      supported:
-        normalizePcgwSupport(
-          data.xboxControllerSupport
-        ),
-
-      models:
-        data.xboxControllerModels ??
-        null,
-    },
-
-    playstation: {
-      supported:
-        normalizePcgwSupport(
-          data.playstationControllerSupport
-        ),
-
-      models:
-        data.playstationControllerModels ??
-        null,
-
-      prompts:
-        normalizePcgwSupport(
-          data.playstationPrompts
-        ),
-
-      connectionModes:
-        data.playstationConnectionModes ??
-        null,
-
-      motionSensors:
-        normalizePcgwSupport(
-          data.playstationMotionSensors
-        ),
-
-      lightBar:
-        normalizePcgwSupport(
-          data.playstationLightBar
-        ),
-
-      dualsense: {
-        adaptiveTriggers:
-          normalizePcgwSupport(
-            data.dualsenseAdaptiveTriggers
-          ),
-
-        adaptiveTriggerModes:
-          data.dualsenseAdaptiveTriggerModes ??
-          null,
-
-        haptics:
-          normalizePcgwSupport(
-            data.dualsenseHaptics
-          ),
-      },
-    },
-
-    nintendo: {
-      supported:
-        normalizePcgwSupport(
-          data.nintendoControllerSupport
-        ),
-
-      models:
-        data.nintendoControllerModels ??
-        null,
-    },
-
-    hotplug:
+    frameGeneration:
       normalizePcgwSupport(
-        data.controllerHotplug
+        data.frameGeneration
       ),
+
+    frameGenerationTech:
+      data.frameGenerationTech ??
+      null,
+
+    frameGenerationNotes:
+      data.frameGenerationNotes ??
+      null,
+
+
+    vsync:
+      normalizePcgwSupport(
+        data.vsync
+      ),
+
+    vsyncNotes:
+      data.vsyncNotes ??
+      null,
+
+
+    sixtyFps:
+      normalizePcgwSupport(
+        data.sixtyFps
+      ),
+
+    sixtyFpsNotes:
+      data.sixtyFpsNotes ??
+      null,
+
+
+    oneTwentyFps:
+      normalizePcgwSupport(
+        data.oneTwentyFps
+      ),
+
+    oneTwentyFpsNotes:
+      data.oneTwentyFpsNotes ??
+      null,
+
+
+    hdr:
+      normalizePcgwSupport(
+        data.hdr
+      ),
+
+    hdrNotes:
+      data.hdrNotes ??
+      null,
+
+
+    rayTracing:
+      normalizePcgwSupport(
+        data.rayTracing
+      ),
+
+    rayTracingNotes:
+      data.rayTracingNotes ??
+      null,
+
+
+    colorBlind:
+      normalizePcgwSupport(
+        data.colorBlind
+      ),
+
+    colorBlindNotes:
+      data.colorBlindNotes ??
+      null,
+
+
+    wsgfLink:
+      data.wsgfLink ??
+      null,
+
+    wsgfAwards: {
+      widescreen:
+        data.widescreenWsgfAward ??
+        null,
+
+      multimonitor:
+        data.multimonitorWsgfAward ??
+        null,
+
+      ultrawide:
+        data.ultrawidescreenWsgfAward ??
+        null,
+
+      fourK:
+        data.fourKUltraHdWsgfAward ??
+        null,
+    },
   };
 
 
-  const mergedGame = {
+  return {
     ...game,
 
-    pcgwLoaded: true,
-    pcgwLoading: false,
-    pcgwError: null,
+    pcgwLoaded:
+      true,
+
+    pcgwLoading:
+      false,
+
+    pcgwError:
+      null,
 
     pcgwPageName:
       data.pageName ??
@@ -373,6 +831,14 @@ function mergePcgwData(
 
     pcgwPageUrl:
       data.pageUrl ??
+      null,
+
+    coverImageUrl:
+      data.coverImageUrl ??
+      null,
+
+    essentialImprovementsHtml:
+      data.essentialImprovementsHtml ??
       null,
 
     developer:
@@ -387,18 +853,88 @@ function mergePcgwData(
       data.releaseDate ??
       null,
 
-    description:
-      "PCGamingWiki information loaded.",
+    features,
 
-    features:
-      mergedFeatures,
+    controllerCompatibility: {
+      xbox: {
+        supported:
+          normalizePcgwSupport(
+            data.xboxControllerSupport
+          ),
 
-    controllerCompatibility:
-      mergedControllerCompatibility,
+        models:
+          data.xboxControllerModels ??
+          null,
+      },
+
+
+      playstation: {
+        supported:
+          normalizePcgwSupport(
+            data.playstationControllerSupport
+          ),
+
+        models:
+          data.playstationControllerModels ??
+          null,
+
+        prompts:
+          normalizePcgwSupport(
+            data.playstationPrompts
+          ),
+
+        connectionModes:
+          data.playstationConnectionModes ??
+          null,
+
+        motionSensors:
+          normalizePcgwSupport(
+            data.playstationMotionSensors
+          ),
+
+        lightBar:
+          normalizePcgwSupport(
+            data.playstationLightBar
+          ),
+
+        dualsense: {
+          adaptiveTriggers:
+            normalizePcgwSupport(
+              data.dualsenseAdaptiveTriggers
+            ),
+
+          adaptiveTriggerModes:
+            data.dualsenseAdaptiveTriggerModes ??
+            null,
+
+          haptics:
+            normalizePcgwSupport(
+              data.dualsenseHaptics
+            ),
+        },
+      },
+
+
+      nintendo: {
+        supported:
+          normalizePcgwSupport(
+            data.nintendoControllerSupport
+          ),
+
+        models:
+          data.nintendoControllerModels ??
+          null,
+      },
+
+
+      hotplug:
+        normalizePcgwSupport(
+          data.controllerHotplug
+        ),
+    },
+
 
     technical: {
-      ...game.technical,
-
       engine:
         data.engine ??
         null,
@@ -416,14 +952,6 @@ function mergePcgwData(
         null,
     },
   };
-
-
-  console.log(
-    "[PCGW MERGE] Final merged game:",
-    mergedGame
-  );
-
-  return mergedGame;
 }
 
 
@@ -435,37 +963,256 @@ function mergeRenoDxData(
     return {
       ...game,
 
-      renodxLoaded: true,
-      renodxLoading: false,
+      renodxLoaded:
+        true,
+
+      renodxLoading:
+        false,
 
       renodxError:
-        "RenoDX returned no data.",
+        "HDR mod lookup returned no data.",
     };
   }
+
+
+  const renodxSource = {
+    found:
+      data.renodx?.found ??
+      false,
+
+    available:
+      data.renodx?.available ??
+      false,
+
+    status:
+      data.renodx?.status ??
+      "not_found",
+
+    matchedName:
+      data.renodx?.matchedName ??
+      null,
+
+    category:
+      data.renodx?.category ??
+      null,
+
+    notes:
+      data.renodx?.notes ??
+      null,
+
+    pageUrl:
+      data.renodx?.pageUrl ??
+      "https://github.com/clshortfuse/renodx/wiki/Mods",
+
+    downloadUrl:
+      data.renodx?.downloadUrl ??
+      null,
+  };
+
+
+  const lumaSource = {
+    found:
+      data.luma?.found ??
+      false,
+
+    available:
+      data.luma?.available ??
+      false,
+
+    status:
+      data.luma?.status ??
+      "not_found",
+
+    matchedName:
+      data.luma?.matchedName ??
+      null,
+
+    category:
+      data.luma?.category ??
+      null,
+
+    notes:
+      data.luma?.notes ??
+      null,
+
+    pageUrl:
+      data.luma?.pageUrl ??
+      "https://github.com/Filoppi/Luma-Framework/wiki/Mods-List",
+
+    downloadUrl:
+      data.luma?.downloadUrl ??
+      null,
+  };
+
 
   return {
     ...game,
 
-    renodxLoaded: true,
-    renodxLoading: false,
-    renodxError: null,
+    renodxLoaded:
+      true,
+
+    renodxLoading:
+      false,
+
+    renodxError:
+      null,
 
     renodx: {
       available:
         data.available ??
+        (
+          renodxSource.available ||
+          lumaSource.available
+        ),
+
+      preferredSource:
+        data.preferredSource ??
+        (
+          renodxSource.available &&
+          lumaSource.available
+            ? "both"
+            : renodxSource.available
+              ? "renodx"
+              : lumaSource.available
+                ? "luma"
+                : "none"
+        ),
+
+      renodx:
+        renodxSource,
+
+      luma:
+        lumaSource,
+    },
+  };
+}
+
+
+function mergeVortexData(
+  game,
+  data
+) {
+  if (!data) {
+    return {
+      ...game,
+
+      vortexLoaded:
+        true,
+
+      vortexLoading:
         false,
 
-      status:
-        data.status ??
+      vortexError:
+        "Vortex lookup returned no data.",
+    };
+  }
+
+
+  return {
+    ...game,
+
+    vortexLoaded:
+      true,
+
+    vortexLoading:
+      false,
+
+    vortexError:
+      null,
+
+    vortex: {
+      supported:
+        data.supported ??
+        false,
+
+      supportType:
+        data.supportType ??
+        "none",
+
+      matchedGameName:
+        data.matchedGameName ??
         null,
 
-      matchedName:
-        data.matchedName ??
+      extensionName:
+        data.extensionName ??
         null,
 
-      category:
-        data.category ??
+      description:
+        data.description ??
         null,
+
+      author:
+        data.author ??
+        null,
+
+      version:
+        data.version ??
+        null,
+
+      pageUrl:
+        data.pageUrl ??
+        null,
+
+      modId:
+        data.modId ??
+        null,
+
+      gameId:
+        data.gameId ??
+        null,
+
+      matchScore:
+        data.matchScore ??
+        0,
+    },
+  };
+}
+
+
+function mergeFluffyData(
+  game,
+  data
+) {
+  if (!data) {
+    return {
+      ...game,
+
+      fluffyLoaded:
+        true,
+
+      fluffyLoading:
+        false,
+
+      fluffyError:
+        "Fluffy Mod Manager lookup returned no data.",
+    };
+  }
+
+
+  return {
+    ...game,
+
+    fluffyLoaded:
+      true,
+
+    fluffyLoading:
+      false,
+
+    fluffyError:
+      null,
+
+    fluffy: {
+      supported:
+        data.supported ??
+        false,
+
+      matchedGameName:
+        data.matchedGameName ??
+        null,
+
+      managerName:
+        data.managerName ??
+        "Fluffy Mod Manager",
 
       notes:
         data.notes ??
@@ -473,7 +1220,11 @@ function mergeRenoDxData(
 
       pageUrl:
         data.pageUrl ??
-        null,
+        "https://www.nexusmods.com/site/mods/818",
+
+      matchScore:
+        data.matchScore ??
+        0,
     },
   };
 }
@@ -483,63 +1234,76 @@ export default function App() {
   const [
     games,
     setGames,
-  ] = useState([]);
+  ] =
+    useState([]);
+
 
   const [
     selectedGame,
     setSelectedGame,
-  ] = useState(null);
+  ] =
+    useState(null);
+
 
   const [
     search,
     setSearch,
-  ] = useState("");
+  ] =
+    useState("");
+
 
   const [
     loading,
     setLoading,
-  ] = useState(false);
+  ] =
+    useState(false);
+
 
   const [
     scanError,
     setScanError,
-  ] = useState(null);
+  ] =
+    useState(null);
+
 
   const [
     hiddenGameIds,
     setHiddenGameIds,
-  ] = useState(
-    () =>
-      loadHiddenGameIds()
-  );
+  ] =
+    useState(
+      () =>
+        loadHiddenGameIds()
+    );
+
 
   const [
     showHiddenGames,
     setShowHiddenGames,
-  ] = useState(false);
+  ] =
+    useState(false);
+
 
   const [
     availableUpdate,
     setAvailableUpdate,
-  ] = useState(null);
-
-  const [
-    updateCheckError,
-    setUpdateCheckError,
-  ] = useState(null);
+  ] =
+    useState(null);
 
 
   async function scanGames() {
-    console.log(
-      "[Game Manager] Calling Rust game scanner..."
+    setLoading(
+      true
     );
 
-    setLoading(true);
-    setScanError(null);
+    setScanError(
+      null
+    );
+
 
     try {
       const installedGames =
         await getInstalledGames();
+
 
       const uniqueGames =
         Array.from(
@@ -553,146 +1317,120 @@ export default function App() {
           ).values()
         );
 
-      if (
-        installedGames.length !==
-        uniqueGames.length
-      ) {
-        console.warn(
-          "[Game Manager] Duplicate games removed:",
-          installedGames.length -
-            uniqueGames.length
-        );
-      }
-
-      const preparedGames =
-        uniqueGames.map(
-          prepareGameForUi
-        );
 
       setGames(
-        preparedGames
+        uniqueGames.map(
+          prepareGameForUi
+        )
       );
+
 
       setSelectedGame(
         null
       );
     } catch (error) {
       console.error(
-        "[Game Manager] Game scan failed:",
+        "[Game Manager] Scan failed:",
         error
       );
+
 
       setScanError(
         String(error)
       );
 
-      setGames([]);
-      setSelectedGame(null);
+
+      setGames(
+        []
+      );
+
+      setSelectedGame(
+        null
+      );
     } finally {
-      setLoading(false);
+      setLoading(
+        false
+      );
     }
   }
 
 
-  useEffect(() => {
-    scanGames();
-  }, []);
+  useEffect(
+    () => {
+      scanGames();
+    },
+    []
+  );
 
 
-  /*
-   * Check for a newer Game Manager version
-   * when the application starts.
-   */
-  useEffect(() => {
-    async function checkVersion() {
-      console.log(
-        "[Updater] Starting automatic update check..."
-      );
+  useEffect(
+    () => {
+      async function checkVersion() {
+        try {
+          const result =
+            await checkForUpdates();
 
-      setUpdateCheckError(
-        null
-      );
-
-      try {
-        const result =
-          await checkForUpdates();
-
-        console.log(
-          "[Updater] Update check result:",
-          result
-        );
-
-        if (
-          result?.available &&
-          result?.update
-        ) {
-          console.log(
-            "[Updater] Update available:",
-            result.update.version
-          );
 
           setAvailableUpdate(
-            result.update
+            result?.available
+              ? result.update
+              : null
           );
-        } else {
-          console.log(
-            "[Updater] Game Manager is up to date."
-          );
-
-          setAvailableUpdate(
-            null
+        } catch (error) {
+          console.error(
+            "[Updater] Check failed:",
+            error
           );
         }
-      } catch (error) {
-        console.error(
-          "[Updater] Automatic update check failed:",
-          error
-        );
-
-        setUpdateCheckError(
-          String(error)
-        );
       }
-    }
-
-    checkVersion();
-  }, []);
 
 
-  function hideGame(game) {
+      checkVersion();
+    },
+    []
+  );
+
+
+  function hideGame(
+    game
+  ) {
     setHiddenGameIds(
       (current) => {
-        if (
+        const next =
           current.includes(
             game.id
           )
-        ) {
-          return current;
-        }
+            ? current
+            : [
+                ...current,
+                game.id,
+              ];
 
-        const next = [
-          ...current,
-          game.id,
-        ];
 
         saveHiddenGameIds(
           next
         );
 
+
         return next;
       }
     );
 
-    setSelectedGame(
-      (current) =>
-        current?.id === game.id
-          ? null
-          : current
-    );
+
+    if (
+      selectedGame?.id ===
+      game.id
+    ) {
+      setSelectedGame(
+        null
+      );
+    }
   }
 
 
-  function restoreGame(game) {
+  function restoreGame(
+    game
+  ) {
     setHiddenGameIds(
       (current) => {
         const next =
@@ -701,9 +1439,11 @@ export default function App() {
               id !== game.id
           );
 
+
         saveHiddenGameIds(
           next
         );
+
 
         return next;
       }
@@ -712,28 +1452,33 @@ export default function App() {
 
 
   function restoreAllHiddenGames() {
-    saveHiddenGameIds([]);
+    setHiddenGameIds(
+      []
+    );
 
-    setHiddenGameIds([]);
+    saveHiddenGameIds(
+      []
+    );
   }
 
 
-  async function selectGame(game) {
-    console.log(
-      "[Game Manager] Selected game:",
-      game
-    );
-
+  async function selectGame(
+    game
+  ) {
     setSelectedGame(
       game
     );
 
+
     if (
       game.pcgwLoaded &&
-      game.renodxLoaded
+      game.renodxLoaded &&
+      game.vortexLoaded &&
+      game.fluffyLoaded
     ) {
       return;
     }
+
 
     const loadingGame = {
       ...game,
@@ -743,53 +1488,82 @@ export default function App() {
 
       renodxLoading:
         !game.renodxLoaded,
+
+      vortexLoading:
+        !game.vortexLoaded,
+
+      fluffyLoading:
+        !game.fluffyLoaded,
     };
 
-    setGames(
-      (currentGames) =>
-        currentGames.map(
-          (currentGame) =>
-            currentGame.id ===
-            loadingGame.id
-              ? loadingGame
-              : currentGame
-        )
-    );
 
     setSelectedGame(
       loadingGame
     );
 
 
-    const pcgwPromise =
-      game.pcgwLoaded
-        ? Promise.resolve(null)
-        : getPcGamingWikiData(
-            game
-          );
+    setGames(
+      (current) =>
+        current.map(
+          (item) =>
+            item.id === game.id
+              ? loadingGame
+              : item
+        )
+    );
 
 
-    const renodxPromise =
-      game.renodxLoaded
-        ? Promise.resolve(null)
-        : getRenoDxModStatus(
-            game
-          );
-
-
+    /*
+     * All external lookups run in parallel.
+     */
     const [
       pcgwResult,
-      renodxResult,
+      hdrModsResult,
+      vortexResult,
+      fluffyResult,
     ] =
       await Promise.allSettled([
-        pcgwPromise,
-        renodxPromise,
+        game.pcgwLoaded
+          ? Promise.resolve(
+              null
+            )
+          : getPcGamingWikiData(
+              game
+            ),
+
+        game.renodxLoaded
+          ? Promise.resolve(
+              null
+            )
+          : getRenoDxModStatus(
+              game
+            ),
+
+        game.vortexLoaded
+          ? Promise.resolve(
+              null
+            )
+          : getVortexSupport(
+              game
+            ),
+
+        game.fluffyLoaded
+          ? Promise.resolve(
+              null
+            )
+          : getFluffySupport(
+              game
+            ),
       ]);
 
 
     let updatedGame =
       loadingGame;
 
+
+    // ============================================================
+    // PCGW
+    // ============================================================
 
     if (!game.pcgwLoaded) {
       if (
@@ -802,16 +1576,14 @@ export default function App() {
             pcgwResult.value
           );
       } else {
-        console.error(
-          "[PCGW] Lookup failed:",
-          pcgwResult.reason
-        );
-
         updatedGame = {
           ...updatedGame,
 
-          pcgwLoaded: true,
-          pcgwLoading: false,
+          pcgwLoaded:
+            true,
+
+          pcgwLoading:
+            false,
 
           pcgwError:
             String(
@@ -822,31 +1594,125 @@ export default function App() {
     }
 
 
+    // ============================================================
+    // RENODX / LUMA
+    // ============================================================
+
     if (!game.renodxLoaded) {
       if (
-        renodxResult.status ===
+        hdrModsResult.status ===
         "fulfilled"
       ) {
         updatedGame =
           mergeRenoDxData(
             updatedGame,
-            renodxResult.value
+            hdrModsResult.value
+          );
+      } else {
+        updatedGame = {
+          ...updatedGame,
+
+          renodxLoaded:
+            true,
+
+          renodxLoading:
+            false,
+
+          renodxError:
+            String(
+              hdrModsResult.reason
+            ),
+        };
+      }
+    }
+
+
+    // ============================================================
+    // VORTEX
+    // ============================================================
+
+    if (!game.vortexLoaded) {
+      if (
+        vortexResult.status ===
+        "fulfilled"
+      ) {
+        console.log(
+          "[Vortex Frontend] Rust returned:",
+          vortexResult.value
+        );
+
+
+        updatedGame =
+          mergeVortexData(
+            updatedGame,
+            vortexResult.value
           );
       } else {
         console.error(
-          "[RenoDX] Lookup failed:",
-          renodxResult.reason
+          "[Vortex] Lookup failed:",
+          vortexResult.reason
         );
+
 
         updatedGame = {
           ...updatedGame,
 
-          renodxLoaded: true,
-          renodxLoading: false,
+          vortexLoaded:
+            true,
 
-          renodxError:
+          vortexLoading:
+            false,
+
+          vortexError:
             String(
-              renodxResult.reason
+              vortexResult.reason
+            ),
+        };
+      }
+    }
+
+
+
+
+    // ============================================================
+    // FLUFFY MOD MANAGER
+    // ============================================================
+
+    if (!game.fluffyLoaded) {
+      if (
+        fluffyResult.status ===
+        "fulfilled"
+      ) {
+        console.log(
+          "[Fluffy Frontend] Rust returned:",
+          fluffyResult.value
+        );
+
+
+        updatedGame =
+          mergeFluffyData(
+            updatedGame,
+            fluffyResult.value
+          );
+      } else {
+        console.error(
+          "[Fluffy] Lookup failed:",
+          fluffyResult.reason
+        );
+
+
+        updatedGame = {
+          ...updatedGame,
+
+          fluffyLoaded:
+            true,
+
+          fluffyLoading:
+            false,
+
+          fluffyError:
+            String(
+              fluffyResult.reason
             ),
         };
       }
@@ -854,32 +1720,23 @@ export default function App() {
 
 
     setGames(
-      (currentGames) =>
-        currentGames.map(
-          (currentGame) =>
-            currentGame.id ===
+      (current) =>
+        current.map(
+          (item) =>
+            item.id ===
             updatedGame.id
               ? updatedGame
-              : currentGame
+              : item
         )
     );
 
 
     setSelectedGame(
-      (currentSelected) => {
-        if (!currentSelected) {
-          return currentSelected;
-        }
-
-        if (
-          currentSelected.id !==
-          updatedGame.id
-        ) {
-          return currentSelected;
-        }
-
-        return updatedGame;
-      }
+      (current) =>
+        current?.id ===
+        updatedGame.id
+          ? updatedGame
+          : current
     );
   }
 
@@ -893,6 +1750,7 @@ export default function App() {
               game.id
             )
         ).length,
+
       [
         games,
         hiddenGameIds,
@@ -901,8 +1759,8 @@ export default function App() {
 
 
   const visibleInstalledCount =
-    games.length -
-    hiddenInstalledCount;
+    games.length
+      - hiddenInstalledCount;
 
 
   const filteredGames =
@@ -913,42 +1771,46 @@ export default function App() {
             .trim()
             .toLowerCase();
 
+
         return games.filter(
           (game) => {
-            const isHidden =
+            const hidden =
               hiddenGameIds.includes(
                 game.id
               );
 
-            if (showHiddenGames) {
-              if (!isHidden) {
-                return false;
-              }
-            } else if (isHidden) {
+
+            if (
+              showHiddenGames
+                ? !hidden
+                : hidden
+            ) {
               return false;
             }
+
 
             if (!query) {
               return true;
             }
 
-            const name =
-              game.name
-                ?.toLowerCase() ??
-              "";
-
-            const store =
-              game.store
-                ?.toLowerCase() ??
-              "";
 
             return (
-              name.includes(query) ||
-              store.includes(query)
+              game.name
+                ?.toLowerCase()
+                .includes(
+                  query
+                )
+              ||
+              game.store
+                ?.toLowerCase()
+                .includes(
+                  query
+                )
             );
           }
         );
       },
+
       [
         games,
         search,
@@ -959,7 +1821,15 @@ export default function App() {
 
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#0b0f17] text-white">
+    <div
+      className="
+        flex
+        h-screen
+        overflow-hidden
+        bg-[#0b0f17]
+        text-white
+      "
+    >
       <Sidebar
         games={
           filteredGames
@@ -1026,6 +1896,7 @@ export default function App() {
         }
       />
 
+
       <GameDetails
         game={
           selectedGame
@@ -1067,15 +1938,20 @@ export default function App() {
             "
           >
             Game Manager{" "}
+
             <span
               className="
                 font-semibold
                 text-cyan-300
               "
             >
-              {availableUpdate.version}
-            </span>{" "}
-            is available.
+              {
+                availableUpdate
+                  .version
+              }
+            </span>
+
+            {" "}is available.
           </div>
 
 
@@ -1091,32 +1967,12 @@ export default function App() {
                 text-white/45
               "
             >
-              {availableUpdate.body}
+              {
+                availableUpdate
+                  .body
+              }
             </div>
           ) : null}
-        </div>
-      ) : null}
-
-
-      {updateCheckError ? (
-        <div
-          className="
-            fixed
-            bottom-5
-            right-5
-            z-40
-            hidden
-          "
-        >
-          {/*
-            Intentionally hidden for now.
-
-            The error is logged to the console,
-            but we don't want a failed network
-            update check to interrupt normal use
-            of Game Manager.
-          */}
-          {updateCheckError}
         </div>
       ) : null}
     </div>

@@ -1,8 +1,12 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-const PCGW_BASE_URL: &str = "https://www.pcgamingwiki.com";
-const PCGW_API_URL: &str = "https://www.pcgamingwiki.com/w/api.php";
+const PCGW_BASE_URL: &str =
+    "https://www.pcgamingwiki.com";
+
+const PCGW_API_URL: &str =
+    "https://www.pcgamingwiki.com/w/api.php";
+
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -11,29 +15,104 @@ pub struct PcgwGameData {
 
     pub page_name: Option<String>,
     pub page_url: Option<String>,
+    pub cover_image_url: Option<String>,
+
+    // ============================================================
+    // OVERVIEW
+    // ============================================================
 
     pub developer: Option<String>,
     pub publisher: Option<String>,
     pub engine: Option<String>,
     pub release_date: Option<String>,
 
-    pub hdr: Option<String>,
-    pub ultrawide: Option<String>,
-    pub controller_support: Option<String>,
-    pub ray_tracing: Option<String>,
-    pub frame_generation: Option<String>,
-    pub upscaling: Option<String>,
+    // ============================================================
+    // ESSENTIAL IMPROVEMENTS
+    // ============================================================
 
-    // Technical Information
+    pub essential_improvements_html: Option<String>,
+
+    // ============================================================
+    // VIDEO
+    // ============================================================
+
+    pub wsgf_link: Option<String>,
+
+    pub widescreen_wsgf_award: Option<String>,
+    pub multimonitor_wsgf_award: Option<String>,
+    pub ultrawidescreen_wsgf_award: Option<String>,
+    pub four_k_ultra_hd_wsgf_award: Option<String>,
+
+    pub widescreen_resolution: Option<String>,
+    pub widescreen_resolution_notes: Option<String>,
+
+    pub multimonitor: Option<String>,
+    pub multimonitor_notes: Option<String>,
+
+    pub ultrawidescreen: Option<String>,
+    pub ultrawidescreen_notes: Option<String>,
+
+    pub four_k_ultra_hd: Option<String>,
+    pub four_k_ultra_hd_notes: Option<String>,
+
+    pub fov: Option<String>,
+    pub fov_notes: Option<String>,
+
+    pub windowed: Option<String>,
+    pub windowed_notes: Option<String>,
+
+    pub borderless_windowed: Option<String>,
+    pub borderless_windowed_notes: Option<String>,
+
+    pub anisotropic: Option<String>,
+    pub anisotropic_notes: Option<String>,
+
+    pub antialiasing: Option<String>,
+    pub antialiasing_notes: Option<String>,
+
+    pub upscaling: Option<String>,
+    pub upscaling_tech: Option<String>,
+    pub upscaling_notes: Option<String>,
+
+    pub frame_generation: Option<String>,
+    pub frame_generation_tech: Option<String>,
+    pub frame_generation_notes: Option<String>,
+
+    pub vsync: Option<String>,
+    pub vsync_notes: Option<String>,
+
+    pub sixty_fps: Option<String>,
+    pub sixty_fps_notes: Option<String>,
+
+    pub one_twenty_fps: Option<String>,
+    pub one_twenty_fps_notes: Option<String>,
+
+    pub hdr: Option<String>,
+    pub hdr_notes: Option<String>,
+
+    pub ray_tracing: Option<String>,
+    pub ray_tracing_notes: Option<String>,
+
+    pub color_blind: Option<String>,
+    pub color_blind_notes: Option<String>,
+
+    pub controller_support: Option<String>,
+
+    // ============================================================
+    // TECHNICAL INFORMATION
+    // ============================================================
+
     pub graphics_api: Option<String>,
     pub config_location: Option<String>,
     pub save_location: Option<String>,
 
-    // Xbox / XInput
+    // ============================================================
+    // CONTROLLERS
+    // ============================================================
+
     pub xbox_controller_support: Option<String>,
     pub xbox_controller_models: Option<String>,
 
-    // PlayStation
     pub playstation_controller_support: Option<String>,
     pub playstation_controller_models: Option<String>,
     pub playstation_prompts: Option<String>,
@@ -41,12 +120,10 @@ pub struct PcgwGameData {
     pub playstation_motion_sensors: Option<String>,
     pub playstation_light_bar: Option<String>,
 
-    // DualSense
     pub dualsense_adaptive_triggers: Option<String>,
     pub dualsense_adaptive_trigger_modes: Option<String>,
     pub dualsense_haptics: Option<String>,
 
-    // Nintendo
     pub nintendo_controller_support: Option<String>,
     pub nintendo_controller_models: Option<String>,
 
@@ -55,16 +132,34 @@ pub struct PcgwGameData {
     pub raw_wikitext_available: bool,
 }
 
+
+// ================================================================
+// MEDIAWIKI RESPONSE TYPES
+// ================================================================
+
 #[derive(Debug, Deserialize)]
 struct ParseApiResponse {
     parse: Option<ParseResult>,
 }
 
+
 #[derive(Debug, Deserialize)]
 struct ParseResult {
     title: String,
+
     wikitext: WikitextResult,
+
+    #[serde(default)]
+    sections: Vec<SectionResult>,
 }
+
+
+#[derive(Debug, Deserialize)]
+struct SectionResult {
+    index: String,
+    line: String,
+}
+
 
 #[derive(Debug, Deserialize)]
 struct WikitextResult {
@@ -72,24 +167,110 @@ struct WikitextResult {
     content: String,
 }
 
+
+#[derive(Debug, Deserialize)]
+struct ParseTextApiResponse {
+    parse: Option<ParseTextResult>,
+}
+
+
+#[derive(Debug, Deserialize)]
+struct ParseTextResult {
+    text: WikitextResult,
+}
+
+
+// ================================================================
+// PCGW NAME SEARCH RESULT
+// ================================================================
+
+#[derive(Debug)]
+struct PcgwNameSearchResult {
+    exact: Option<String>,
+    fallback: Option<String>,
+}
+
+
+// ================================================================
+// EMPTY RESULT
+// ================================================================
+
 fn empty_result() -> PcgwGameData {
     PcgwGameData {
         found: false,
 
         page_name: None,
         page_url: None,
+        cover_image_url: None,
 
         developer: None,
         publisher: None,
         engine: None,
         release_date: None,
 
-        hdr: None,
-        ultrawide: None,
-        controller_support: None,
-        ray_tracing: None,
-        frame_generation: None,
+        essential_improvements_html: None,
+
+        wsgf_link: None,
+
+        widescreen_wsgf_award: None,
+        multimonitor_wsgf_award: None,
+        ultrawidescreen_wsgf_award: None,
+        four_k_ultra_hd_wsgf_award: None,
+
+        widescreen_resolution: None,
+        widescreen_resolution_notes: None,
+
+        multimonitor: None,
+        multimonitor_notes: None,
+
+        ultrawidescreen: None,
+        ultrawidescreen_notes: None,
+
+        four_k_ultra_hd: None,
+        four_k_ultra_hd_notes: None,
+
+        fov: None,
+        fov_notes: None,
+
+        windowed: None,
+        windowed_notes: None,
+
+        borderless_windowed: None,
+        borderless_windowed_notes: None,
+
+        anisotropic: None,
+        anisotropic_notes: None,
+
+        antialiasing: None,
+        antialiasing_notes: None,
+
         upscaling: None,
+        upscaling_tech: None,
+        upscaling_notes: None,
+
+        frame_generation: None,
+        frame_generation_tech: None,
+        frame_generation_notes: None,
+
+        vsync: None,
+        vsync_notes: None,
+
+        sixty_fps: None,
+        sixty_fps_notes: None,
+
+        one_twenty_fps: None,
+        one_twenty_fps_notes: None,
+
+        hdr: None,
+        hdr_notes: None,
+
+        ray_tracing: None,
+        ray_tracing_notes: None,
+
+        color_blind: None,
+        color_blind_notes: None,
+
+        controller_support: None,
 
         graphics_api: None,
         config_location: None,
@@ -118,7 +299,14 @@ fn empty_result() -> PcgwGameData {
     }
 }
 
-fn normalize_key(value: &str) -> String {
+
+// ================================================================
+// GENERIC WIKITEXT HELPERS
+// ================================================================
+
+fn normalize_key(
+    value: &str,
+) -> String {
     value
         .trim()
         .to_lowercase()
@@ -128,22 +316,34 @@ fn normalize_key(value: &str) -> String {
         .join(" ")
 }
 
-fn strip_html_comments(input: &str) -> String {
-    let mut output = input.to_string();
+
+fn strip_html_comments(
+    input: &str,
+) -> String {
+    let mut output =
+        input.to_string();
 
     loop {
-        let Some(start) = output.find("<!--") else {
+        let Some(start) =
+            output.find("<!--")
+        else {
             break;
         };
 
         let Some(relative_end) =
-            output[start + 4..].find("-->")
+            output[
+                start + 4..
+            ]
+            .find("-->")
         else {
             break;
         };
 
         let end =
-            start + 4 + relative_end + 3;
+            start
+                + 4
+                + relative_end
+                + 3;
 
         output.replace_range(
             start..end,
@@ -154,13 +354,16 @@ fn strip_html_comments(input: &str) -> String {
     output
 }
 
-fn strip_refs(input: &str) -> String {
+
+fn strip_refs(
+    input: &str,
+) -> String {
     let mut output =
         input.to_string();
 
     loop {
         let lower =
-            output.to_lowercase();
+            output.to_ascii_lowercase();
 
         let Some(start) =
             lower.find("<ref")
@@ -192,8 +395,10 @@ fn strip_refs(input: &str) -> String {
             start + open_end + 1;
 
         let lower_after =
-            output[after_open..]
-                .to_lowercase();
+            output[
+                after_open..
+            ]
+            .to_ascii_lowercase();
 
         if let Some(close_relative) =
             lower_after.find("</ref>")
@@ -215,7 +420,10 @@ fn strip_refs(input: &str) -> String {
     output
 }
 
-fn strip_wiki_links(input: &str) -> String {
+
+fn strip_wiki_links(
+    input: &str,
+) -> String {
     let mut result =
         input.to_string();
 
@@ -227,30 +435,36 @@ fn strip_wiki_links(input: &str) -> String {
         };
 
         let Some(relative_end) =
-            result[start + 2..]
-                .find("]]")
+            result[
+                start + 2..
+            ]
+            .find("]]")
         else {
             break;
         };
 
         let end =
-            start + 2 + relative_end;
+            start
+                + 2
+                + relative_end;
 
-        let link_contents =
-            result[start + 2..end]
-                .to_string();
+        let contents =
+            result[
+                start + 2..end
+            ]
+            .to_string();
 
         let replacement =
-            if let Some(pipe_position) =
-                link_contents.rfind('|')
+            if let Some(pipe) =
+                contents.rfind('|')
             {
-                link_contents[
-                    pipe_position + 1..
+                contents[
+                    pipe + 1..
                 ]
                 .trim()
                 .to_string()
             } else {
-                link_contents
+                contents
                     .trim()
                     .to_string()
             };
@@ -264,7 +478,10 @@ fn strip_wiki_links(input: &str) -> String {
     result
 }
 
-fn strip_external_links(input: &str) -> String {
+
+fn strip_external_links(
+    input: &str,
+) -> String {
     let mut result =
         input.to_string();
 
@@ -273,8 +490,10 @@ fn strip_external_links(input: &str) -> String {
 
     while search_from < result.len() {
         let Some(relative_start) =
-            result[search_from..]
-                .find('[')
+            result[
+                search_from..
+            ]
+            .find('[')
         else {
             break;
         };
@@ -283,8 +502,10 @@ fn strip_external_links(input: &str) -> String {
             search_from
                 + relative_start;
 
-        if result[start..]
-            .starts_with("[[")
+        if result[
+            start..
+        ]
+        .starts_with("[[")
         {
             search_from =
                 start + 2;
@@ -293,7 +514,10 @@ fn strip_external_links(input: &str) -> String {
         }
 
         let Some(relative_end) =
-            result[start..].find(']')
+            result[
+                start..
+            ]
+            .find(']')
         else {
             break;
         };
@@ -302,11 +526,16 @@ fn strip_external_links(input: &str) -> String {
             start + relative_end;
 
         let contents =
-            result[start + 1..end]
-                .to_string();
+            result[
+                start + 1..end
+            ]
+            .to_string();
 
-        if contents.starts_with("http://")
-            || contents.starts_with("https://")
+        if contents.starts_with(
+            "http://"
+        ) || contents.starts_with(
+            "https://"
+        )
         {
             let replacement =
                 if let Some(space) =
@@ -318,7 +547,7 @@ fn strip_external_links(input: &str) -> String {
                     .trim()
                     .to_string()
                 } else {
-                    String::new()
+                    contents
                 };
 
             result.replace_range(
@@ -338,6 +567,7 @@ fn strip_external_links(input: &str) -> String {
     result
 }
 
+
 fn simplify_pcgw_row_templates(
     input: &str,
 ) -> String {
@@ -346,7 +576,8 @@ fn simplify_pcgw_row_templates(
 
     loop {
         let lower =
-            output.to_lowercase();
+            output
+                .to_ascii_lowercase();
 
         let Some(start) =
             lower.find(
@@ -357,41 +588,58 @@ fn simplify_pcgw_row_templates(
         };
 
         let Some(relative_end) =
-            output[start..]
-                .find("}}")
+            output[
+                start..
+            ]
+            .find("}}")
         else {
             break;
         };
 
         let end =
-            start + relative_end + 2;
+            start
+                + relative_end
+                + 2;
 
         let template =
-            output[start..end]
-                .to_string();
+            output[
+                start..end
+            ]
+            .to_string();
 
         let inner =
             template
-                .trim_start_matches("{{")
-                .trim_end_matches("}}");
+                .trim_start_matches(
+                    "{{"
+                )
+                .trim_end_matches(
+                    "}}"
+                );
 
-        let parts: Vec<&str> =
+        let parts:
+            Vec<&str> =
             inner
                 .split('|')
                 .collect();
 
         let replacement =
             if parts.len() >= 2 {
-                parts[1..]
-                    .iter()
-                    .map(|part| {
+                parts[
+                    1..
+                ]
+                .iter()
+                .map(
+                    |part| {
                         part.trim()
-                    })
-                    .filter(|part| {
+                    }
+                )
+                .filter(
+                    |part| {
                         !part.is_empty()
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                    }
+                )
+                .collect::<Vec<_>>()
+                .join(", ")
             } else {
                 String::new()
             };
@@ -404,6 +652,7 @@ fn simplify_pcgw_row_templates(
 
     output
 }
+
 
 fn simplify_templates(
     input: &str,
@@ -428,38 +677,39 @@ fn simplify_templates(
             );
     }
 
-    output =
-        output.replace(
+    output = output
+        .replace(
             "<br />",
             ", ",
-        );
-
-    output =
-        output.replace(
+        )
+        .replace(
             "<br/>",
             ", ",
-        );
-
-    output =
-        output.replace(
+        )
+        .replace(
             "<br>",
             ", ",
         );
 
-    let lines: Vec<String> =
+    let lines:
+        Vec<String> =
         output
             .lines()
-            .map(|line| {
-                line
-                    .trim()
-                    .trim_start_matches('*')
-                    .trim_start_matches('#')
-                    .trim()
-                    .to_string()
-            })
-            .filter(|line| {
-                !line.is_empty()
-            })
+            .map(
+                |line| {
+                    line
+                        .trim()
+                        .trim_start_matches('*')
+                        .trim_start_matches('#')
+                        .trim()
+                        .to_string()
+                }
+            )
+            .filter(
+                |line| {
+                    !line.is_empty()
+                }
+            )
             .collect();
 
     output =
@@ -482,6 +732,7 @@ fn simplify_templates(
 
     output
 }
+
 
 fn clean_value(
     value: &str,
@@ -517,11 +768,26 @@ fn clean_value(
         );
 
     cleaned = cleaned
-        .replace("'''", "")
-        .replace("''", "")
-        .replace("&nbsp;", " ")
-        .replace("&ndash;", "–")
-        .replace("&mdash;", "—");
+        .replace(
+            "'''",
+            "",
+        )
+        .replace(
+            "''",
+            "",
+        )
+        .replace(
+            "&nbsp;",
+            " ",
+        )
+        .replace(
+            "&ndash;",
+            "–",
+        )
+        .replace(
+            "&mdash;",
+            "—",
+        );
 
     let cleaned =
         cleaned
@@ -539,19 +805,252 @@ fn clean_value(
     }
 }
 
+
+// ================================================================
+// FEATURE CLEANUP
+// ================================================================
+
+/*
+ * Remove any leftover balanced {{ ... }} templates.
+ *
+ * This is intentionally used for display notes only.
+ */
+fn strip_remaining_templates(
+    input: &str,
+) -> String {
+    let mut output =
+        input.to_string();
+
+    loop {
+        let Some(start) =
+            output.find("{{")
+        else {
+            break;
+        };
+
+        let Some((_, end)) =
+            find_complete_template(
+                &output,
+                start,
+            )
+        else {
+            /*
+             * Incomplete template. Drop everything from the
+             * opening braces rather than exposing raw markup.
+             */
+            output.truncate(
+                start
+            );
+
+            break;
+        };
+
+        output.replace_range(
+            start..end,
+            "",
+        );
+    }
+
+    output
+}
+
+
+/*
+ * Feature status parameters should be very small values such as:
+ *
+ * true
+ * false
+ * limited
+ * hackable
+ * always on
+ *
+ * If unrelated wiki content gets attached to the parameter, only
+ * keep the first sensible status-sized portion.
+ */
+fn clean_feature_status(
+    value: Option<String>,
+) -> Option<String> {
+    let value =
+        value?;
+
+    let value =
+        strip_remaining_templates(
+            &value
+        );
+
+    /*
+     * Stop as soon as obvious table or heading markup appears.
+     */
+    let mut cutoff =
+        value.len();
+
+    for marker in [
+        "{|",
+        "|}",
+        "==",
+        "\n|",
+        "\n!",
+    ] {
+        if let Some(position) =
+            value.find(marker)
+        {
+            cutoff =
+                cutoff.min(
+                    position
+                );
+        }
+    }
+
+    let first_part =
+        value[
+            ..cutoff
+        ]
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim();
+
+    let cleaned =
+        first_part
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim_matches(',')
+            .trim()
+            .to_string();
+
+    if cleaned.is_empty() {
+        None
+    } else if cleaned.len() > 100 {
+        /*
+         * A support status should never be a long paragraph.
+         * Treat obviously malformed values as unknown.
+         */
+        None
+    } else {
+        Some(cleaned)
+    }
+}
+
+
+/*
+ * Notes can be descriptive, but should not contain raw templates,
+ * full wiki tables, or giant settings dumps.
+ */
+fn clean_feature_note(
+    value: Option<String>,
+) -> Option<String> {
+    let value =
+        value?;
+
+    let mut cleaned =
+        strip_remaining_templates(
+            &value
+        );
+
+    /*
+     * Drop everything starting with a MediaWiki table.
+     */
+    if let Some(table_start) =
+        cleaned.find("{|")
+    {
+        cleaned.truncate(
+            table_start
+        );
+    }
+
+    /*
+     * Remove common leftover wiki table delimiters.
+     */
+    cleaned = cleaned
+        .replace(
+            "|}",
+            " "
+        )
+        .replace(
+            "|-",
+            " "
+        )
+        .replace(
+            "!!",
+            " "
+        )
+        .replace(
+            "||",
+            " "
+        );
+
+    cleaned =
+        cleaned
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim_matches(',')
+            .trim()
+            .to_string();
+
+    /*
+     * Long notes are useful, but a feature card should not become
+     * several screens tall. Keep a readable summary.
+     */
+    const MAX_NOTE_CHARS:
+        usize = 420;
+
+    if cleaned.len() > MAX_NOTE_CHARS {
+        let mut truncate_at =
+            MAX_NOTE_CHARS;
+
+        while truncate_at > 0
+            && !cleaned
+                .is_char_boundary(
+                    truncate_at
+                )
+        {
+            truncate_at -= 1;
+        }
+
+        cleaned.truncate(
+            truncate_at
+        );
+
+        if let Some(last_space) =
+            cleaned.rfind(' ')
+        {
+            cleaned.truncate(
+                last_space
+            );
+        }
+
+        cleaned.push('…');
+    }
+
+    if cleaned.is_empty() {
+        None
+    } else {
+        Some(cleaned)
+    }
+}
+
+
 fn extract_parameter(
     wikitext: &str,
     parameter_names: &[&str],
 ) -> Option<String> {
-    let normalized_names: Vec<String> =
+    let normalized_names:
+        Vec<String> =
         parameter_names
             .iter()
-            .map(|name| {
-                normalize_key(name)
-            })
+            .map(
+                |name| {
+                    normalize_key(
+                        name
+                    )
+                }
+            )
             .collect();
 
-    let lines: Vec<&str> =
+    let lines:
+        Vec<&str> =
         wikitext
             .lines()
             .collect();
@@ -560,20 +1059,24 @@ fn extract_parameter(
         0;
 
     while index < lines.len() {
-        let line =
-            lines[index];
-
         let trimmed =
-            line.trim_start();
+            lines[
+                index
+            ]
+            .trim_start();
 
-        if !trimmed.starts_with('|') {
+        if !trimmed
+            .starts_with('|')
+        {
             index += 1;
             continue;
         }
 
         let without_pipe =
-            trimmed[1..]
-                .trim_start();
+            trimmed[
+                1..
+            ]
+            .trim_start();
 
         let Some(equals_position) =
             without_pipe.find('=')
@@ -591,9 +1094,11 @@ fn extract_parameter(
 
         if !normalized_names
             .iter()
-            .any(|name| {
-                name == &key
-            })
+            .any(
+                |name| {
+                    name == &key
+                }
+            )
         {
             index += 1;
             continue;
@@ -609,21 +1114,30 @@ fn extract_parameter(
         let mut next_index =
             index + 1;
 
-        while next_index < lines.len() {
+        while next_index <
+            lines.len()
+        {
             let next_line =
-                lines[next_index];
+                lines[
+                    next_index
+                ];
 
             let next_trimmed =
-                next_line.trim_start();
+                next_line
+                    .trim_start();
 
             if next_trimmed
                 .starts_with('|')
             {
                 let next_without_pipe =
-                    next_trimmed[1..]
-                        .trim_start();
+                    next_trimmed[
+                        1..
+                    ]
+                    .trim_start();
 
-                if let Some(next_equals) =
+                if let Some(
+                    next_equals
+                ) =
                     next_without_pipe
                         .find('=')
                 {
@@ -657,7 +1171,9 @@ fn extract_parameter(
                 &value
             )
         {
-            return Some(cleaned);
+            return Some(
+                cleaned
+            );
         }
 
         index =
@@ -667,11 +1183,10 @@ fn extract_parameter(
     None
 }
 
-/*
- * ============================================================
- * GRAPHICS API
- * ============================================================
- */
+
+// ================================================================
+// GRAPHICS API
+// ================================================================
 
 fn meaningful_api_value(
     value: Option<String>,
@@ -696,6 +1211,7 @@ fn meaningful_api_value(
     Some(value)
 }
 
+
 fn graphics_api_entry(
     label: &str,
     value: Option<String>,
@@ -706,7 +1222,9 @@ fn graphics_api_entry(
         )?;
 
     if value
-        .eq_ignore_ascii_case("true")
+        .eq_ignore_ascii_case(
+            "true"
+        )
     {
         return Some(
             label.to_string()
@@ -722,52 +1240,47 @@ fn graphics_api_entry(
     )
 }
 
+
 fn extract_graphics_api(
     wikitext: &str,
 ) -> Option<String> {
-    let mut entries: Vec<String> =
+    let mut entries =
         Vec::new();
 
-    if let Some(value) =
-        graphics_api_entry(
+    for (
+        label,
+        field,
+    ) in [
+        (
             "Direct3D",
-            extract_parameter(
-                wikitext,
-                &[
-                    "direct3d versions",
-                ],
-            ),
-        )
-    {
-        entries.push(value);
-    }
-
-    if let Some(value) =
-        graphics_api_entry(
+            "direct3d versions",
+        ),
+        (
             "Vulkan",
-            extract_parameter(
-                wikitext,
-                &[
-                    "vulkan versions",
-                ],
-            ),
-        )
-    {
-        entries.push(value);
-    }
-
-    if let Some(value) =
-        graphics_api_entry(
+            "vulkan versions",
+        ),
+        (
             "OpenGL",
-            extract_parameter(
-                wikitext,
-                &[
-                    "opengl versions",
-                ],
-            ),
-        )
-    {
-        entries.push(value);
+            "opengl versions",
+        ),
+        (
+            "Glide",
+            "glide versions",
+        ),
+    ] {
+        if let Some(value) =
+            graphics_api_entry(
+                label,
+                extract_parameter(
+                    wikitext,
+                    &[field],
+                ),
+            )
+        {
+            entries.push(
+                value
+            );
+        }
     }
 
     if let Some(value) =
@@ -776,40 +1289,14 @@ fn extract_graphics_api(
             extract_parameter(
                 wikitext,
                 &[
-                    "metal support",
+                    "metal support"
                 ],
             ),
         )
     {
-        entries.push(value);
-    }
-
-    if let Some(value) =
-        graphics_api_entry(
-            "Mantle",
-            extract_parameter(
-                wikitext,
-                &[
-                    "mantle support",
-                ],
-            ),
-        )
-    {
-        entries.push(value);
-    }
-
-    if let Some(value) =
-        graphics_api_entry(
-            "Glide",
-            extract_parameter(
-                wikitext,
-                &[
-                    "glide versions",
-                ],
-            ),
-        )
-    {
-        entries.push(value);
+        entries.push(
+            value
+        );
     }
 
     if entries.is_empty() {
@@ -821,11 +1308,10 @@ fn extract_graphics_api(
     }
 }
 
-/*
- * ============================================================
- * GAME DATA / CONFIG / SAVE PATHS
- * ============================================================
- */
+
+// ================================================================
+// GAME DATA PATH PARSING
+// ================================================================
 
 fn find_complete_template(
     input: &str,
@@ -837,12 +1323,16 @@ fn find_complete_template(
     let mut index =
         start;
 
-    let mut depth: i32 =
-        0;
+    let mut depth:
+        i32 = 0;
 
-    while index + 1 < bytes.len() {
+    while index + 1 <
+        bytes.len()
+    {
         if bytes[index] == b'{'
-            && bytes[index + 1] == b'{'
+            && bytes[
+                index + 1
+            ] == b'{'
         {
             depth += 1;
             index += 2;
@@ -850,17 +1340,23 @@ fn find_complete_template(
         }
 
         if bytes[index] == b'}'
-            && bytes[index + 1] == b'}'
+            && bytes[
+                index + 1
+            ] == b'}'
         {
             depth -= 1;
             index += 2;
 
             if depth == 0 {
-                return Some((
-                    input[start..index]
+                return Some(
+                    (
+                        input[
+                            start..index
+                        ]
                         .to_string(),
-                    index,
-                ));
+                        index,
+                    )
+                );
             }
 
             continue;
@@ -872,17 +1368,20 @@ fn find_complete_template(
     None
 }
 
+
 fn find_templates(
     wikitext: &str,
     template_name: &str,
 ) -> Vec<String> {
     let lower =
-        wikitext.to_lowercase();
+        wikitext
+            .to_ascii_lowercase();
 
     let marker =
         format!(
             "{{{{{}|",
-            template_name.to_lowercase()
+            template_name
+                .to_ascii_lowercase()
         );
 
     let mut templates =
@@ -891,10 +1390,16 @@ fn find_templates(
     let mut search_from =
         0;
 
-    while search_from < lower.len() {
+    while search_from <
+        lower.len()
+    {
         let Some(relative_start) =
-            lower[search_from..]
-                .find(&marker)
+            lower[
+                search_from..
+            ]
+            .find(
+                &marker
+            )
         else {
             break;
         };
@@ -903,13 +1408,17 @@ fn find_templates(
             search_from
                 + relative_start;
 
-        if let Some((
-            template,
-            end,
-        )) = find_complete_template(
-            wikitext,
-            start,
-        ) {
+        if let Some(
+            (
+                template,
+                end,
+            )
+        ) =
+            find_complete_template(
+                wikitext,
+                start,
+            )
+        {
             templates.push(
                 template
             );
@@ -924,18 +1433,19 @@ fn find_templates(
     templates
 }
 
+
 fn split_template_arguments(
     template: &str,
 ) -> Vec<String> {
-    if template.len() < 4 {
-        return Vec::new();
-    }
-
     let inner =
         template
             .trim()
-            .trim_start_matches("{{")
-            .trim_end_matches("}}");
+            .trim_start_matches(
+                "{{"
+            )
+            .trim_end_matches(
+                "}}"
+            );
 
     let bytes =
         inner.as_bytes();
@@ -949,25 +1459,33 @@ fn split_template_arguments(
     let mut index =
         0;
 
-    let mut template_depth: i32 =
-        0;
+    let mut template_depth:
+        i32 = 0;
 
-    let mut link_depth: i32 =
-        0;
+    let mut link_depth:
+        i32 = 0;
 
-    while index < bytes.len() {
-        if index + 1 < bytes.len()
+    while index <
+        bytes.len()
+    {
+        if index + 1 <
+            bytes.len()
             && bytes[index] == b'{'
-            && bytes[index + 1] == b'{'
+            && bytes[
+                index + 1
+            ] == b'{'
         {
             template_depth += 1;
             index += 2;
             continue;
         }
 
-        if index + 1 < bytes.len()
+        if index + 1 <
+            bytes.len()
             && bytes[index] == b'}'
-            && bytes[index + 1] == b'}'
+            && bytes[
+                index + 1
+            ] == b'}'
         {
             if template_depth > 0 {
                 template_depth -= 1;
@@ -977,18 +1495,24 @@ fn split_template_arguments(
             continue;
         }
 
-        if index + 1 < bytes.len()
+        if index + 1 <
+            bytes.len()
             && bytes[index] == b'['
-            && bytes[index + 1] == b'['
+            && bytes[
+                index + 1
+            ] == b'['
         {
             link_depth += 1;
             index += 2;
             continue;
         }
 
-        if index + 1 < bytes.len()
+        if index + 1 <
+            bytes.len()
             && bytes[index] == b']'
-            && bytes[index + 1] == b']'
+            && bytes[
+                index + 1
+            ] == b']'
         {
             if link_depth > 0 {
                 link_depth -= 1;
@@ -1003,9 +1527,11 @@ fn split_template_arguments(
             && link_depth == 0
         {
             parts.push(
-                inner[start..index]
-                    .trim()
-                    .to_string()
+                inner[
+                    start..index
+                ]
+                .trim()
+                .to_string()
             );
 
             start =
@@ -1016,13 +1542,16 @@ fn split_template_arguments(
     }
 
     parts.push(
-        inner[start..]
-            .trim()
-            .to_string()
+        inner[
+            start..
+        ]
+        .trim()
+        .to_string()
     );
 
     parts
 }
+
 
 fn simplify_path_templates(
     input: &str,
@@ -1032,17 +1561,22 @@ fn simplify_path_templates(
 
     loop {
         let lower =
-            output.to_lowercase();
+            output
+                .to_ascii_lowercase();
 
         let Some(start) =
-            lower.find("{{p|")
+            lower.find(
+                "{{p|"
+            )
         else {
             break;
         };
 
         let Some(relative_end) =
-            output[start..]
-                .find("}}")
+            output[
+                start..
+            ]
+            .find("}}")
         else {
             break;
         };
@@ -1053,15 +1587,22 @@ fn simplify_path_templates(
                 + 2;
 
         let template =
-            output[start..end]
-                .to_string();
+            output[
+                start..end
+            ]
+            .to_string();
 
         let inner =
             template
-                .trim_start_matches("{{")
-                .trim_end_matches("}}");
+                .trim_start_matches(
+                    "{{"
+                )
+                .trim_end_matches(
+                    "}}"
+                );
 
-        let parts: Vec<&str> =
+        let parts:
+            Vec<&str> =
             inner
                 .split('|')
                 .collect();
@@ -1069,45 +1610,57 @@ fn simplify_path_templates(
         let key =
             parts
                 .get(1)
-                .map(|value| {
-                    value
-                        .trim()
-                        .to_lowercase()
-                })
+                .map(
+                    |value| {
+                        value
+                            .trim()
+                            .to_lowercase()
+                    }
+                )
                 .unwrap_or_default();
 
         let replacement =
             match key.as_str() {
                 "userprofile" =>
-                    "%USERPROFILE%".to_string(),
+                    "%USERPROFILE%"
+                        .to_string(),
 
                 "appdata" =>
-                    "%APPDATA%".to_string(),
+                    "%APPDATA%"
+                        .to_string(),
 
                 "localappdata" =>
-                    "%LOCALAPPDATA%".to_string(),
+                    "%LOCALAPPDATA%"
+                        .to_string(),
 
                 "programdata" =>
-                    "%PROGRAMDATA%".to_string(),
+                    "%PROGRAMDATA%"
+                        .to_string(),
 
                 "documents" =>
-                    "%USERPROFILE%\\Documents".to_string(),
+                    "%USERPROFILE%\\Documents"
+                        .to_string(),
 
-                "savedgames" |
-                "saved games" =>
-                    "%USERPROFILE%\\Saved Games".to_string(),
+                "savedgames"
+                | "saved games" =>
+                    "%USERPROFILE%\\Saved Games"
+                        .to_string(),
 
                 "game" =>
-                    "<game>".to_string(),
+                    "<game>"
+                        .to_string(),
 
                 "steam" =>
-                    "<Steam>".to_string(),
+                    "<Steam>"
+                        .to_string(),
 
                 "uid" =>
-                    "<user-id>".to_string(),
+                    "<user-id>"
+                        .to_string(),
 
                 "username" =>
-                    "<username>".to_string(),
+                    "<username>"
+                        .to_string(),
 
                 "" =>
                     String::new(),
@@ -1127,6 +1680,7 @@ fn simplify_path_templates(
 
     output
 }
+
 
 fn clean_game_data_path(
     path: &str,
@@ -1157,9 +1711,18 @@ fn clean_game_data_path(
         );
 
     cleaned = cleaned
-        .replace("'''", "")
-        .replace("''", "")
-        .replace("&nbsp;", " ");
+        .replace(
+            "'''",
+            "",
+        )
+        .replace(
+            "''",
+            "",
+        )
+        .replace(
+            "&nbsp;",
+            " ",
+        );
 
     let cleaned =
         cleaned
@@ -1167,15 +1730,17 @@ fn clean_game_data_path(
             .to_string();
 
     if cleaned.is_empty()
-        || cleaned.eq_ignore_ascii_case(
-            "unknown"
-        )
+        || cleaned
+            .eq_ignore_ascii_case(
+                "unknown"
+            )
     {
         None
     } else {
         Some(cleaned)
     }
 }
+
 
 fn extract_game_data_location(
     wikitext: &str,
@@ -1199,28 +1764,23 @@ fn extract_game_data_location(
                 &template
             );
 
-        /*
-         * parts:
-         *
-         * 0 = Game data/config
-         * 1 = Windows
-         * 2 = first path
-         * 3 = optional second path
-         * ...
-         */
         if parts.len() < 3 {
             continue;
         }
 
         let platform =
-            parts[1]
-                .trim();
+            parts[
+                1
+            ]
+            .trim();
 
         let mut paths =
             Vec::new();
 
         for raw_path in
-            parts.iter().skip(2)
+            parts
+                .iter()
+                .skip(2)
         {
             if let Some(path) =
                 clean_game_data_path(
@@ -1229,8 +1789,11 @@ fn extract_game_data_location(
             {
                 if !paths.contains(
                     &path
-                ) {
-                    paths.push(path);
+                )
+                {
+                    paths.push(
+                        path
+                    );
                 }
             }
         }
@@ -1247,8 +1810,9 @@ fn extract_game_data_location(
             windows_paths.extend(
                 paths
             );
-        } else if fallback_paths
-            .is_empty()
+        } else if
+            fallback_paths
+                .is_empty()
         {
             fallback_paths =
                 paths;
@@ -1274,15 +1838,19 @@ fn extract_game_data_location(
     }
 }
 
+
+// ================================================================
+// PAGE URL HELPERS
+// ================================================================
+
 fn make_page_url(
     page_name: &str,
 ) -> String {
     let page =
-        page_name
-            .replace(
-                ' ',
-                "_",
-            );
+        page_name.replace(
+            ' ',
+            "_",
+        );
 
     format!(
         "{}/wiki/{}",
@@ -1293,6 +1861,7 @@ fn make_page_url(
     )
 }
 
+
 fn page_name_from_url(
     url: &str,
 ) -> Option<String> {
@@ -1300,11 +1869,14 @@ fn page_name_from_url(
         "/wiki/";
 
     let position =
-        url.find(marker)?;
+        url.find(
+            marker
+        )?;
 
     let encoded_title =
         &url[
-            position + marker.len()..
+            position
+                + marker.len()..
         ];
 
     if encoded_title
@@ -1327,6 +1899,90 @@ fn page_name_from_url(
     )
 }
 
+
+// ================================================================
+// STOREFRONT NAME CLEANUP
+// ================================================================
+
+fn clean_storefront_game_name(
+    name: &str,
+) -> String {
+    let mut cleaned =
+        String::with_capacity(
+            name.len()
+        );
+
+    for character in
+        name.chars()
+    {
+        match character {
+            '™'
+            | '®'
+            | '©'
+            | '℠' => {}
+
+            '\u{00A0}' => {
+                cleaned.push(
+                    ' '
+                );
+            }
+
+            _ => {
+                cleaned.push(
+                    character
+                );
+            }
+        }
+    }
+
+    cleaned
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+
+fn pcgw_search_candidates(
+    name: &str,
+) -> Vec<String> {
+    let original =
+        name
+            .trim()
+            .to_string();
+
+    let cleaned =
+        clean_storefront_game_name(
+            name
+        );
+
+    let mut candidates =
+        Vec::new();
+
+    if !original.is_empty() {
+        candidates.push(
+            original.clone()
+        );
+    }
+
+    if !cleaned.is_empty()
+        && !cleaned
+            .eq_ignore_ascii_case(
+                &original
+            )
+    {
+        candidates.push(
+            cleaned
+        );
+    }
+
+    candidates
+}
+
+
+// ================================================================
+// EXACT STOREFRONT LOOKUPS
+// ================================================================
+
 async fn lookup_by_steam_id(
     client: &Client,
     app_id: &str,
@@ -1340,51 +1996,40 @@ async fn lookup_by_steam_id(
             )
         );
 
-    println!(
-        "[PCGW] Steam AppID lookup: {}",
-        app_id
-    );
-
     let response =
         client
-            .get(&url)
+            .get(
+                &url
+            )
             .send()
             .await
-            .map_err(|error| {
-                format!(
-                    "Failed to query PCGamingWiki Steam redirect API: {}",
-                    error
-                )
-            })?;
+            .map_err(
+                |error| {
+                    format!(
+                        "Failed Steam PCGW lookup: {}",
+                        error
+                    )
+                }
+            )?;
 
     if !response
         .status()
         .is_success()
     {
-        println!(
-            "[PCGW] Steam lookup HTTP {}",
-            response.status()
+        return Ok(
+            None
         );
-
-        return Ok(None);
     }
-
-    let final_url =
-        response
-            .url()
-            .to_string();
-
-    println!(
-        "[PCGW] Steam redirect: {}",
-        final_url
-    );
 
     Ok(
         page_name_from_url(
-            &final_url
+            response
+                .url()
+                .as_str()
         )
     )
 }
+
 
 async fn lookup_by_gog_id(
     client: &Client,
@@ -1399,80 +2044,101 @@ async fn lookup_by_gog_id(
             )
         );
 
-    println!(
-        "[PCGW] GOG lookup: {}",
-        gog_id
-    );
-
     let response =
         client
-            .get(&url)
+            .get(
+                &url
+            )
             .send()
             .await
-            .map_err(|error| {
-                format!(
-                    "Failed to query PCGamingWiki GOG redirect API: {}",
-                    error
-                )
-            })?;
+            .map_err(
+                |error| {
+                    format!(
+                        "Failed GOG PCGW lookup: {}",
+                        error
+                    )
+                }
+            )?;
 
     if !response
         .status()
         .is_success()
     {
-        println!(
-            "[PCGW] GOG lookup HTTP {}",
-            response.status()
+        return Ok(
+            None
         );
-
-        return Ok(None);
     }
-
-    let final_url =
-        response
-            .url()
-            .to_string();
-
-    println!(
-        "[PCGW] GOG redirect: {}",
-        final_url
-    );
 
     Ok(
         page_name_from_url(
-            &final_url
+            response
+                .url()
+                .as_str()
         )
     )
 }
 
-async fn lookup_by_name(
+
+// ================================================================
+// NAME LOOKUP
+// ================================================================
+
+async fn search_pcgw_name(
     client: &Client,
     name: &str,
-) -> Result<Option<String>, String> {
+) -> Result<
+    PcgwNameSearchResult,
+    String,
+> {
     println!(
-        "[PCGW] Name search: {}",
+        "[PCGW] Searching PCGamingWiki for: {:?}",
         name
     );
 
     let response =
         client
-            .get(PCGW_API_URL)
-            .query(&[
-                ("action", "opensearch"),
-                ("search", name),
-                ("limit", "10"),
-                ("namespace", "0"),
-                ("redirects", "resolve"),
-                ("format", "json"),
-            ])
+            .get(
+                PCGW_API_URL
+            )
+            .query(
+                &[
+                    (
+                        "action",
+                        "opensearch",
+                    ),
+                    (
+                        "search",
+                        name,
+                    ),
+                    (
+                        "limit",
+                        "10",
+                    ),
+                    (
+                        "namespace",
+                        "0",
+                    ),
+                    (
+                        "redirects",
+                        "resolve",
+                    ),
+                    (
+                        "format",
+                        "json",
+                    ),
+                ]
+            )
             .send()
             .await
-            .map_err(|error| {
-                format!(
-                    "Failed to search PCGamingWiki: {}",
-                    error
-                )
-            })?;
+            .map_err(
+                |error| {
+                    format!(
+                        "Failed PCGW search for {:?}: {}",
+                        name,
+                        error
+                    )
+                }
+            )?;
 
     if !response
         .status()
@@ -1480,101 +2146,230 @@ async fn lookup_by_name(
     {
         return Err(
             format!(
-                "PCGamingWiki search returned HTTP {}",
+                "PCGamingWiki search for {:?} returned HTTP {}",
+                name,
                 response.status()
             )
         );
     }
 
-    let json: serde_json::Value =
+    let json:
+        serde_json::Value =
         response
             .json()
             .await
-            .map_err(|error| {
-                format!(
-                    "Failed to parse PCGamingWiki search response: {}",
-                    error
-                )
-            })?;
+            .map_err(
+                |error| {
+                    format!(
+                        "Invalid PCGW search response for {:?}: {}",
+                        name,
+                        error
+                    )
+                }
+            )?;
 
     let Some(results) =
         json
             .get(1)
-            .and_then(|value| {
-                value.as_array()
-            })
+            .and_then(
+                |value| {
+                    value.as_array()
+                }
+            )
     else {
-        return Ok(None);
+        return Ok(
+            PcgwNameSearchResult {
+                exact:
+                    None,
+
+                fallback:
+                    None,
+            }
+        );
     };
 
-    if results.is_empty() {
-        println!(
-            "[PCGW] No name results"
-        );
-
-        return Ok(None);
-    }
-
-    if let Some(exact_match) =
+    let exact =
         results
             .iter()
-            .filter_map(|value| {
-                value.as_str()
-            })
-            .find(|result| {
-                result
-                    .eq_ignore_ascii_case(
-                        name
-                    )
-            })
+            .filter_map(
+                |value| {
+                    value.as_str()
+                }
+            )
+            .find(
+                |result| {
+                    result
+                        .eq_ignore_ascii_case(
+                            name
+                        )
+                }
+            )
+            .map(
+                |result| {
+                    result.to_string()
+                }
+            );
+
+    let fallback =
+        results
+            .first()
+            .and_then(
+                |value| {
+                    value.as_str()
+                }
+            )
+            .map(
+                |value| {
+                    value.to_string()
+                }
+            );
+
+    Ok(
+        PcgwNameSearchResult {
+            exact,
+            fallback,
+        }
+    )
+}
+
+
+async fn lookup_by_name(
+    client: &Client,
+    name: &str,
+) -> Result<Option<String>, String> {
+    let candidates =
+        pcgw_search_candidates(
+            name
+        );
+
+    println!(
+        "[PCGW] Name lookup candidates: {:?}",
+        candidates
+    );
+
+    let mut first_fallback:
+        Option<String> =
+        None;
+
+    for candidate in
+        &candidates
     {
+        match search_pcgw_name(
+            client,
+            candidate,
+        )
+        .await
+        {
+            Ok(result) => {
+                if let Some(exact) =
+                    result.exact
+                {
+                    println!(
+                        "[PCGW] Exact name match {:?} -> {:?}",
+                        candidate,
+                        exact
+                    );
+
+                    return Ok(
+                        Some(
+                            exact
+                        )
+                    );
+                }
+
+                if first_fallback
+                    .is_none()
+                {
+                    first_fallback =
+                        result.fallback;
+                }
+            }
+
+            Err(error) => {
+                println!(
+                    "[PCGW] Search failed for {:?}: {}",
+                    candidate,
+                    error
+                );
+            }
+        }
+    }
+
+    if let Some(fallback) =
+        first_fallback
+    {
+        println!(
+            "[PCGW] No exact match found. Using fuzzy fallback: {:?}",
+            fallback
+        );
+
         return Ok(
             Some(
-                exact_match
-                    .to_string()
+                fallback
             )
         );
     }
 
     Ok(
-        results
-            .first()
-            .and_then(|value| {
-                value.as_str()
-            })
-            .map(|value| {
-                value.to_string()
-            })
+        None
     )
 }
 
-async fn get_wikitext(
+
+// ================================================================
+// GET WIKITEXT + SECTIONS
+// ================================================================
+
+async fn get_page_data(
     client: &Client,
     page_name: &str,
-) -> Result<Option<(String, String)>, String> {
-    println!(
-        "[PCGW] Fetching wikitext for: {}",
-        page_name
-    );
-
+) -> Result<
+    Option<(
+        String,
+        String,
+        Option<String>,
+    )>,
+    String,
+> {
     let response =
         client
-            .get(PCGW_API_URL)
-            .query(&[
-                ("action", "parse"),
-                ("page", page_name),
-                ("redirects", "1"),
-                ("prop", "wikitext"),
-                ("format", "json"),
-            ])
+            .get(
+                PCGW_API_URL
+            )
+            .query(
+                &[
+                    (
+                        "action",
+                        "parse",
+                    ),
+                    (
+                        "page",
+                        page_name,
+                    ),
+                    (
+                        "redirects",
+                        "1",
+                    ),
+                    (
+                        "prop",
+                        "wikitext|sections",
+                    ),
+                    (
+                        "format",
+                        "json",
+                    ),
+                ]
+            )
             .send()
             .await
-            .map_err(|error| {
-                format!(
-                    "Failed to retrieve PCGamingWiki page: {}",
-                    error
-                )
-            })?;
+            .map_err(
+                |error| {
+                    format!(
+                        "Failed PCGW page request: {}",
+                        error
+                    )
+                }
+            )?;
 
     if !response
         .status()
@@ -1582,46 +2377,410 @@ async fn get_wikitext(
     {
         return Err(
             format!(
-                "PCGamingWiki parse request returned HTTP {}",
+                "PCGamingWiki page request returned HTTP {}",
                 response.status()
             )
         );
     }
 
-    let parsed: ParseApiResponse =
+    let parsed:
+        ParseApiResponse =
         response
             .json()
             .await
-            .map_err(|error| {
-                format!(
-                    "Failed to parse PCGamingWiki page response: {}",
-                    error
-                )
-            })?;
+            .map_err(
+                |error| {
+                    format!(
+                        "Failed PCGW parse response: {}",
+                        error
+                    )
+                }
+            )?;
 
     let Some(parse) =
         parsed.parse
     else {
-        return Ok(None);
+        return Ok(
+            None
+        );
     };
 
+    let essential_section =
+        parse
+            .sections
+            .iter()
+            .find(
+                |section| {
+                    section
+                        .line
+                        .trim()
+                        .eq_ignore_ascii_case(
+                            "Essential improvements"
+                        )
+                }
+            )
+            .map(
+                |section| {
+                    section
+                        .index
+                        .clone()
+                }
+            );
+
     Ok(
-        Some((
-            parse.title,
-            parse.wikitext.content,
-        ))
+        Some(
+            (
+                parse.title,
+                parse.wikitext.content,
+                essential_section,
+            )
+        )
     )
 }
+
+
+// ================================================================
+// ESSENTIAL IMPROVEMENTS HTML
+// ================================================================
+
+async fn get_section_html(
+    client: &Client,
+    page_name: &str,
+    section_index: &str,
+) -> Result<
+    Option<String>,
+    String,
+> {
+    let response =
+        client
+            .get(
+                PCGW_API_URL
+            )
+            .query(
+                &[
+                    (
+                        "action",
+                        "parse",
+                    ),
+                    (
+                        "page",
+                        page_name,
+                    ),
+                    (
+                        "redirects",
+                        "1",
+                    ),
+                    (
+                        "section",
+                        section_index,
+                    ),
+                    (
+                        "prop",
+                        "text",
+                    ),
+                    (
+                        "format",
+                        "json",
+                    ),
+                ]
+            )
+            .send()
+            .await
+            .map_err(
+                |error| {
+                    format!(
+                        "Failed to retrieve Essential improvements: {}",
+                        error
+                    )
+                }
+            )?;
+
+    if !response
+        .status()
+        .is_success()
+    {
+        return Err(
+            format!(
+                "Essential improvements request returned HTTP {}",
+                response.status()
+            )
+        );
+    }
+
+    let parsed:
+        ParseTextApiResponse =
+        response
+            .json()
+            .await
+            .map_err(
+                |error| {
+                    format!(
+                        "Failed to parse Essential improvements response: {}",
+                        error
+                    )
+                }
+            )?;
+
+    let Some(parse) =
+        parsed.parse
+    else {
+        return Ok(
+            None
+        );
+    };
+
+    let html =
+        parse
+            .text
+            .content
+            .trim()
+            .to_string();
+
+    if html.is_empty() {
+        Ok(
+            None
+        )
+    } else {
+        Ok(
+            Some(
+                html
+            )
+        )
+    }
+}
+
+
+// ================================================================
+// COVER IMAGE
+// ================================================================
+
+/*
+ * PCGamingWiki stores the infobox cover as a MediaWiki File title,
+ * not as a direct image URL. Resolve that title through imageinfo.
+ *
+ * MediaWiki's image repository handling also allows this to work
+ * when the file is provided by a shared repository such as Commons.
+ */
+async fn get_cover_image_url(
+    client: &Client,
+    cover_filename: &str,
+) -> Result<Option<String>, String> {
+    let mut filename =
+        cover_filename
+            .trim()
+            .to_string();
+
+    if filename.is_empty()
+        || filename.eq_ignore_ascii_case(
+            "none"
+        )
+        || filename.eq_ignore_ascii_case(
+            "unknown"
+        )
+    {
+        return Ok(
+            None
+        );
+    }
+
+    if filename
+        .to_ascii_lowercase()
+        .starts_with("file:")
+    {
+        filename =
+            filename[
+                "file:".len()..
+            ]
+            .trim()
+            .to_string();
+    }
+
+    if filename.is_empty() {
+        return Ok(
+            None
+        );
+    }
+
+    let file_title =
+        format!(
+            "File:{}",
+            filename
+        );
+
+    println!(
+        "[PCGW] Resolving cover file: {:?}",
+        file_title
+    );
+
+    let response =
+        client
+            .get(
+                PCGW_API_URL
+            )
+            .query(
+                &[
+                    (
+                        "action",
+                        "query",
+                    ),
+                    (
+                        "titles",
+                        file_title.as_str(),
+                    ),
+                    (
+                        "prop",
+                        "imageinfo",
+                    ),
+                    (
+                        "iiprop",
+                        "url",
+                    ),
+                    (
+                        "iiurlwidth",
+                        "600",
+                    ),
+                    (
+                        "format",
+                        "json",
+                    ),
+                ]
+            )
+            .send()
+            .await
+            .map_err(
+                |error| {
+                    format!(
+                        "Failed to retrieve PCGW cover image: {}",
+                        error
+                    )
+                }
+            )?;
+
+    if !response
+        .status()
+        .is_success()
+    {
+        return Err(
+            format!(
+                "PCGW cover image request returned HTTP {}",
+                response.status()
+            )
+        );
+    }
+
+    let json:
+        serde_json::Value =
+        response
+            .json()
+            .await
+            .map_err(
+                |error| {
+                    format!(
+                        "Failed to parse PCGW cover image response: {}",
+                        error
+                    )
+                }
+            )?;
+
+    let Some(pages) =
+        json
+            .get("query")
+            .and_then(
+                |value| {
+                    value.get(
+                        "pages"
+                    )
+                }
+            )
+            .and_then(
+                |value| {
+                    value.as_object()
+                }
+            )
+    else {
+        return Ok(
+            None
+        );
+    };
+
+    for page in
+        pages.values()
+    {
+        let image_info =
+            page
+                .get("imageinfo")
+                .and_then(
+                    |value| {
+                        value.as_array()
+                    }
+                )
+                .and_then(
+                    |values| {
+                        values.first()
+                    }
+                );
+
+        let Some(image_info) =
+            image_info
+        else {
+            continue;
+        };
+
+        /*
+         * Prefer MediaWiki's resized image. It is much smaller than
+         * downloading the original cover and is more than enough for
+         * the Game Manager header.
+         */
+        if let Some(url) =
+            image_info
+                .get("thumburl")
+                .and_then(
+                    |value| {
+                        value.as_str()
+                    }
+                )
+        {
+            return Ok(
+                Some(
+                    url.to_string()
+                )
+            );
+        }
+
+        if let Some(url) =
+            image_info
+                .get("url")
+                .and_then(
+                    |value| {
+                        value.as_str()
+                    }
+                )
+        {
+            return Ok(
+                Some(
+                    url.to_string()
+                )
+            );
+        }
+    }
+
+    Ok(
+        None
+    )
+}
+
+
+// ================================================================
+// PARSE PCGW GAME DATA
+// ================================================================
 
 fn parse_game_data(
     page_name: String,
     wikitext: String,
 ) -> PcgwGameData {
-    /*
-     * ============================================================
-     * OVERVIEW
-     * ============================================================
-     */
+    // ============================================================
+    // OVERVIEW
+    // ============================================================
 
     let developer =
         extract_parameter(
@@ -1645,7 +2804,7 @@ fn parse_game_data(
         extract_parameter(
             &wikitext,
             &[
-                "engine",
+                "engine"
             ],
         );
 
@@ -1659,30 +2818,436 @@ fn parse_game_data(
             ],
         );
 
-    /*
-     * ============================================================
-     * PC FEATURES
-     * ============================================================
-     */
+
+    // ============================================================
+    // WSGF
+    // ============================================================
+
+    let wsgf_link =
+        extract_parameter(
+            &wikitext,
+            &[
+                "wsgf link"
+            ],
+        );
+
+    let widescreen_wsgf_award =
+        extract_parameter(
+            &wikitext,
+            &[
+                "widescreen wsgf award"
+            ],
+        );
+
+    let multimonitor_wsgf_award =
+        extract_parameter(
+            &wikitext,
+            &[
+                "multimonitor wsgf award"
+            ],
+        );
+
+    let ultrawidescreen_wsgf_award =
+        extract_parameter(
+            &wikitext,
+            &[
+                "ultrawidescreen wsgf award"
+            ],
+        );
+
+    let four_k_ultra_hd_wsgf_award =
+        extract_parameter(
+            &wikitext,
+            &[
+                "4k ultra hd wsgf award"
+            ],
+        );
+
+
+    // ============================================================
+    // VIDEO
+    // ============================================================
+
+    let widescreen_resolution =
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "widescreen resolution"
+                ],
+            )
+        );
+
+    let widescreen_resolution_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "widescreen resolution notes"
+                ],
+            )
+        );
+
+
+    let multimonitor =
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "multimonitor"
+                ],
+            )
+        );
+
+    let multimonitor_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "multimonitor notes"
+                ],
+            )
+        );
+
+
+    let ultrawidescreen =
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "ultrawidescreen"
+                ],
+            )
+        );
+
+    let ultrawidescreen_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "ultrawidescreen notes"
+                ],
+            )
+        );
+
+
+    let four_k_ultra_hd =
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "4k ultra hd"
+                ],
+            )
+        );
+
+    let four_k_ultra_hd_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "4k ultra hd notes"
+                ],
+            )
+        );
+
+
+    let fov =
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "fov"
+                ],
+            )
+        );
+
+    let fov_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "fov notes"
+                ],
+            )
+        );
+
+
+    let windowed =
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "windowed"
+                ],
+            )
+        );
+
+    let windowed_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "windowed notes"
+                ],
+            )
+        );
+
+
+    let borderless_windowed =
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "borderless windowed"
+                ],
+            )
+        );
+
+    let borderless_windowed_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "borderless windowed notes"
+                ],
+            )
+        );
+
+
+    let anisotropic =
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "anisotropic"
+                ],
+            )
+        );
+
+    let anisotropic_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "anisotropic notes"
+                ],
+            )
+        );
+
+
+    let antialiasing =
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "antialiasing"
+                ],
+            )
+        );
+
+    let antialiasing_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "antialiasing notes"
+                ],
+            )
+        );
+
+
+    let upscaling =
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "upscaling"
+                ],
+            )
+        );
+
+    let upscaling_tech =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "upscaling tech"
+                ],
+            )
+        );
+
+    let upscaling_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "upscaling notes"
+                ],
+            )
+        );
+
+
+    let frame_generation =
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "framegen"
+                ],
+            )
+        );
+
+    let frame_generation_tech =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "framegen tech"
+                ],
+            )
+        );
+
+    let frame_generation_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "framegen notes"
+                ],
+            )
+        );
+
+
+    let vsync =
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "vsync"
+                ],
+            )
+        );
+
+    let vsync_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "vsync notes"
+                ],
+            )
+        );
+
+
+    let sixty_fps =
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "60 fps"
+                ],
+            )
+        );
+
+    let sixty_fps_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "60 fps notes"
+                ],
+            )
+        );
+
+
+    let one_twenty_fps =
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "120 fps"
+                ],
+            )
+        );
+
+    let one_twenty_fps_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "120 fps notes"
+                ],
+            )
+        );
+
 
     let hdr =
-        extract_parameter(
-            &wikitext,
-            &[
-                "hdr",
-                "hdr output",
-            ],
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "hdr"
+                ],
+            )
         );
 
-    let ultrawide =
-        extract_parameter(
-            &wikitext,
-            &[
-                "ultrawidescreen",
-                "ultrawide",
-                "ultra widescreen",
-            ],
+    let hdr_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "hdr notes"
+                ],
+            )
         );
+
+
+    let ray_tracing =
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "ray tracing"
+                ],
+            )
+        );
+
+    let ray_tracing_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "ray tracing notes"
+                ],
+            )
+        );
+
+
+    let color_blind =
+        clean_feature_status(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "color blind"
+                ],
+            )
+        );
+
+    let color_blind_notes =
+        clean_feature_note(
+            extract_parameter(
+                &wikitext,
+                &[
+                    "color blind notes"
+                ],
+            )
+        );
+
+
+    // ============================================================
+    // GENERAL CONTROLLER
+    // ============================================================
 
     let controller_support =
         extract_parameter(
@@ -1693,40 +3258,10 @@ fn parse_game_data(
             ],
         );
 
-    let ray_tracing =
-        extract_parameter(
-            &wikitext,
-            &[
-                "ray tracing",
-                "raytracing",
-            ],
-        );
 
-    let frame_generation =
-        extract_parameter(
-            &wikitext,
-            &[
-                "framegen",
-                "frame generation",
-                "frame generation support",
-            ],
-        );
-
-    let upscaling =
-        extract_parameter(
-            &wikitext,
-            &[
-                "upscaling",
-                "upscaling support",
-                "temporal upscaling",
-            ],
-        );
-
-    /*
-     * ============================================================
-     * TECHNICAL INFORMATION
-     * ============================================================
-     */
+    // ============================================================
+    // TECHNICAL
+    // ============================================================
 
     let graphics_api =
         extract_graphics_api(
@@ -1745,11 +3280,10 @@ fn parse_game_data(
             "game data/saves",
         );
 
-    /*
-     * ============================================================
-     * CONTROLLERS
-     * ============================================================
-     */
+
+    // ============================================================
+    // XBOX
+    // ============================================================
 
     let xbox_controller_support =
         extract_parameter(
@@ -1770,6 +3304,11 @@ fn parse_game_data(
             ],
         );
 
+
+    // ============================================================
+    // PLAYSTATION
+    // ============================================================
+
     let playstation_controller_support =
         extract_parameter(
             &wikitext,
@@ -1783,7 +3322,7 @@ fn parse_game_data(
         extract_parameter(
             &wikitext,
             &[
-                "playstation controller models",
+                "playstation controller models"
             ],
         );
 
@@ -1809,7 +3348,7 @@ fn parse_game_data(
         extract_parameter(
             &wikitext,
             &[
-                "playstation motion sensors",
+                "playstation motion sensors"
             ],
         );
 
@@ -1817,15 +3356,20 @@ fn parse_game_data(
         extract_parameter(
             &wikitext,
             &[
-                "light bar support",
+                "light bar support"
             ],
         );
+
+
+    // ============================================================
+    // DUALSENSE
+    // ============================================================
 
     let dualsense_adaptive_triggers =
         extract_parameter(
             &wikitext,
             &[
-                "dualsense adaptive trigger support",
+                "dualsense adaptive trigger support"
             ],
         );
 
@@ -1833,7 +3377,7 @@ fn parse_game_data(
         extract_parameter(
             &wikitext,
             &[
-                "dualsense adaptive trigger support modes",
+                "dualsense adaptive trigger support modes"
             ],
         );
 
@@ -1841,9 +3385,14 @@ fn parse_game_data(
         extract_parameter(
             &wikitext,
             &[
-                "dualsense haptics support",
+                "dualsense haptics support"
             ],
         );
+
+
+    // ============================================================
+    // NINTENDO
+    // ============================================================
 
     let nintendo_controller_support =
         extract_parameter(
@@ -1858,7 +3407,7 @@ fn parse_game_data(
         extract_parameter(
             &wikitext,
             &[
-                "nintendo controller models",
+                "nintendo controller models"
             ],
         );
 
@@ -1871,41 +3420,17 @@ fn parse_game_data(
             ],
         );
 
-    /*
-     * ============================================================
-     * DEBUG
-     * ============================================================
-     */
 
-    println!("");
     println!(
-        "[PCGW DEBUG] ===== TECHNICAL INFORMATION ====="
+        "[PCGW VIDEO] Color Blind: {:?}",
+        color_blind
     );
 
     println!(
-        "[PCGW DEBUG] Engine: {:?}",
-        engine
+        "[PCGW VIDEO] Color Blind Notes: {:?}",
+        color_blind_notes
     );
 
-    println!(
-        "[PCGW DEBUG] Graphics API: {:?}",
-        graphics_api
-    );
-
-    println!(
-        "[PCGW DEBUG] Config Location: {:?}",
-        config_location
-    );
-
-    println!(
-        "[PCGW DEBUG] Save Location: {:?}",
-        save_location
-    );
-
-    println!(
-        "[PCGW DEBUG] =================================="
-    );
-    println!("");
 
     PcgwGameData {
         found: true,
@@ -1922,17 +3447,82 @@ fn parse_game_data(
                 )
             ),
 
+        /*
+         * Resolved later by get_pcgw_game_data() after the
+         * infobox cover filename has been extracted.
+         */
+        cover_image_url:
+            None,
+
         developer,
         publisher,
         engine,
         release_date,
 
-        hdr,
-        ultrawide,
-        controller_support,
-        ray_tracing,
-        frame_generation,
+        essential_improvements_html:
+            None,
+
+        wsgf_link,
+
+        widescreen_wsgf_award,
+        multimonitor_wsgf_award,
+        ultrawidescreen_wsgf_award,
+        four_k_ultra_hd_wsgf_award,
+
+        widescreen_resolution,
+        widescreen_resolution_notes,
+
+        multimonitor,
+        multimonitor_notes,
+
+        ultrawidescreen,
+        ultrawidescreen_notes,
+
+        four_k_ultra_hd,
+        four_k_ultra_hd_notes,
+
+        fov,
+        fov_notes,
+
+        windowed,
+        windowed_notes,
+
+        borderless_windowed,
+        borderless_windowed_notes,
+
+        anisotropic,
+        anisotropic_notes,
+
+        antialiasing,
+        antialiasing_notes,
+
         upscaling,
+        upscaling_tech,
+        upscaling_notes,
+
+        frame_generation,
+        frame_generation_tech,
+        frame_generation_notes,
+
+        vsync,
+        vsync_notes,
+
+        sixty_fps,
+        sixty_fps_notes,
+
+        one_twenty_fps,
+        one_twenty_fps_notes,
+
+        hdr,
+        hdr_notes,
+
+        ray_tracing,
+        ray_tracing_notes,
+
+        color_blind,
+        color_blind_notes,
+
+        controller_support,
 
         graphics_api,
         config_location,
@@ -1957,9 +3547,15 @@ fn parse_game_data(
 
         controller_hotplug,
 
-        raw_wikitext_available: true,
+        raw_wikitext_available:
+            true,
     }
 }
+
+
+// ================================================================
+// RESOLVE PCGW PAGE
+// ================================================================
 
 async fn resolve_page_name(
     client: &Client,
@@ -1986,9 +3582,13 @@ async fn resolve_page_name(
                 )
                 .await
                 {
-                    Ok(Some(page_name)) => {
+                    Ok(
+                        Some(page)
+                    ) => {
                         return Ok(
-                            Some(page_name)
+                            Some(
+                                page
+                            )
                         );
                     }
 
@@ -1996,7 +3596,7 @@ async fn resolve_page_name(
 
                     Err(error) => {
                         println!(
-                            "[PCGW] Steam lookup failed: {}",
+                            "[PCGW] Steam exact lookup failed: {}",
                             error
                         );
                     }
@@ -2021,9 +3621,13 @@ async fn resolve_page_name(
                 )
                 .await
                 {
-                    Ok(Some(page_name)) => {
+                    Ok(
+                        Some(page)
+                    ) => {
                         return Ok(
-                            Some(page_name)
+                            Some(
+                                page
+                            )
                         );
                     }
 
@@ -2031,7 +3635,7 @@ async fn resolve_page_name(
 
                     Err(error) => {
                         println!(
-                            "[PCGW] GOG lookup failed: {}",
+                            "[PCGW] GOG exact lookup failed: {}",
                             error
                         );
                     }
@@ -2047,6 +3651,11 @@ async fn resolve_page_name(
     .await
 }
 
+
+// ================================================================
+// TAURI COMMAND
+// ================================================================
+
 #[tauri::command]
 pub async fn get_pcgw_game_data(
     name: String,
@@ -2059,8 +3668,15 @@ pub async fn get_pcgw_game_data(
     );
 
     println!(
-        "[PCGW] Name: {}",
+        "[PCGW] Original installed title: {:?}",
         name
+    );
+
+    println!(
+        "[PCGW] Sanitized title: {:?}",
+        clean_storefront_game_name(
+            &name
+        )
     );
 
     println!(
@@ -2068,15 +3684,11 @@ pub async fn get_pcgw_game_data(
         store
     );
 
-    println!(
-        "[PCGW] Launcher ID: {:?}",
-        launcher_id
-    );
 
     let client =
         Client::builder()
             .user_agent(
-                "GameManager/0.2.0 PCGamingWiki integration"
+                "GameManager/0.3.0 (https://github.com/GreatDanish1026/GameManager) PCGamingWiki integration"
             )
             .redirect(
                 reqwest::redirect::Policy::limited(
@@ -2084,65 +3696,171 @@ pub async fn get_pcgw_game_data(
                 )
             )
             .build()
-            .map_err(|error| {
-                format!(
-                    "Failed to create PCGamingWiki HTTP client: {}",
-                    error
-                )
-            })?;
+            .map_err(
+                |error| {
+                    format!(
+                        "Failed to create HTTP client: {}",
+                        error
+                    )
+                }
+            )?;
+
 
     let page_name =
         resolve_page_name(
             &client,
             &name,
             &store,
-            launcher_id.as_deref(),
+            launcher_id
+                .as_deref(),
         )
         .await?;
+
 
     let Some(page_name) =
         page_name
     else {
         println!(
-            "[PCGW] No matching PCGamingWiki page found"
+            "[PCGW] No matching page found"
         );
 
         return Ok(
             empty_result()
         );
     };
+
 
     println!(
         "[PCGW] Resolved page: {}",
         page_name
     );
 
-    let parsed_page =
-        get_wikitext(
+
+    let page_data =
+        get_page_data(
             &client,
             &page_name,
         )
         .await?;
 
-    let Some((
-        resolved_page_name,
-        wikitext,
-    )) = parsed_page
+
+    let Some(
+        (
+            resolved_page_name,
+            wikitext,
+            essential_section_index,
+        )
+    ) =
+        page_data
     else {
         return Ok(
             empty_result()
         );
     };
 
+
+    /*
+     * Extract the raw cover filename before wikitext is moved into
+     * parse_game_data(). The display name remains untouched.
+     */
+    let cover_filename =
+        extract_parameter(
+            &wikitext,
+            &[
+                "cover"
+            ],
+        );
+
+
     println!(
-        "[PCGW] Wikitext received: {} characters",
-        wikitext.len()
+        "[PCGW] Cover filename: {:?}",
+        cover_filename
     );
 
-    Ok(
+
+    let mut result =
         parse_game_data(
-            resolved_page_name,
+            resolved_page_name
+                .clone(),
             wikitext,
+        );
+
+
+    if let Some(cover_filename) =
+        cover_filename
+    {
+        match get_cover_image_url(
+            &client,
+            &cover_filename,
         )
+        .await
+        {
+            Ok(url) => {
+                result.cover_image_url =
+                    url;
+            }
+
+            Err(error) => {
+                /*
+                 * A missing/broken cover must never break the rest
+                 * of the PCGamingWiki lookup.
+                 */
+                println!(
+                    "[PCGW] Cover lookup failed: {}",
+                    error
+                );
+            }
+        }
+    }
+
+
+    println!(
+        "[PCGW] Cover image URL: {:?}",
+        result.cover_image_url
+    );
+
+
+    if let Some(section_index) =
+        essential_section_index
+    {
+        match get_section_html(
+            &client,
+            &resolved_page_name,
+            &section_index,
+        )
+        .await
+        {
+            Ok(html) => {
+                result
+                    .essential_improvements_html =
+                    html;
+            }
+
+            Err(error) => {
+                println!(
+                    "[PCGW] Essential improvements lookup failed: {}",
+                    error
+                );
+            }
+        }
+    }
+
+
+    println!(
+        "[PCGW] Essential improvements present: {}",
+        result
+            .essential_improvements_html
+            .is_some()
+    );
+
+    println!(
+        "[PCGW] =========================================="
+    );
+
+    println!("");
+
+
+    Ok(
+        result
     )
 }

@@ -1,10 +1,12 @@
 import {
   AlertCircle,
   Check,
+  Download,
   ExternalLink,
   Loader2,
   Play,
   Sparkles,
+  Wrench,
   X,
 } from "lucide-react";
 
@@ -14,115 +16,128 @@ import {
 } from "react";
 
 import {
+  openUrl,
+} from "@tauri-apps/plugin-opener";
+
+import {
   getRhiStatus,
   launchRhi,
 } from "../services/rhi";
 
-import {
-  openUrl,
-} from "@tauri-apps/plugin-opener";
 
 const RENODX_MODS_URL =
   "https://github.com/clshortfuse/renodx/wiki/Mods";
 
+const LUMA_MODS_URL =
+  "https://github.com/Filoppi/Luma-Framework/wiki/Mods-List";
+
 
 function getStatusDisplay(
-  renodx
+  source
 ) {
-  if (!renodx) {
+  if (!source?.found) {
     return {
-      label: "Unknown",
-      state: "unknown",
-    };
-  }
+      label:
+        "Not Found",
 
-  if (renodx.available) {
-    return {
-      label: "Available",
-      state: "available",
+      state:
+        "unavailable",
     };
   }
 
   const status =
-    renodx.status
+    source.status
       ?.trim()
       .toLowerCase();
 
+
   if (
-    status === "in_progress" ||
-    status === "in progress"
+    status === "working"
   ) {
     return {
-      label: "In Progress",
-      state: "progress",
+      label:
+        "Working",
+
+      state:
+        "available",
     };
   }
+
+
+  if (
+    status === "in_progress"
+  ) {
+    return {
+      label:
+        "In Progress",
+
+      state:
+        "progress",
+    };
+  }
+
+
+  if (
+    status === "planned"
+  ) {
+    return {
+      label:
+        "Planned",
+
+      state:
+        "planned",
+    };
+  }
+
+
+  if (
+    status === "incompatible"
+  ) {
+    return {
+      label:
+        "Not Compatible",
+
+      state:
+        "unavailable",
+    };
+  }
+
 
   if (
     status === "listed"
   ) {
     return {
-      label: "Listed",
-      state: "listed",
-    };
-  }
-
-  if (
-    status === "not_found" ||
-    status === "not found"
-  ) {
-    return {
-      label: "Not Available",
-      state: "unavailable",
-    };
-  }
-
-  if (renodx.status) {
-    return {
       label:
-        renodx.status
-          .replaceAll("_", " ")
-          .split(" ")
-          .map((word) => {
-            if (!word) {
-              return word;
-            }
+        "Listed",
 
-            return (
-              word.charAt(0).toUpperCase() +
-              word.slice(1).toLowerCase()
-            );
-          })
-          .join(" "),
-
-      state: "unknown",
+      state:
+        "listed",
     };
   }
+
 
   return {
     label:
-      renodx.available
-        ? "Available"
-        : "Not Available",
+      "Unknown",
 
     state:
-      renodx.available
-        ? "available"
-        : "unavailable",
+      "unknown",
   };
 }
 
 
-function StatusBadge({
-  renodx,
+function SourceStatusBadge({
+  source,
 }) {
   const status =
     getStatusDisplay(
-      renodx
+      source
     );
 
+
   if (
-    status.state === "available"
+    status.state ===
+    "available"
   ) {
     return (
       <div
@@ -150,9 +165,14 @@ function StatusBadge({
     );
   }
 
+
   if (
-    status.state === "progress" ||
-    status.state === "listed"
+    status.state ===
+      "progress" ||
+    status.state ===
+      "listed" ||
+    status.state ===
+      "planned"
   ) {
     return (
       <div
@@ -180,34 +200,6 @@ function StatusBadge({
     );
   }
 
-  if (
-    status.state === "unavailable"
-  ) {
-    return (
-      <div
-        className="
-          inline-flex
-          items-center
-          gap-1.5
-          rounded-full
-          border
-          border-red-500/30
-          bg-red-500/10
-          px-2.5
-          py-1
-          text-xs
-          font-semibold
-          text-red-300
-        "
-      >
-        <X
-          className="h-3.5 w-3.5"
-        />
-
-        {status.label}
-      </div>
-    );
-  }
 
   return (
     <div
@@ -226,7 +218,7 @@ function StatusBadge({
         text-white/45
       "
     >
-      <AlertCircle
+      <X
         className="h-3.5 w-3.5"
       />
 
@@ -236,52 +228,216 @@ function StatusBadge({
 }
 
 
-function DetailRow({
-  label,
-  value,
+function ModSourceCard({
+  title,
+  source,
+  accent = "cyan",
+  onOpenPage,
+  onDownload,
 }) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return null;
-  }
+  const found =
+    source?.found ??
+    false;
+
 
   return (
     <div
       className="
-        flex
-        items-start
-        justify-between
-        gap-4
-        border-t
-        border-white/[0.06]
-        py-3
-        first:border-t-0
+        rounded-xl
+        border
+        border-white/[0.08]
+        bg-black/10
+        p-4
       "
     >
-      <span
+      <div
         className="
-          shrink-0
-          text-sm
-          text-white/40
+          flex
+          items-start
+          justify-between
+          gap-3
         "
       >
-        {label}
-      </span>
+        <div
+          className="
+            flex
+            items-center
+            gap-3
+          "
+        >
+          <div
+            className={`
+              flex
+              h-9
+              w-9
+              shrink-0
+              items-center
+              justify-center
+              rounded-lg
 
-      <span
+              ${
+                accent === "violet"
+                  ? "bg-violet-500/10 text-violet-300"
+                  : "bg-cyan-500/10 text-cyan-300"
+              }
+            `}
+          >
+            {accent === "violet" ? (
+              <Sparkles
+                className="h-4 w-4"
+              />
+            ) : (
+              <Wrench
+                className="h-4 w-4"
+              />
+            )}
+          </div>
+
+          <div>
+            <div
+              className="
+                text-sm
+                font-semibold
+                text-white
+              "
+            >
+              {title}
+            </div>
+
+            {source?.matchedName ? (
+              <div
+                className="
+                  mt-0.5
+                  text-xs
+                  text-white/40
+                "
+              >
+                {source.matchedName}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+
+        <SourceStatusBadge
+          source={
+            source
+          }
+        />
+      </div>
+
+
+      {source?.category ? (
+        <div
+          className="
+            mt-4
+            text-xs
+            text-white/40
+          "
+        >
+          Category:{" "}
+          <span
+            className="
+              text-white/65
+            "
+          >
+            {source.category}
+          </span>
+        </div>
+      ) : null}
+
+
+      {source?.notes ? (
+        <div
+          className="
+            mt-3
+            rounded-lg
+            border
+            border-white/[0.06]
+            bg-white/[0.025]
+            px-3
+            py-2.5
+            text-xs
+            leading-relaxed
+            text-white/55
+          "
+        >
+          {source.notes}
+        </div>
+      ) : null}
+
+
+      <div
         className="
-          max-w-[65%]
-          text-right
-          text-sm
-          leading-relaxed
-          text-white/75
+          mt-4
+          flex
+          flex-wrap
+          gap-2
         "
       >
-        {value}
-      </span>
+        <button
+          type="button"
+          onClick={
+            onOpenPage
+          }
+          className="
+            inline-flex
+            items-center
+            gap-2
+            rounded-lg
+            border
+            border-white/10
+            bg-white/[0.04]
+            px-3
+            py-2
+            text-xs
+            font-medium
+            text-white/65
+            transition
+            hover:bg-white/[0.08]
+            hover:text-white
+          "
+        >
+          <ExternalLink
+            className="h-3.5 w-3.5"
+          />
+
+          View Mods
+        </button>
+
+
+        {found &&
+        source?.downloadUrl ? (
+          <button
+            type="button"
+            onClick={
+              onDownload
+            }
+            className="
+              inline-flex
+              items-center
+              gap-2
+              rounded-lg
+              border
+              border-emerald-500/20
+              bg-emerald-500/[0.07]
+              px-3
+              py-2
+              text-xs
+              font-medium
+              text-emerald-300
+              transition
+              hover:bg-emerald-500/10
+            "
+          >
+            <Download
+              className="h-3.5 w-3.5"
+            />
+
+            Open Download
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -290,32 +446,59 @@ function DetailRow({
 export default function RenoDxCard({
   game,
 }) {
-  const renodx =
-    game?.renodx;
+  const hdrMods =
+    game?.renodx ?? {};
 
-  const available =
-    renodx?.available ??
-    false;
+
+  const renodx =
+    hdrMods?.renodx ?? {
+      found: false,
+      available: false,
+    };
+
+
+  const luma =
+    hdrMods?.luma ?? {
+      found: false,
+      available: false,
+    };
+
+
+  /*
+   * RHI can be used when either framework has
+   * an actual usable mod.
+   *
+   * Planned Luma entries do not qualify.
+   * In-progress entries do.
+   */
+  const modAvailable =
+    renodx.available ||
+    luma.available;
+
 
   const [
     rhiChecking,
     setRhiChecking,
   ] = useState(true);
 
+
   const [
     rhiInstalled,
     setRhiInstalled,
   ] = useState(false);
+
 
   const [
     rhiPath,
     setRhiPath,
   ] = useState(null);
 
+
   const [
     rhiLaunching,
     setRhiLaunching,
   ] = useState(false);
+
 
   const [
     rhiError,
@@ -326,6 +509,7 @@ export default function RenoDxCard({
   useEffect(() => {
     let cancelled =
       false;
+
 
     async function checkRhi() {
       setRhiChecking(true);
@@ -370,7 +554,9 @@ export default function RenoDxCard({
       }
     }
 
+
     checkRhi();
+
 
     return () => {
       cancelled =
@@ -382,14 +568,16 @@ export default function RenoDxCard({
   async function handleLaunchRhi() {
     if (
       !rhiInstalled ||
-      !available ||
+      !modAvailable ||
       rhiLaunching
     ) {
       return;
     }
 
+
     setRhiLaunching(true);
     setRhiError(null);
+
 
     try {
       await launchRhi();
@@ -408,38 +596,21 @@ export default function RenoDxCard({
   }
 
 
-async function handleViewMods() {
-  try {
-    await openUrl(
-      "https://github.com/clshortfuse/renodx/wiki/Mods"
-    );
-  } catch (error) {
-    console.error(
-      "[RenoDX] Failed to open mods page:",
-      error
-    );
-  }
-}
+  async function openExternal(
+    url
+  ) {
+    if (!url) {
+      return;
+    }
 
-
-  let rhiButtonText =
-    "RHI Not Found";
-
-  if (rhiChecking) {
-    rhiButtonText =
-      "Checking RHI...";
-  } else if (!rhiInstalled) {
-    rhiButtonText =
-      "RHI Not Found";
-  } else if (!available) {
-    rhiButtonText =
-      "RenoDX Not Available";
-  } else if (rhiLaunching) {
-    rhiButtonText =
-      "Launching...";
-  } else {
-    rhiButtonText =
-      "Launch RHI";
+    try {
+      await openUrl(url);
+    } catch (error) {
+      console.error(
+        "[HDR Mods] Failed to open URL:",
+        error
+      );
+    }
   }
 
 
@@ -447,21 +618,60 @@ async function handleViewMods() {
     rhiChecking ||
     rhiLaunching ||
     !rhiInstalled ||
-    !available;
+    !modAvailable;
 
 
-  let rhiTitle =
-    "Launch ReShade HDR Installer";
+  let rhiButtonText =
+    "Launch RHI";
+
 
   if (rhiChecking) {
-    rhiTitle =
-      "Checking for ReShade HDR Installer";
+    rhiButtonText =
+      "Checking RHI...";
   } else if (!rhiInstalled) {
-    rhiTitle =
-      "ReShade HDR Installer was not found";
-  } else if (!available) {
-    rhiTitle =
-      "RHI can only be launched when a RenoDX mod is available for this game";
+    rhiButtonText =
+      "RHI Not Found";
+  } else if (!modAvailable) {
+    rhiButtonText =
+      "No Usable HDR Mod";
+  } else if (rhiLaunching) {
+    rhiButtonText =
+      "Launching...";
+  }
+
+
+  let availabilityText =
+    "No supported RenoDX or Luma mod was found.";
+
+
+  if (
+    renodx.available &&
+    luma.available
+  ) {
+    availabilityText =
+      "Both RenoDX and Luma Framework mods are available for this game.";
+  } else if (
+    renodx.available
+  ) {
+    availabilityText =
+      "A RenoDX mod is available for this game.";
+  } else if (
+    luma.available
+  ) {
+    availabilityText =
+      "A Luma Framework mod is available for this game.";
+  } else if (
+    luma.found &&
+    luma.status === "planned"
+  ) {
+    availabilityText =
+      "A Luma Framework mod is planned, but it is not available yet.";
+  } else if (
+    luma.found &&
+    luma.status === "incompatible"
+  ) {
+    availabilityText =
+      "The game is listed by Luma Framework, but the current implementation is marked incompatible.";
   }
 
 
@@ -478,9 +688,11 @@ async function handleViewMods() {
       <div
         className="
           flex
-          items-start
-          justify-between
+          flex-col
           gap-4
+          lg:flex-row
+          lg:items-start
+          lg:justify-between
         "
       >
         <div
@@ -516,21 +728,25 @@ async function handleViewMods() {
                 text-white
               "
             >
-              RenoDX
+              HDR Mod Support
             </h3>
 
             <p
               className="
                 mt-1
+                max-w-2xl
                 text-sm
+                leading-relaxed
                 text-white/40
               "
             >
-              HDR enhancement and
-              game modification support
+              Checks RenoDX and Luma Framework
+              for HDR and graphics enhancement
+              mods compatible with this game.
             </p>
           </div>
         </div>
+
 
         {game?.renodxLoading ? (
           <div
@@ -558,12 +774,52 @@ async function handleViewMods() {
 
             Checking
           </div>
+        ) : modAvailable ? (
+          <div
+            className="
+              inline-flex
+              items-center
+              gap-1.5
+              rounded-full
+              border
+              border-emerald-500/30
+              bg-emerald-500/10
+              px-2.5
+              py-1
+              text-xs
+              font-semibold
+              text-emerald-300
+            "
+          >
+            <Check
+              className="h-3.5 w-3.5"
+            />
+
+            Mod Available
+          </div>
         ) : (
-          <StatusBadge
-            renodx={
-              renodx
-            }
-          />
+          <div
+            className="
+              inline-flex
+              items-center
+              gap-1.5
+              rounded-full
+              border
+              border-white/10
+              bg-white/[0.04]
+              px-2.5
+              py-1
+              text-xs
+              font-semibold
+              text-white/45
+            "
+          >
+            <X
+              className="h-3.5 w-3.5"
+            />
+
+            No Usable Mod
+          </div>
         )}
       </div>
 
@@ -589,32 +845,77 @@ async function handleViewMods() {
 
       {!game?.renodxLoading &&
       !game?.renodxError ? (
-        <div
-          className="
-            mt-5
-          "
-        >
-          <DetailRow
-            label="Matched Game"
-            value={
-              renodx?.matchedName
-            }
-          />
+        <>
+          <div
+            className="
+              mt-5
+              rounded-lg
+              border
+              border-white/[0.06]
+              bg-white/[0.02]
+              px-4
+              py-3
+              text-sm
+              text-white/55
+            "
+          >
+            {availabilityText}
+          </div>
 
-          <DetailRow
-            label="Category"
-            value={
-              renodx?.category
-            }
-          />
 
-          <DetailRow
-            label="Notes"
-            value={
-              renodx?.notes
-            }
-          />
-        </div>
+          <div
+            className="
+              mt-4
+              grid
+              grid-cols-1
+              gap-4
+              xl:grid-cols-2
+            "
+          >
+            <ModSourceCard
+              title="RenoDX"
+              source={
+                renodx
+              }
+              accent="violet"
+
+              onOpenPage={() =>
+                openExternal(
+                  renodx.pageUrl ??
+                  RENODX_MODS_URL
+                )
+              }
+
+              onDownload={() =>
+                openExternal(
+                  renodx.downloadUrl
+                )
+              }
+            />
+
+
+            <ModSourceCard
+              title="Luma Framework"
+              source={
+                luma
+              }
+              accent="cyan"
+
+              onOpenPage={() =>
+                openExternal(
+                  luma.pageUrl ??
+                  LUMA_MODS_URL
+                )
+              }
+
+              onDownload={() =>
+                openExternal(
+                  luma.downloadUrl
+                )
+              }
+            />
+          </div>
+        </>
       ) : null}
 
 
@@ -643,41 +944,10 @@ async function handleViewMods() {
           mt-5
           flex
           flex-wrap
+          items-center
           gap-3
         "
       >
-        <button
-          type="button"
-          onClick={
-            handleViewMods
-          }
-          className="
-            inline-flex
-            items-center
-            gap-2
-            rounded-lg
-            border
-            border-white/10
-            bg-white/[0.04]
-            px-4
-            py-2
-            text-sm
-            font-medium
-            text-white/75
-            transition
-            hover:border-white/20
-            hover:bg-white/[0.08]
-            hover:text-white
-          "
-        >
-          <ExternalLink
-            className="h-4 w-4"
-          />
-
-          View Mods
-        </button>
-
-
         <button
           type="button"
           onClick={
@@ -685,9 +955,6 @@ async function handleViewMods() {
           }
           disabled={
             rhiDisabled
-          }
-          title={
-            rhiTitle
           }
           className="
             inline-flex
@@ -728,6 +995,19 @@ async function handleViewMods() {
 
           {rhiButtonText}
         </button>
+
+
+        {modAvailable ? (
+          <span
+            className="
+              text-xs
+              text-white/30
+            "
+          >
+            RHI can be used with the detected
+            HDR mod.
+          </span>
+        ) : null}
       </div>
 
 

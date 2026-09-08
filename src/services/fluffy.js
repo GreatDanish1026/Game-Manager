@@ -3,27 +3,30 @@ import {
 } from "@tauri-apps/api/core";
 
 
-export async function getRenoDxModStatus(
+export async function getFluffySupport(
   game
 ) {
   console.log(
-    "[HDR Mods] Checking:",
+    "[Fluffy] Checking:",
     game.name
   );
 
+
   const result =
     await invoke(
-      "get_renodx_mod_status",
+      "get_fluffy_support",
       {
         name:
           game.name,
       }
     );
 
+
   console.log(
-    "[HDR Mods] Result:",
+    "[Fluffy] Result:",
     result
   );
+
 
   return result;
 }
