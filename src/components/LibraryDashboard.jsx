@@ -1,10 +1,14 @@
 import {
   Activity,
+  CheckCircle2,
+  Clock3,
   Gamepad2,
   MonitorUp,
   Puzzle,
+  RefreshCcw,
   Star,
   Store,
+  TriangleAlert,
 } from "lucide-react";
 
 import {
@@ -19,10 +23,20 @@ import {
 } from "../services/libraryInsights";
 
 import {
+  getLibraryAnalysisSummary,
+} from "../services/analysisState";
+
+import {
+  getSettings,
+} from "../services/settings";
+
+import {
   getGameUserMetadata,
 } from "../services/userGameMetadata";
 
 import AboutCard from "./AboutCard";
+import ExternalServiceStatusPanel from "./ExternalServiceStatusPanel";
+
 
 function StatCard({
   icon: Icon,
@@ -89,6 +103,7 @@ function StatCard({
   );
 }
 
+
 function CountRow({
   label,
   value,
@@ -129,7 +144,94 @@ function CountRow({
   );
 }
 
+
+function AnalysisStateRow({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  tone = "neutral",
+}) {
+  const toneClass =
+    {
+      good:
+        "text-emerald-300/75 bg-emerald-500/[0.06]",
+      warning:
+        "text-amber-300/75 bg-amber-500/[0.06]",
+      stale:
+        "text-orange-300/75 bg-orange-500/[0.06]",
+      neutral:
+        "text-white/45 bg-white/[0.025]",
+    }[
+      tone
+    ];
+
+  return (
+    <div
+      className={`
+        flex
+        items-center
+        gap-3
+        rounded-xl
+        px-3
+        py-3
+        ${toneClass}
+      `}
+    >
+      <Icon
+        className="
+          h-4
+          w-4
+          shrink-0
+        "
+      />
+
+      <div
+        className="
+          min-w-0
+          flex-1
+        "
+      >
+        <div
+          className="
+            text-xs
+            font-semibold
+          "
+        >
+          {label}
+        </div>
+
+        <div
+          className="
+            mt-0.5
+            text-[10px]
+            opacity-55
+          "
+        >
+          {detail}
+        </div>
+      </div>
+
+      <div
+        className="
+          text-lg
+          font-bold
+          tabular-nums
+          text-white/80
+        "
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+
 export default function LibraryDashboard({
+  games = [],
+  onAnalyzeRemaining,
+  onRefreshStale,
+  libraryAnalysis,
   onCheckForUpdates,
   updateCheckStatus,
 }) {
@@ -152,6 +254,8 @@ export default function LibraryDashboard({
         "game-manager-library-insights-changed",
         "game-manager-library-snapshot-changed",
         "game-manager-user-metadata-changed",
+        "game-manager-analysis-state-changed",
+        "game-manager-settings-changed",
         "storage",
       ];
 
@@ -181,11 +285,16 @@ export default function LibraryDashboard({
         const snapshot =
           getLibrarySnapshot();
 
-        const games =
+        const snapshotGames =
           Object.values(
             snapshot.games
             ?? {}
           );
+
+        const installedGames =
+          games.length > 0
+            ? games
+            : snapshotGames;
 
         const insights =
           Object.values(
@@ -193,7 +302,7 @@ export default function LibraryDashboard({
           );
 
         const stores =
-          games.reduce(
+          installedGames.reduce(
             (
               result,
               game
@@ -219,36 +328,28 @@ export default function LibraryDashboard({
               predicate
             ).length;
 
+        const settings =
+          getSettings();
+
+        const analysis =
+          getLibraryAnalysisSummary(
+            installedGames,
+            settings
+              .analysisFreshDays
+          );
+
         return {
           total:
-            snapshot.totalGames
-            || games.length,
+            installedGames.length,
 
           indexed:
-            games.length,
+            installedGames.length,
 
           analyzed:
             insights.length,
 
-          analyzedCoverage:
-            (
-              snapshot.totalGames
-              || games.length
-            ) > 0
-              ? Math.round(
-                  (
-                    insights.length
-                    / (
-                      snapshot.totalGames
-                      || games.length
-                    )
-                  )
-                  * 100
-                )
-              : 0,
-
           favorites:
-            games.filter(
+            installedGames.filter(
               (game) =>
                 getGameUserMetadata(
                   game
@@ -256,6 +357,8 @@ export default function LibraryDashboard({
             ).length,
 
           stores,
+
+          analysis,
 
           hdr:
             count(
@@ -307,7 +410,12 @@ export default function LibraryDashboard({
         };
       },
       [
+        games,
         revision,
+        libraryAnalysis
+          ?.state,
+        libraryAnalysis
+          ?.completed,
       ]
     );
 
@@ -315,14 +423,21 @@ export default function LibraryDashboard({
     Object.entries(
       data.stores
     )
-    .sort(
-      (
-        left,
-        right
-      ) =>
-        right[1]
-        - left[1]
-    );
+      .sort(
+        (
+          left,
+          right
+        ) =>
+          right[1]
+          - left[1]
+      );
+
+  const analysisRunning =
+    libraryAnalysis?.state ===
+      "running"
+    ||
+    libraryAnalysis?.state ===
+      "cancelling";
 
   return (
     <main
@@ -384,10 +499,11 @@ export default function LibraryDashboard({
                 text-white/35
               "
             >
-              Select a game from the sidebar, or review what Game Manager has learned about your library.
+              Review library coverage, capabilities, and analysis freshness.
             </p>
           </div>
         </div>
+
 
         <div
           className="
@@ -413,11 +529,11 @@ export default function LibraryDashboard({
             icon={
               Activity
             }
-            label="Analyzed"
+            label="Fully Analyzed"
             value={
-              data.analyzed
+              data.analysis.full
             }
-            detail={`${data.analyzedCoverage}% library coverage`}
+            detail={`${data.analysis.coverage}% fresh coverage`}
           />
 
           <StatCard
@@ -440,6 +556,229 @@ export default function LibraryDashboard({
             }
           />
         </div>
+
+
+        <section
+          className="
+            mt-6
+            rounded-2xl
+            border
+            border-cyan-500/15
+            bg-cyan-500/[0.025]
+            p-5
+          "
+        >
+          <div
+            className="
+              flex
+              flex-col
+              gap-4
+              lg:flex-row
+              lg:items-center
+              lg:justify-between
+            "
+          >
+            <div>
+              <div
+                className="
+                  text-base
+                  font-semibold
+                  text-white/80
+                "
+              >
+                Library Analysis
+              </div>
+
+              <div
+                className="
+                  mt-1
+                  text-xs
+                  text-white/35
+                "
+              >
+                Fresh coverage is based on your Analysis freshness setting.
+              </div>
+            </div>
+
+            <div
+              className="
+                flex
+                flex-wrap
+                gap-2
+              "
+            >
+              <button
+                type="button"
+                onClick={
+                  onAnalyzeRemaining
+                }
+                disabled={
+                  analysisRunning
+                  ||
+                  data.analysis
+                    .remaining === 0
+                }
+                className="
+                  rounded-lg
+                  bg-cyan-500/15
+                  px-3
+                  py-2
+                  text-xs
+                  font-semibold
+                  text-cyan-200
+                  transition
+                  hover:bg-cyan-500/25
+                  disabled:cursor-not-allowed
+                  disabled:opacity-35
+                "
+              >
+                Analyze Remaining
+              </button>
+
+              <button
+                type="button"
+                onClick={
+                  onRefreshStale
+                }
+                disabled={
+                  analysisRunning
+                  ||
+                  data.analysis
+                    .stale === 0
+                }
+                className="
+                  inline-flex
+                  items-center
+                  gap-2
+                  rounded-lg
+                  border
+                  border-white/[0.08]
+                  bg-white/[0.025]
+                  px-3
+                  py-2
+                  text-xs
+                  font-semibold
+                  text-white/55
+                  transition
+                  hover:bg-white/[0.06]
+                  hover:text-white/75
+                  disabled:cursor-not-allowed
+                  disabled:opacity-35
+                "
+              >
+                <RefreshCcw
+                  className="h-3.5 w-3.5"
+                />
+
+                Refresh Stale Data
+              </button>
+            </div>
+          </div>
+
+
+          <div
+            className="
+              mt-5
+              h-2.5
+              overflow-hidden
+              rounded-full
+              bg-white/[0.055]
+            "
+          >
+            <div
+              className="
+                h-full
+                rounded-full
+                bg-cyan-400
+                transition-[width]
+                duration-300
+              "
+              style={{
+                width:
+                  `${data.analysis.coverage}%`,
+              }}
+            />
+          </div>
+
+          <div
+            className="
+              mt-2
+              flex
+              items-center
+              justify-between
+              text-[11px]
+              text-white/35
+            "
+          >
+            <span>
+              {data.analysis.full} of {data.analysis.total} fully analyzed
+            </span>
+
+            <span>
+              {data.analysis.coverage}%
+            </span>
+          </div>
+
+
+          <div
+            className="
+              mt-4
+              grid
+              grid-cols-1
+              gap-2
+              sm:grid-cols-2
+              xl:grid-cols-4
+            "
+          >
+            <AnalysisStateRow
+              icon={
+                CheckCircle2
+              }
+              label="Fully analyzed"
+              value={
+                data.analysis.full
+              }
+              detail="Complete and fresh"
+              tone="good"
+            />
+
+            <AnalysisStateRow
+              icon={
+                TriangleAlert
+              }
+              label="Partially analyzed"
+              value={
+                data.analysis.partial
+              }
+              detail="One or more sources incomplete"
+              tone="warning"
+            />
+
+            <AnalysisStateRow
+              icon={
+                Clock3
+              }
+              label="Out of date"
+              value={
+                data.analysis.stale
+              }
+              detail="Older than freshness setting"
+              tone="stale"
+            />
+
+            <AnalysisStateRow
+              icon={
+                Activity
+              }
+              label="Never analyzed"
+              value={
+                data.analysis.never
+              }
+              detail="No analysis record yet"
+            />
+          </div>
+        </section>
+
 
         <div
           className="
@@ -622,6 +961,23 @@ export default function LibraryDashboard({
           </div>
         </div>
 
+
+        <div
+          className="
+            mt-5
+          "
+        >
+          <ExternalServiceStatusPanel
+            onCheckForUpdates={
+              onCheckForUpdates
+            }
+            updateCheckStatus={
+              updateCheckStatus
+            }
+          />
+        </div>
+
+
         <div
           className="
             mt-5
@@ -651,8 +1007,9 @@ export default function LibraryDashboard({
             text-white/30
           "
         >
-          Graphics and mod counts are based on games you have opened and analyzed.
-          This avoids sending hundreds of automatic requests to external services at startup.
+          Capability counts use analyzed library data. Background analysis tracks
+          PCGamingWiki, RenoDX/Luma, and Vortex independently so a failed source
+          can be shown as partial instead of making the whole game appear unanalyzed.
         </div>
       </div>
     </main>

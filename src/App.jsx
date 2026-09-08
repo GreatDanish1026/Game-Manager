@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -8,6 +9,8 @@ import Sidebar from "./components/Sidebar";
 import GameDetails from "./components/GameDetails";
 import AppErrorBoundary from "./components/AppErrorBoundary";
 import UpdateNotification from "./components/UpdateNotification";
+import LibraryAnalysisPanel from "./components/LibraryAnalysisPanel";
+import SettingsScreen from "./components/SettingsScreen";
 
 import {
   getInstalledGames,
@@ -31,11 +34,141 @@ import {
 
 import {
   saveLibrarySnapshot,
+  storeGameInsight,
 } from "./services/libraryInsights";
+
+import {
+  getSettings,
+} from "./services/settings";
+
+import {
+  markServiceChecking,
+  SERVICE_IDS,
+  setServiceStatus,
+} from "./services/serviceStatus";
+
+import {
+  getAnalysisState,
+  recordGameAnalysis,
+} from "./services/analysisState";
 
 
 const HIDDEN_GAMES_STORAGE_KEY =
   "game-manager-hidden-games";
+
+const ANALYSIS_TIMESTAMPS_STORAGE_KEY =
+  "game-manager-analysis-timestamps-v1";
+
+function loadAnalysisTimestamps() {
+  try {
+    const stored =
+      localStorage.getItem(
+        ANALYSIS_TIMESTAMPS_STORAGE_KEY
+      );
+
+    if (!stored) {
+      return {};
+    }
+
+    const parsed =
+      JSON.parse(
+        stored
+      );
+
+    return parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+        ? parsed
+        : {};
+  } catch (error) {
+    console.error(
+      "[Library Analysis] Failed to load timestamps:",
+      error
+    );
+
+    return {};
+  }
+}
+
+
+function saveAnalysisTimestamps(
+  timestamps
+) {
+  try {
+    localStorage.setItem(
+      ANALYSIS_TIMESTAMPS_STORAGE_KEY,
+      JSON.stringify(
+        timestamps
+      )
+    );
+  } catch (error) {
+    console.error(
+      "[Library Analysis] Failed to save timestamps:",
+      error
+    );
+  }
+}
+
+
+function isRecentlyAnalyzed(
+  game,
+  timestamps,
+  freshDays
+) {
+  if (
+    game.pcgwLoaded &&
+    game.renodxLoaded &&
+    game.vortexLoaded
+  ) {
+    return true;
+  }
+
+  const timestamp =
+    Number(
+      timestamps[
+        game.id
+      ]
+    );
+
+  const freshMs =
+    Math.max(
+      1,
+      Number(
+        freshDays
+      ) || 7
+    )
+    * 24
+    * 60
+    * 60
+    * 1000;
+
+  return Number.isFinite(
+    timestamp
+  ) &&
+    Date.now() - timestamp <
+      freshMs;
+}
+
+
+async function timedLookup(
+  label,
+  lookup
+) {
+  const started =
+    performance.now();
+
+  try {
+    return await lookup();
+  } finally {
+    const elapsed =
+      performance.now()
+      - started;
+
+    console.info(
+      `[Performance] ${label}: ${elapsed.toFixed(0)} ms`
+    );
+  }
+}
 
 
 function loadHiddenGameIds() {
@@ -239,6 +372,15 @@ function prepareGameForUi(
       null,
 
     pcgwPageUrl:
+      null,
+
+    // Cover art returned by PCGamingWiki.
+    // GameDetails also has a Steam fallback when this is unavailable.
+    coverImageUrl:
+      game.coverImageUrl ??
+      game.coverArtUrl ??
+      game.coverUrl ??
+      game.imageUrl ??
       null,
 
     essentialImprovementsHtml:
@@ -560,6 +702,15 @@ function mergePcgwData(
       pcgwPageUrl:
         null,
 
+      // Preserve any artwork supplied by the library scanner even when
+      // PCGamingWiki does not find a matching page.
+      coverImageUrl:
+        game.coverImageUrl ??
+        game.coverArtUrl ??
+        game.coverUrl ??
+        game.imageUrl ??
+        null,
+
       essentialImprovementsHtml:
         null,
     };
@@ -787,6 +938,17 @@ function mergePcgwData(
 
     pcgwPageUrl:
       data.pageUrl ??
+      null,
+
+    // Restore the cover-art field that existed before the v1.0.0
+    // production-readiness refactor. Prefer PCGamingWiki artwork, then
+    // preserve any scanner-provided artwork already attached to the game.
+    coverImageUrl:
+      data.coverImageUrl ??
+      game.coverImageUrl ??
+      game.coverArtUrl ??
+      game.coverUrl ??
+      game.imageUrl ??
       null,
 
     essentialImprovementsHtml:
@@ -1121,6 +1283,109 @@ function mergeVortexData(
 }
 
 
+function errorToServiceMessage(
+  error
+) {
+  const message =
+    String(
+      error
+      ?? "Unknown error"
+    );
+
+  if (
+    /valid release json|release json|latest\.json|updater metadata|update metadata/i.test(
+      message
+    )
+  ) {
+    return {
+      status:
+        "degraded",
+
+      message:
+        "GitHub is reachable, but the updater release metadata is missing or invalid.",
+    };
+  }
+
+  if (
+    /429|rate.?limit/i.test(
+      message
+    )
+  ) {
+    return {
+      status:
+        "degraded",
+
+      message:
+        "Rate limited by the service.",
+    };
+  }
+
+  if (
+    /timeout|timed out/i.test(
+      message
+    )
+  ) {
+    return {
+      status:
+        "degraded",
+
+      message:
+        "Service request timed out.",
+    };
+  }
+
+  if (
+    /5\d\d|server error/i.test(
+      message
+    )
+  ) {
+    return {
+      status:
+        "degraded",
+
+      message:
+        "Service returned a server error.",
+    };
+  }
+
+  return {
+    status:
+      "offline",
+
+    message,
+  };
+}
+
+
+function markLookupSuccess(
+  serviceId,
+  message = "Service responded successfully."
+) {
+  setServiceStatus(
+    serviceId,
+    "online",
+    message
+  );
+}
+
+
+function markLookupFailure(
+  serviceId,
+  error
+) {
+  const result =
+    errorToServiceMessage(
+      error
+    );
+
+  setServiceStatus(
+    serviceId,
+    result.status,
+    result.message
+  );
+}
+
+
 export default function App() {
   const [
     games,
@@ -1171,7 +1436,21 @@ export default function App() {
     showHiddenGames,
     setShowHiddenGames,
   ] =
-    useState(false);
+    useState(
+      () =>
+        getSettings()
+          .showHiddenOnStartup
+    );
+
+  const [
+    activeView,
+    setActiveView,
+  ] =
+    useState(
+      () =>
+        getSettings()
+          .startupView
+    );
 
 
   const [
@@ -1192,6 +1471,670 @@ export default function App() {
       message:
         null,
     });
+
+
+  const [
+    libraryAnalysis,
+    setLibraryAnalysis,
+  ] =
+    useState({
+      state:
+        "idle",
+
+      total:
+        0,
+
+      completed:
+        0,
+
+      succeeded:
+        0,
+
+      failed:
+        0,
+
+      skipped:
+        0,
+
+      activeGames:
+        [],
+
+      errors:
+        [],
+    });
+
+  const analysisCancelRef =
+    useRef(false);
+
+  const analysisRunIdRef =
+    useRef(0);
+
+
+  function updateGameEverywhere(
+    updatedGame
+  ) {
+    setGames(
+      (current) =>
+        current.map(
+          (item) =>
+            item.id ===
+            updatedGame.id
+              ? updatedGame
+              : item
+        )
+    );
+
+    setSelectedGame(
+      (current) =>
+        current?.id ===
+        updatedGame.id
+          ? updatedGame
+          : current
+    );
+  }
+
+
+  async function analyzeGameInBackground(
+    game
+  ) {
+    const analysisStarted =
+      performance.now();
+
+    if (
+      !game.pcgwLoaded ||
+      game.pcgwError
+    ) {
+      markServiceChecking(
+        SERVICE_IDS.pcgw
+      );
+    }
+
+    if (
+      !game.renodxLoaded ||
+      game.renodxError
+    ) {
+      markServiceChecking(
+        SERVICE_IDS.renodx
+      );
+
+      markServiceChecking(
+        SERVICE_IDS.luma
+      );
+    }
+
+    if (
+      !game.vortexLoaded ||
+      game.vortexError
+    ) {
+      markServiceChecking(
+        SERVICE_IDS.vortex
+      );
+    }
+
+    const [
+      pcgwResult,
+      hdrModsResult,
+      vortexResult,
+    ] =
+      await Promise.allSettled([
+        game.pcgwLoaded &&
+        !game.pcgwError
+          ? Promise.resolve(
+              null
+            )
+          : timedLookup(
+              `PCGamingWiki [${game.name}]`,
+              () =>
+                getPcGamingWikiData(
+                  game
+                )
+            ),
+
+        game.renodxLoaded &&
+        !game.renodxError
+          ? Promise.resolve(
+              null
+            )
+          : timedLookup(
+              `RenoDX / Luma [${game.name}]`,
+              () =>
+                getRenoDxModStatus(
+                  game
+                )
+            ),
+
+        game.vortexLoaded &&
+        !game.vortexError
+          ? Promise.resolve(
+              null
+            )
+          : timedLookup(
+              `Vortex [${game.name}]`,
+              () =>
+                getVortexSupport(
+                  game
+                )
+            ),
+      ]);
+
+    let updatedGame = {
+      ...game,
+
+      pcgwLoading:
+        false,
+
+      renodxLoading:
+        false,
+
+      vortexLoading:
+        false,
+    };
+
+
+    if (
+      !game.pcgwLoaded ||
+      game.pcgwError
+    ) {
+      if (
+        pcgwResult.status ===
+        "fulfilled"
+      ) {
+        markLookupSuccess(
+          SERVICE_IDS.pcgw
+        );
+
+        updatedGame =
+          mergePcgwData(
+            updatedGame,
+            pcgwResult.value
+          );
+      } else {
+        markLookupFailure(
+          SERVICE_IDS.pcgw,
+          pcgwResult.reason
+        );
+
+        updatedGame = {
+          ...updatedGame,
+
+          pcgwLoaded:
+            true,
+
+          pcgwError:
+            String(
+              pcgwResult.reason
+            ),
+        };
+      }
+    }
+
+
+    if (
+      !game.renodxLoaded ||
+      game.renodxError
+    ) {
+      if (
+        hdrModsResult.status ===
+        "fulfilled"
+      ) {
+        markLookupSuccess(
+          SERVICE_IDS.renodx
+        );
+
+        markLookupSuccess(
+          SERVICE_IDS.luma
+        );
+
+        updatedGame =
+          mergeRenoDxData(
+            updatedGame,
+            hdrModsResult.value
+          );
+      } else {
+        markLookupFailure(
+          SERVICE_IDS.renodx,
+          hdrModsResult.reason
+        );
+
+        markLookupFailure(
+          SERVICE_IDS.luma,
+          hdrModsResult.reason
+        );
+
+        updatedGame = {
+          ...updatedGame,
+
+          renodxLoaded:
+            true,
+
+          renodxError:
+            String(
+              hdrModsResult.reason
+            ),
+        };
+      }
+    }
+
+
+    if (
+      !game.vortexLoaded ||
+      game.vortexError
+    ) {
+      if (
+        vortexResult.status ===
+        "fulfilled"
+      ) {
+        markLookupSuccess(
+          SERVICE_IDS.vortex
+        );
+
+        updatedGame =
+          mergeVortexData(
+            updatedGame,
+            vortexResult.value
+          );
+      } else {
+        markLookupFailure(
+          SERVICE_IDS.vortex,
+          vortexResult.reason
+        );
+
+        updatedGame = {
+          ...updatedGame,
+
+          vortexLoaded:
+            true,
+
+          vortexError:
+            String(
+              vortexResult.reason
+            ),
+        };
+      }
+    }
+
+
+    const failed =
+      Boolean(
+        updatedGame.pcgwError ||
+        updatedGame.renodxError ||
+        updatedGame.vortexError
+      );
+
+    updateGameEverywhere(
+      updatedGame
+    );
+
+    try {
+      storeGameInsight(
+        updatedGame
+      );
+    } catch (error) {
+      console.error(
+        "[Library Analysis] Failed to store insight:",
+        error
+      );
+    }
+
+    try {
+      recordGameAnalysis(
+        updatedGame
+      );
+    } catch (error) {
+      console.error(
+        "[Library Analysis] Failed to store analysis state:",
+        error
+      );
+    }
+
+    console.info(
+      `[Performance] Background analysis [${game.name}]: ${(performance.now() - analysisStarted).toFixed(0)} ms`
+    );
+
+    return {
+      updatedGame,
+      failed,
+    };
+  }
+
+
+  async function startLibraryAnalysis(
+    mode = "remaining"
+  ) {
+    if (
+      libraryAnalysis.state ===
+      "running" ||
+      libraryAnalysis.state ===
+      "cancelling"
+    ) {
+      return;
+    }
+
+    const timestamps =
+      loadAnalysisTimestamps();
+
+    const analysisSettings =
+      getSettings();
+
+    const queue =
+      games.filter(
+        (game) => {
+          const state =
+            getAnalysisState(
+              game,
+              analysisSettings
+                .analysisFreshDays
+            );
+
+          if (
+            mode ===
+            "stale"
+          ) {
+            return state.status ===
+              "stale";
+          }
+
+          return state.status !==
+            "full";
+        }
+      );
+
+    const skipped =
+      games.length -
+      queue.length;
+
+    if (
+      queue.length === 0
+    ) {
+      setLibraryAnalysis({
+        state:
+          "complete",
+
+        total:
+          0,
+
+        completed:
+          0,
+
+        succeeded:
+          0,
+
+        failed:
+          0,
+
+        skipped,
+
+        activeGames:
+          [],
+
+        errors:
+          [],
+      });
+
+      return;
+    }
+
+    analysisCancelRef.current =
+      false;
+
+    const runId =
+      ++analysisRunIdRef.current;
+
+    setLibraryAnalysis({
+      state:
+        "running",
+
+      total:
+        queue.length,
+
+      completed:
+        0,
+
+      succeeded:
+        0,
+
+      failed:
+        0,
+
+      skipped,
+
+      activeGames:
+        [],
+
+      errors:
+        [],
+    });
+
+    let nextIndex =
+      0;
+
+    async function worker() {
+      while (
+        !analysisCancelRef.current
+      ) {
+        const index =
+          nextIndex++;
+
+        if (
+          index >=
+          queue.length
+        ) {
+          break;
+        }
+
+        const game =
+          queue[index];
+
+        setLibraryAnalysis(
+          (current) => {
+            if (
+              runId !==
+              analysisRunIdRef.current
+            ) {
+              return current;
+            }
+
+            return {
+              ...current,
+
+              activeGames: [
+                ...current.activeGames,
+                {
+                  id:
+                    game.id,
+
+                  name:
+                    game.name,
+                },
+              ],
+            };
+          }
+        );
+
+        let failed =
+          false;
+
+        let errorMessage =
+          null;
+
+        try {
+          const result =
+            await analyzeGameInBackground(
+              game
+            );
+
+          failed =
+            result.failed;
+
+          if (!failed) {
+            timestamps[
+              game.id
+            ] =
+              Date.now();
+
+            saveAnalysisTimestamps(
+              timestamps
+            );
+          } else {
+            errorMessage =
+              "One or more data sources failed.";
+          }
+        } catch (error) {
+          failed =
+            true;
+
+          errorMessage =
+            String(error);
+
+          console.error(
+            `[Library Analysis] ${game.name} failed:`,
+            error
+          );
+        }
+
+        setLibraryAnalysis(
+          (current) => {
+            if (
+              runId !==
+              analysisRunIdRef.current
+            ) {
+              return current;
+            }
+
+            const errors =
+              failed
+                ? [
+                    ...current.errors,
+                    {
+                      id:
+                        game.id,
+
+                      name:
+                        game.name,
+
+                      message:
+                        errorMessage,
+                    },
+                  ].slice(
+                    -8
+                  )
+                : current.errors;
+
+            return {
+              ...current,
+
+              completed:
+                current.completed +
+                1,
+
+              succeeded:
+                current.succeeded +
+                (
+                  failed
+                    ? 0
+                    : 1
+                ),
+
+              failed:
+                current.failed +
+                (
+                  failed
+                    ? 1
+                    : 0
+                ),
+
+              activeGames:
+                current.activeGames
+                  .filter(
+                    (item) =>
+                      item.id !==
+                      game.id
+                  ),
+
+              errors,
+            };
+          }
+        );
+
+        /*
+         * Small pause between jobs keeps background analysis friendly
+         * to PCGamingWiki/GitHub-backed services while still feeling fast.
+         */
+        if (
+          !analysisCancelRef.current
+        ) {
+          await new Promise(
+            (resolve) =>
+              setTimeout(
+                resolve,
+                150
+              )
+          );
+        }
+      }
+    }
+
+    const workers =
+      Array.from(
+        {
+          length:
+            Math.min(
+              analysisSettings
+                .analysisConcurrency,
+              queue.length
+            ),
+        },
+        () =>
+          worker()
+      );
+
+    await Promise.all(
+      workers
+    );
+
+    if (
+      runId !==
+      analysisRunIdRef.current
+    ) {
+      return;
+    }
+
+    setLibraryAnalysis(
+      (current) => ({
+        ...current,
+
+        state:
+          analysisCancelRef.current
+            ? "cancelled"
+            : "complete",
+
+        activeGames:
+          [],
+      })
+    );
+  }
+
+
+  function cancelLibraryAnalysis() {
+    if (
+      libraryAnalysis.state !==
+      "running"
+    ) {
+      return;
+    }
+
+    analysisCancelRef.current =
+      true;
+
+    setLibraryAnalysis(
+      (current) => ({
+        ...current,
+
+        state:
+          "cancelling",
+      })
+    );
+  }
 
 
   async function scanGames() {
@@ -1270,6 +2213,10 @@ export default function App() {
   async function runUpdateCheck({
     manual = false,
   } = {}) {
+    markServiceChecking(
+      SERVICE_IDS.github
+    );
+
     if (manual) {
       setUpdateCheckStatus({
         state:
@@ -1293,6 +2240,13 @@ export default function App() {
         update
       );
 
+      markLookupSuccess(
+        SERVICE_IDS.github,
+        update
+          ? `Update ${update.version} is available.`
+          : "Update service responded successfully."
+      );
+
       if (manual) {
         setUpdateCheckStatus({
           state:
@@ -1309,6 +2263,11 @@ export default function App() {
     } catch (error) {
       console.error(
         "[Updater] Check failed:",
+        error
+      );
+
+      markLookupFailure(
+        SERVICE_IDS.github,
         error
       );
 
@@ -1333,10 +2292,15 @@ export default function App() {
 
   useEffect(
     () => {
-      runUpdateCheck({
-        manual:
-          false,
-      });
+      if (
+        getSettings()
+          .automaticUpdateChecks
+      ) {
+        runUpdateCheck({
+          manual:
+            false,
+        });
+      }
     },
     []
   );
@@ -1434,12 +2398,34 @@ export default function App() {
     setShowHiddenGames(
       false
     );
+
+    setActiveView(
+      "library"
+    );
+  }
+
+
+  function showSettings() {
+    setSelectedGame(
+      null
+    );
+
+    setShowHiddenGames(
+      false
+    );
+
+    setActiveView(
+      "settings"
+    );
   }
 
 
   async function selectGame(
     game
   ) {
+    const analysisStarted =
+      performance.now();
+
     setSelectedGame(
       game
     );
@@ -1450,6 +2436,10 @@ export default function App() {
       game.renodxLoaded &&
       game.vortexLoaded
     ) {
+      console.info(
+        `[Performance] Selected game cache hit: ${(performance.now() - analysisStarted).toFixed(0)} ms`
+      );
+
       return;
     }
 
@@ -1484,6 +2474,37 @@ export default function App() {
     );
 
 
+    if (
+      !game.pcgwLoaded ||
+      game.pcgwError
+    ) {
+      markServiceChecking(
+        SERVICE_IDS.pcgw
+      );
+    }
+
+    if (
+      !game.renodxLoaded ||
+      game.renodxError
+    ) {
+      markServiceChecking(
+        SERVICE_IDS.renodx
+      );
+
+      markServiceChecking(
+        SERVICE_IDS.luma
+      );
+    }
+
+    if (
+      !game.vortexLoaded ||
+      game.vortexError
+    ) {
+      markServiceChecking(
+        SERVICE_IDS.vortex
+      );
+    }
+
     /*
      * All three external lookups run in parallel.
      */
@@ -1493,28 +2514,43 @@ export default function App() {
       vortexResult,
     ] =
       await Promise.allSettled([
-        game.pcgwLoaded
+        game.pcgwLoaded &&
+        !game.pcgwError
           ? Promise.resolve(
               null
             )
-          : getPcGamingWikiData(
-              game
+          : timedLookup(
+              "PCGamingWiki",
+              () =>
+                getPcGamingWikiData(
+                  game
+                )
             ),
 
-        game.renodxLoaded
+        game.renodxLoaded &&
+        !game.renodxError
           ? Promise.resolve(
               null
             )
-          : getRenoDxModStatus(
-              game
+          : timedLookup(
+              "RenoDX / Luma",
+              () =>
+                getRenoDxModStatus(
+                  game
+                )
             ),
 
-        game.vortexLoaded
+        game.vortexLoaded &&
+        !game.vortexError
           ? Promise.resolve(
               null
             )
-          : getVortexSupport(
-              game
+          : timedLookup(
+              "Vortex",
+              () =>
+                getVortexSupport(
+                  game
+                )
             ),
       ]);
 
@@ -1527,17 +2563,29 @@ export default function App() {
     // PCGW
     // ============================================================
 
-    if (!game.pcgwLoaded) {
+    if (
+      !game.pcgwLoaded ||
+      game.pcgwError
+    ) {
       if (
         pcgwResult.status ===
         "fulfilled"
       ) {
+        markLookupSuccess(
+          SERVICE_IDS.pcgw
+        );
+
         updatedGame =
           mergePcgwData(
             updatedGame,
             pcgwResult.value
           );
       } else {
+        markLookupFailure(
+          SERVICE_IDS.pcgw,
+          pcgwResult.reason
+        );
+
         updatedGame = {
           ...updatedGame,
 
@@ -1560,17 +2608,38 @@ export default function App() {
     // RENODX / LUMA
     // ============================================================
 
-    if (!game.renodxLoaded) {
+    if (
+      !game.renodxLoaded ||
+      game.renodxError
+    ) {
       if (
         hdrModsResult.status ===
         "fulfilled"
       ) {
+        markLookupSuccess(
+          SERVICE_IDS.renodx
+        );
+
+        markLookupSuccess(
+          SERVICE_IDS.luma
+        );
+
         updatedGame =
           mergeRenoDxData(
             updatedGame,
             hdrModsResult.value
           );
       } else {
+        markLookupFailure(
+          SERVICE_IDS.renodx,
+          hdrModsResult.reason
+        );
+
+        markLookupFailure(
+          SERVICE_IDS.luma,
+          hdrModsResult.reason
+        );
+
         updatedGame = {
           ...updatedGame,
 
@@ -1593,11 +2662,18 @@ export default function App() {
     // VORTEX
     // ============================================================
 
-    if (!game.vortexLoaded) {
+    if (
+      !game.vortexLoaded ||
+      game.vortexError
+    ) {
       if (
         vortexResult.status ===
         "fulfilled"
       ) {
+        markLookupSuccess(
+          SERVICE_IDS.vortex
+        );
+
         console.log(
           "[Vortex Frontend] Rust returned:",
           vortexResult.value
@@ -1610,6 +2686,11 @@ export default function App() {
             vortexResult.value
           );
       } else {
+        markLookupFailure(
+          SERVICE_IDS.vortex,
+          vortexResult.reason
+        );
+
         console.error(
           "[Vortex] Lookup failed:",
           vortexResult.reason
@@ -1631,6 +2712,51 @@ export default function App() {
             ),
         };
       }
+    }
+
+
+    console.info(
+      `[Performance] Selected game analysis: ${(performance.now() - analysisStarted).toFixed(0)} ms`
+    );
+
+    try {
+      storeGameInsight(
+        updatedGame
+      );
+    } catch (error) {
+      console.error(
+        "[Library Analysis] Failed to store selected-game insight:",
+        error
+      );
+    }
+
+    try {
+      recordGameAnalysis(
+        updatedGame
+      );
+    } catch (error) {
+      console.error(
+        "[Library Analysis] Failed to store selected-game analysis state:",
+        error
+      );
+    }
+
+    if (
+      !updatedGame.pcgwError &&
+      !updatedGame.renodxError &&
+      !updatedGame.vortexError
+    ) {
+      const timestamps =
+        loadAnalysisTimestamps();
+
+      timestamps[
+        updatedGame.id
+      ] =
+        Date.now();
+
+      saveAnalysisTimestamps(
+        timestamps
+      );
     }
 
 
@@ -1775,6 +2901,15 @@ export default function App() {
           showDashboard
         }
 
+        onShowSettings={
+          showSettings
+        }
+
+        settingsActive={
+          activeView ===
+          "settings"
+        }
+
         search={
           search
         }
@@ -1821,22 +2956,72 @@ export default function App() {
 
 
       <AppErrorBoundary>
-        <GameDetails
-          game={
-            selectedGame
-          }
-          onCheckForUpdates={
-            () =>
-              runUpdateCheck({
-                manual:
-                  true,
-              })
-          }
-          updateCheckStatus={
-            updateCheckStatus
-          }
-        />
+        {activeView ===
+        "settings" ? (
+          <SettingsScreen
+            onCheckForUpdates={
+              () =>
+                runUpdateCheck({
+                  manual:
+                    true,
+                })
+            }
+            updateCheckStatus={
+              updateCheckStatus
+            }
+          />
+        ) : (
+          <GameDetails
+            game={
+              selectedGame
+            }
+            libraryGames={
+              games
+            }
+            onAnalyzeRemaining={
+              () =>
+                startLibraryAnalysis(
+                  "remaining"
+                )
+            }
+            onRefreshStale={
+              () =>
+                startLibraryAnalysis(
+                  "stale"
+                )
+            }
+            libraryAnalysis={
+              libraryAnalysis
+            }
+            onCheckForUpdates={
+              () =>
+                runUpdateCheck({
+                  manual:
+                    true,
+                })
+            }
+            updateCheckStatus={
+              updateCheckStatus
+            }
+          />
+        )}
       </AppErrorBoundary>
+
+
+      <LibraryAnalysisPanel
+        analysis={
+          libraryAnalysis
+        }
+        gameCount={
+          games.length
+        }
+        onStart={
+          startLibraryAnalysis
+        }
+        onCancel={
+          cancelLibraryAnalysis
+        }
+      />
 
 
       {availableUpdate ? (

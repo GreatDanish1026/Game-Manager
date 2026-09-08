@@ -10,15 +10,10 @@ use std::{
         Path,
         PathBuf,
     },
+    time::Instant,
 };
 
 use serde::Serialize;
-
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 
 const MAX_SCAN_DEPTH: usize = 5;
@@ -741,64 +736,172 @@ fn find_name_contains(
 
 
 #[cfg(target_os = "windows")]
+#[repr(C)]
+struct VsFixedFileInfo {
+    signature: u32,
+    struct_version: u32,
+    file_version_ms: u32,
+    file_version_ls: u32,
+    product_version_ms: u32,
+    product_version_ls: u32,
+    file_flags_mask: u32,
+    file_flags: u32,
+    file_os: u32,
+    file_type: u32,
+    file_subtype: u32,
+    file_date_ms: u32,
+    file_date_ls: u32,
+}
+
+
+#[cfg(target_os = "windows")]
+#[link(name = "version")]
+extern "system" {
+    fn GetFileVersionInfoSizeW(
+        filename: *const u16,
+        handle: *mut u32,
+    ) -> u32;
+
+    fn GetFileVersionInfoW(
+        filename: *const u16,
+        handle: u32,
+        length: u32,
+        data: *mut std::ffi::c_void,
+    ) -> i32;
+
+    fn VerQueryValueW(
+        block: *const std::ffi::c_void,
+        sub_block: *const u16,
+        buffer: *mut *mut std::ffi::c_void,
+        length: *mut u32,
+    ) -> i32;
+}
+
+
+#[cfg(target_os = "windows")]
 fn file_version(
     path: &Path,
 ) -> Option<String> {
-    use std::process::Command;
+    use std::os::windows::ffi::OsStrExt;
 
-    /*
-     * Read the Windows VERSIONINFO resource without adding a new
-     * Rust dependency. The DLL path is passed through an environment
-     * variable so paths containing spaces, apostrophes, or other
-     * shell-sensitive characters do not need to be interpolated
-     * into the PowerShell command.
-     */
-    let output =
-        Command::new(
-            "powershell.exe"
-        )
-        .creation_flags(
-            CREATE_NO_WINDOW
-        )
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-WindowStyle",
-            "Hidden",
-            "-Command",
-            "$v = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($env:GM_FILE_VERSION_PATH); if ($v.FileVersion) { $v.FileVersion } elseif ($v.ProductVersion) { $v.ProductVersion }",
-        ])
-        .env(
-            "GM_FILE_VERSION_PATH",
-            path
-        )
-        .output()
-        .ok()?;
+    let wide_path =
+        path
+            .as_os_str()
+            .encode_wide()
+            .chain(
+                std::iter::once(
+                    0
+                )
+            )
+            .collect::<Vec<_>>();
 
-    if !output.status.success() {
+    let mut ignored_handle =
+        0u32;
+
+    let size =
+        unsafe {
+            GetFileVersionInfoSizeW(
+                wide_path.as_ptr(),
+                &mut ignored_handle,
+            )
+        };
+
+    if size == 0 {
         return None;
     }
 
-    let value =
-        String::from_utf8_lossy(
-            &output.stdout
-        )
-        .trim()
-        .trim_matches(
-            '\0'
-        )
-        .trim()
-        .to_string();
+    let mut data =
+        vec![
+            0u8;
+            size as usize
+        ];
 
-    if value.is_empty() {
-        None
-    } else {
-        Some(
-            value
-        )
+    let loaded =
+        unsafe {
+            GetFileVersionInfoW(
+                wide_path.as_ptr(),
+                0,
+                size,
+                data.as_mut_ptr()
+                    .cast(),
+            )
+        };
+
+    if loaded == 0 {
+        return None;
     }
-}
 
+    let root_query =
+        [
+            '\\' as u16,
+            0,
+        ];
+
+    let mut fixed_info_ptr:
+        *mut std::ffi::c_void =
+        std::ptr::null_mut();
+
+    let mut fixed_info_len =
+        0u32;
+
+    let queried =
+        unsafe {
+            VerQueryValueW(
+                data.as_ptr()
+                    .cast(),
+                root_query.as_ptr(),
+                &mut fixed_info_ptr,
+                &mut fixed_info_len,
+            )
+        };
+
+    if queried == 0
+        || fixed_info_ptr.is_null()
+        || fixed_info_len
+            < std::mem::size_of::<VsFixedFileInfo>()
+                as u32
+    {
+        return None;
+    }
+
+    let fixed_info =
+        unsafe {
+            &*(fixed_info_ptr
+                as *const VsFixedFileInfo)
+        };
+
+    if fixed_info.signature
+        != 0xFEEF04BD
+    {
+        return None;
+    }
+
+    let major =
+        fixed_info.file_version_ms
+            >> 16;
+
+    let minor =
+        fixed_info.file_version_ms
+            & 0xFFFF;
+
+    let build =
+        fixed_info.file_version_ls
+            >> 16;
+
+    let revision =
+        fixed_info.file_version_ls
+            & 0xFFFF;
+
+    Some(
+        format!(
+            "{}.{}.{}.{}",
+            major,
+            minor,
+            build,
+            revision
+        )
+    )
+}
 
 #[cfg(not(target_os = "windows"))]
 fn file_version(
@@ -1183,6 +1286,9 @@ pub fn inspect_local_installation(
     game_name: String,
     install_path: String,
 ) -> Result<LocalInstallationInfo, String> {
+    let total_started =
+        Instant::now();
+
     let root =
         PathBuf::from(
             install_path
@@ -1213,10 +1319,16 @@ pub fn inspect_local_installation(
         root.display()
     );
 
+    let scan_started =
+        Instant::now();
+
     let scan =
         scan_directory(
             &root
         )?;
+
+    let scan_elapsed =
+        scan_started.elapsed();
 
     let executable =
         detect_executable(
@@ -1245,6 +1357,16 @@ pub fn inspect_local_installation(
         "[LOCAL INSPECTOR] Files visited: {}, truncated: {}",
         scan.visited,
         scan.truncated
+    );
+
+    println!(
+        "[PERFORMANCE] Local directory scan: {} ms",
+        scan_elapsed.as_millis()
+    );
+
+    println!(
+        "[PERFORMANCE] Local installation analysis: {} ms",
+        total_started.elapsed().as_millis()
     );
 
     Ok(

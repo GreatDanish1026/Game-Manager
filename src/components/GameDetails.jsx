@@ -61,6 +61,42 @@ import {
 } from "../services/libraryInsights";
 
 
+function getGameCoverArt(game) {
+  if (!game) {
+    return null;
+  }
+
+  const explicitCover =
+    game.coverImageUrl
+    ?? game.coverArtUrl
+    ?? game.coverUrl
+    ?? game.imageUrl
+    ?? null;
+
+  if (explicitCover) {
+    return explicitCover;
+  }
+
+  const store =
+    String(game.store ?? "")
+      .trim()
+      .toLowerCase();
+
+  const launcherId =
+    String(game.launcherId ?? "")
+      .trim();
+
+  if (
+    store === "steam"
+    && launcherId
+  ) {
+    return `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${launcherId}/library_600x900.jpg`;
+  }
+
+  return null;
+}
+
+
 function InfoRow({
   icon: Icon,
   label,
@@ -560,6 +596,10 @@ function modSummary(
 
 export default function GameDetails({
   game,
+  libraryGames = [],
+  onAnalyzeRemaining,
+  onRefreshStale,
+  libraryAnalysis,
   onCheckForUpdates,
   updateCheckStatus,
 }) {
@@ -580,6 +620,29 @@ export default function GameDetails({
     setLaunchError,
   ] =
     useState(null);
+
+  const [
+    coverImageFailed,
+    setCoverImageFailed,
+  ] =
+    useState(false);
+
+  const coverArtUrl =
+    getGameCoverArt(
+      game
+    );
+
+
+  useEffect(
+    () => {
+      setCoverImageFailed(
+        false
+      );
+    },
+    [
+      coverArtUrl,
+    ]
+  );
 
 
   useEffect(
@@ -607,6 +670,18 @@ export default function GameDetails({
   if (!game) {
     return (
       <LibraryDashboard
+        games={
+          libraryGames
+        }
+        onAnalyzeRemaining={
+          onAnalyzeRemaining
+        }
+        onRefreshStale={
+          onRefreshStale
+        }
+        libraryAnalysis={
+          libraryAnalysis
+        }
         onCheckForUpdates={
           onCheckForUpdates
         }
@@ -895,7 +970,7 @@ export default function GameDetails({
             </div>
 
 
-            {game.coverImageUrl ? (
+            {coverArtUrl && !coverImageFailed ? (
               <div
                 data-pcgw-cover
                 className="
@@ -916,7 +991,7 @@ export default function GameDetails({
                 >
                   <img
                     src={
-                      game.coverImageUrl
+                      coverArtUrl
                     }
                     alt={
                       `${game.name} cover`
@@ -933,17 +1008,15 @@ export default function GameDetails({
                     loading="lazy"
                     referrerPolicy="no-referrer"
                     onError={
-                      (event) => {
+                      () => {
                         console.error(
                           "[PCGW] Cover image failed to load:",
-                          game.coverImageUrl
+                          coverArtUrl
                         );
 
-                        event.currentTarget
-                          .closest(
-                            "[data-pcgw-cover]"
-                          )
-                          ?.remove();
+                        setCoverImageFailed(
+                          true
+                        );
                       }
                     }
                   />

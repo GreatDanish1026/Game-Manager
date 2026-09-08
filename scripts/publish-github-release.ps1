@@ -62,7 +62,10 @@ foreach (
 # Confirm GitHub CLI authentication before changing anything.
 & gh auth status
 
-if ($LASTEXITCODE -ne 0) {
+if (
+    $LASTEXITCODE
+    -ne 0
+) {
     throw "GitHub CLI authentication is not ready. Run gh auth login first."
 }
 
@@ -104,14 +107,20 @@ Write-Host ""
 $Confirmation =
     Read-Host "Type RELEASE to continue"
 
-if ($Confirmation -ne "RELEASE") {
+if (
+    $Confirmation
+    -ne "RELEASE"
+) {
     Write-Host "Cancelled."
     exit 0
 }
 
 & gh @Arguments
 
-if ($LASTEXITCODE -ne 0) {
+if (
+    $LASTEXITCODE
+    -ne 0
+) {
     throw "GitHub release creation failed."
 }
 
@@ -119,3 +128,33 @@ Write-Host ""
 Write-Host "[PASS] GitHub release created." -ForegroundColor Green
 Write-Host "Verify:"
 Write-Host "https://github.com/GreatDanish1026/Game-Manager/releases/latest/download/latest.json"
+
+
+$RemoteValidator =
+    Join-Path(
+        $PSScriptRoot
+    ) "validate-updater-metadata.ps1"
+
+if (
+    Test-Path(
+        $RemoteValidator
+    )
+) {
+    Write-Host ""
+    Write-Host "Waiting briefly for GitHub release assets to become available..."
+    Start-Sleep -Seconds 3
+
+    & powershell `
+        -ExecutionPolicy Bypass `
+        -File $RemoteValidator `
+        -Repository "GreatDanish1026/Game-Manager" `
+        -ExpectedVersion $Version `
+        -Retries 5 `
+        -RetryDelaySeconds 3
+
+    if (
+        $LASTEXITCODE -ne 0
+    ) {
+        throw "Release was created, but remote updater metadata validation failed. Do not consider this release complete until latest.json is fixed."
+    }
+}

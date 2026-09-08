@@ -1,17 +1,17 @@
+use serde::Serialize;
+
+#[cfg(target_os = "windows")]
 use std::{
-    process::Command,
-};
-
-use serde::{
-    Deserialize,
-    Serialize,
+    collections::BTreeMap,
+    sync::OnceLock,
+    time::Instant,
 };
 
 #[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
+use winreg::{
+    enums::HKEY_LOCAL_MACHINE,
+    RegKey,
+};
 
 
 #[derive(Debug, Clone, Serialize)]
@@ -35,36 +35,6 @@ pub struct SystemHardwareInfo {
     pub os_name: Option<String>,
     pub os_version: Option<String>,
     pub gpus: Vec<GpuInfo>,
-}
-
-
-#[derive(Debug, Deserialize)]
-struct PowerShellGpu {
-    #[serde(rename = "Name")]
-    name: Option<String>,
-
-    #[serde(rename = "AdapterRAM")]
-    adapter_ram: Option<u64>,
-}
-
-
-#[derive(Debug, Deserialize)]
-struct PowerShellCpu {
-    #[serde(rename = "Name")]
-    name: Option<String>,
-}
-
-
-#[derive(Debug, Deserialize)]
-struct PowerShellOs {
-    #[serde(rename = "Caption")]
-    caption: Option<String>,
-
-    #[serde(rename = "Version")]
-    version: Option<String>,
-
-    #[serde(rename = "TotalVisibleMemorySize")]
-    total_visible_memory_size: Option<u64>,
 }
 
 
@@ -185,11 +155,6 @@ fn amd_ray_tracing_class(
         return false;
     }
 
-    /*
-     * Conservative family check:
-     * RX 6000 / 7000 / 9000-class desktop/mobile Radeon GPUs
-     * are treated as hardware ray-tracing-capable families.
-     */
     for marker in [
         "RX 6",
         "RX 7",
@@ -218,235 +183,622 @@ fn intel_arc(
 }
 
 
-fn parse_json_output<T>(
-    script: &str,
-) -> Result<T, String>
-where
-    T:
-        for<'de>
-            Deserialize<'de>,
-{
-    let output =
-        Command::new(
-            "powershell.exe"
-        )
-        .creation_flags(
-            CREATE_NO_WINDOW
-        )
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-WindowStyle",
-            "Hidden",
-            "-Command",
-            script,
-        ])
-        .output()
-        .map_err(
-            |error| {
-                format!(
-                    "Failed to run PowerShell hardware query: {}",
-                    error
-                )
-            }
-        )?;
-
-    if !output.status.success() {
-        return Err(
-            format!(
-                "PowerShell hardware query failed with exit code {:?}.",
-                output.status.code()
-            )
+#[cfg(target_os = "windows")]
+fn cpu_name_from_registry() -> Option<String> {
+    let hklm =
+        RegKey::predef(
+            HKEY_LOCAL_MACHINE
         );
+
+    let key =
+        hklm
+            .open_subkey(
+                r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"
+            )
+            .ok()?;
+
+    let value:
+        String =
+        key
+            .get_value(
+                "ProcessorNameString"
+            )
+            .ok()?;
+
+    let trimmed =
+        value.trim();
+
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(
+            trimmed.to_string()
+        )
+    }
+}
+
+
+#[cfg(target_os = "windows")]
+fn os_from_registry() -> (
+    Option<String>,
+    Option<String>,
+) {
+    let hklm =
+        RegKey::predef(
+            HKEY_LOCAL_MACHINE
+        );
+
+    let Ok(key) =
+        hklm.open_subkey(
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+        )
+    else {
+        return (
+            None,
+            None,
+        );
+    };
+
+    let mut product_name =
+        key
+            .get_value::<String, _>(
+                "ProductName"
+            )
+            .ok();
+
+    let display_version =
+        key
+            .get_value::<String, _>(
+                "DisplayVersion"
+            )
+            .ok()
+            .or_else(
+                || {
+                    key
+                        .get_value::<String, _>(
+                            "ReleaseId"
+                        )
+                        .ok()
+                }
+            );
+
+    let build =
+        key
+            .get_value::<String, _>(
+                "CurrentBuildNumber"
+            )
+            .ok();
+
+    let ubr =
+        key
+            .get_value::<u32, _>(
+                "UBR"
+            )
+            .ok();
+
+    if let (
+        Some(name),
+        Some(build_number),
+    ) = (
+        product_name.as_mut(),
+        build
+            .as_deref()
+            .and_then(
+                |value| {
+                    value.parse::<u32>()
+                        .ok()
+                }
+            ),
+    ) {
+        if build_number >= 22000
+            && name.contains(
+                "Windows 10"
+            )
+        {
+            *name =
+                name.replace(
+                    "Windows 10",
+                    "Windows 11",
+                );
+        }
     }
 
-    let text =
-        String::from_utf8_lossy(
-            &output.stdout
-        )
-        .trim()
-        .to_string();
+    let build_text =
+        match (
+            build.as_deref(),
+            ubr,
+        ) {
+            (
+                Some(build),
+                Some(ubr),
+            ) =>
+                Some(
+                    format!(
+                        "{}.{}",
+                        build,
+                        ubr
+                    )
+                ),
 
-    serde_json::from_str(
-        &text
-    )
-    .map_err(
-        |error| {
-            format!(
-                "Failed to parse hardware query result: {}",
-                error
-            )
-        }
+            (
+                Some(build),
+                None,
+            ) =>
+                Some(
+                    build.to_string()
+                ),
+
+            _ =>
+                None,
+        };
+
+    let version =
+        match (
+            display_version,
+            build_text,
+        ) {
+            (
+                Some(display),
+                Some(build),
+            ) =>
+                Some(
+                    format!(
+                        "{} (Build {})",
+                        display,
+                        build
+                    )
+                ),
+
+            (
+                Some(display),
+                None,
+            ) =>
+                Some(
+                    display
+                ),
+
+            (
+                None,
+                Some(build),
+            ) =>
+                Some(
+                    format!(
+                        "Build {}",
+                        build
+                    )
+                ),
+
+            _ =>
+                None,
+        };
+
+    (
+        product_name,
+        version,
     )
 }
 
 
 #[cfg(target_os = "windows")]
-fn query_gpus() -> Result<Vec<PowerShellGpu>, String> {
-    let value:
-        serde_json::Value =
-        parse_json_output(
-            "Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM | ConvertTo-Json -Compress"
-        )?;
+#[repr(C)]
+struct MemoryStatusEx {
+    length: u32,
+    memory_load: u32,
+    total_phys: u64,
+    avail_phys: u64,
+    total_page_file: u64,
+    avail_page_file: u64,
+    total_virtual: u64,
+    avail_virtual: u64,
+    avail_extended_virtual: u64,
+}
 
-    if value.is_array() {
-        serde_json::from_value(
-            value
+
+#[cfg(target_os = "windows")]
+#[link(name = "kernel32")]
+extern "system" {
+    fn GlobalMemoryStatusEx(
+        buffer: *mut MemoryStatusEx,
+    ) -> i32;
+}
+
+
+#[cfg(target_os = "windows")]
+fn total_ram_bytes() -> Option<u64> {
+    let mut status =
+        MemoryStatusEx {
+            length:
+                std::mem::size_of::<MemoryStatusEx>()
+                    as u32,
+            memory_load:
+                0,
+            total_phys:
+                0,
+            avail_phys:
+                0,
+            total_page_file:
+                0,
+            avail_page_file:
+                0,
+            total_virtual:
+                0,
+            avail_virtual:
+                0,
+            avail_extended_virtual:
+                0,
+        };
+
+    let success =
+        unsafe {
+            GlobalMemoryStatusEx(
+                &mut status
+            )
+        };
+
+    if success == 0 {
+        None
+    } else {
+        Some(
+            status.total_phys
         )
-        .map_err(
-            |error| {
-                error.to_string()
+    }
+}
+
+
+#[cfg(target_os = "windows")]
+fn raw_registry_memory_bytes(
+    key: &RegKey,
+) -> Option<u64> {
+    for value_name in [
+        "HardwareInformation.qwMemorySize",
+        "HardwareInformation.MemorySize",
+    ] {
+        let Ok(raw) =
+            key.get_raw_value(
+                value_name
+            )
+        else {
+            continue;
+        };
+
+        if raw.bytes.len() >= 8 {
+            let bytes:
+                [u8; 8] =
+                raw.bytes[0..8]
+                    .try_into()
+                    .ok()?;
+
+            return Some(
+                u64::from_le_bytes(
+                    bytes
+                )
+            );
+        }
+
+        if raw.bytes.len() >= 4 {
+            let bytes:
+                [u8; 4] =
+                raw.bytes[0..4]
+                    .try_into()
+                    .ok()?;
+
+            return Some(
+                u32::from_le_bytes(
+                    bytes
+                ) as u64
+            );
+        }
+    }
+
+    None
+}
+
+
+#[cfg(target_os = "windows")]
+fn add_gpu_registry_entry(
+    key: &RegKey,
+    found: &mut BTreeMap<String, (
+        String,
+        Option<u64>,
+    )>,
+) {
+    let name =
+        key
+            .get_value::<String, _>(
+                "DriverDesc"
+            )
+            .ok()
+            .or_else(
+                || {
+                    key
+                        .get_value::<String, _>(
+                            "Device Description"
+                        )
+                        .ok()
+                }
+            );
+
+    let Some(name) =
+        name
+            .map(
+                |value| {
+                    value.trim()
+                        .to_string()
+                }
+            )
+            .filter(
+                |value| {
+                    !value.is_empty()
+                }
+            )
+    else {
+        return;
+    };
+
+    let lower =
+        name.to_ascii_lowercase();
+
+    if lower.contains(
+        "microsoft basic"
+    )
+        || lower.contains(
+            "remote display"
+        )
+    {
+        return;
+    }
+
+    let memory =
+        raw_registry_memory_bytes(
+            key
+        );
+
+    let dedupe_key =
+        lower;
+
+    match found.get_mut(
+        &dedupe_key
+    ) {
+        Some((
+            _,
+            existing_memory,
+        )) => {
+            if memory.unwrap_or(0)
+                > existing_memory
+                    .unwrap_or(0)
+            {
+                *existing_memory =
+                    memory;
+            }
+        }
+
+        None => {
+            found.insert(
+                dedupe_key,
+                (
+                    name,
+                    memory,
+                ),
+            );
+        }
+    }
+}
+
+
+#[cfg(target_os = "windows")]
+fn query_gpus_from_class_registry(
+    found: &mut BTreeMap<String, (
+        String,
+        Option<u64>,
+    )>,
+) {
+    let hklm =
+        RegKey::predef(
+            HKEY_LOCAL_MACHINE
+        );
+
+    let Ok(class_key) =
+        hklm.open_subkey(
+            r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+        )
+    else {
+        return;
+    };
+
+    for subkey_name in
+        class_key.enum_keys()
+            .flatten()
+    {
+        if !subkey_name
+            .chars()
+            .all(
+                |character| {
+                    character.is_ascii_digit()
+                }
+            )
+        {
+            continue;
+        }
+
+        if let Ok(key) =
+            class_key.open_subkey(
+                &subkey_name
+            )
+        {
+            add_gpu_registry_entry(
+                &key,
+                found,
+            );
+        }
+    }
+}
+
+
+#[cfg(target_os = "windows")]
+fn query_gpus_from_video_registry(
+    found: &mut BTreeMap<String, (
+        String,
+        Option<u64>,
+    )>,
+) {
+    let hklm =
+        RegKey::predef(
+            HKEY_LOCAL_MACHINE
+        );
+
+    let Ok(video_key) =
+        hklm.open_subkey(
+            r"SYSTEM\CurrentControlSet\Control\Video"
+        )
+    else {
+        return;
+    };
+
+    for adapter_key_name in
+        video_key.enum_keys()
+            .flatten()
+    {
+        let Ok(adapter_key) =
+            video_key.open_subkey(
+                &adapter_key_name
+            )
+        else {
+            continue;
+        };
+
+        for child_name in
+            adapter_key.enum_keys()
+                .flatten()
+        {
+            let Ok(child_key) =
+                adapter_key.open_subkey(
+                    &child_name
+                )
+            else {
+                continue;
+            };
+
+            add_gpu_registry_entry(
+                &child_key,
+                found,
+            );
+        }
+    }
+}
+
+
+#[cfg(target_os = "windows")]
+fn query_gpus() -> Vec<GpuInfo> {
+    let mut found:
+        BTreeMap<String, (
+            String,
+            Option<u64>,
+        )> =
+        BTreeMap::new();
+
+    query_gpus_from_class_registry(
+        &mut found
+    );
+
+    query_gpus_from_video_registry(
+        &mut found
+    );
+
+    found
+        .into_values()
+        .map(
+            |(
+                name,
+                dedicated_memory_bytes,
+            )| {
+                GpuInfo {
+                    vendor:
+                        normalized_vendor(
+                            &name
+                        ),
+
+                    nvidia_rtx:
+                        nvidia_rtx(
+                            &name
+                        ),
+
+                    nvidia_frame_generation_capable:
+                        nvidia_frame_generation_capable(
+                            &name
+                        ),
+
+                    amd_ray_tracing_class:
+                        amd_ray_tracing_class(
+                            &name
+                        ),
+
+                    intel_arc:
+                        intel_arc(
+                            &name
+                        ),
+
+                    dedicated_memory_bytes,
+
+                    name,
+                }
             }
         )
-    } else {
-        let single:
-            PowerShellGpu =
-            serde_json::from_value(
-                value
-            )
-            .map_err(
-                |error| {
-                    error.to_string()
-                }
-            )?;
+        .collect()
+}
 
-        Ok(
-            vec![
-                single,
-            ]
-        )
+
+#[cfg(target_os = "windows")]
+fn detect_system_hardware() -> SystemHardwareInfo {
+    let started =
+        Instant::now();
+
+    let cpu_name =
+        cpu_name_from_registry();
+
+    let ram_bytes =
+        total_ram_bytes();
+
+    let (
+        os_name,
+        os_version,
+    ) =
+        os_from_registry();
+
+    let gpus =
+        query_gpus();
+
+    println!(
+        "[PERFORMANCE] Hardware detection: {} ms",
+        started.elapsed().as_millis()
+    );
+
+    SystemHardwareInfo {
+        cpu_name,
+        ram_bytes,
+        os_name,
+        os_version,
+        gpus,
     }
 }
 
 
 #[cfg(target_os = "windows")]
-fn query_cpu() -> Result<PowerShellCpu, String> {
-    parse_json_output(
-        "Get-CimInstance Win32_Processor | Select-Object -First 1 Name | ConvertTo-Json -Compress"
-    )
-}
-
-
-#[cfg(target_os = "windows")]
-fn query_os() -> Result<PowerShellOs, String> {
-    parse_json_output(
-        "Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,TotalVisibleMemorySize | ConvertTo-Json -Compress"
-    )
-}
+static HARDWARE_CACHE:
+    OnceLock<SystemHardwareInfo> =
+    OnceLock::new();
 
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
 pub fn get_system_hardware() -> Result<SystemHardwareInfo, String> {
-    let gpu_rows =
-        query_gpus()?;
-
-    let cpu =
-        query_cpu()
-            .ok();
-
-    let os =
-        query_os()
-            .ok();
-
-    let gpus =
-        gpu_rows
-            .into_iter()
-            .filter_map(
-                |row| {
-                    let name =
-                        row.name?
-                            .trim()
-                            .to_string();
-
-                    if name.is_empty() {
-                        return None;
-                    }
-
-                    Some(
-                        GpuInfo {
-                            vendor:
-                                normalized_vendor(
-                                    &name
-                                ),
-
-                            nvidia_rtx:
-                                nvidia_rtx(
-                                    &name
-                                ),
-
-                            nvidia_frame_generation_capable:
-                                nvidia_frame_generation_capable(
-                                    &name
-                                ),
-
-                            amd_ray_tracing_class:
-                                amd_ray_tracing_class(
-                                    &name
-                                ),
-
-                            intel_arc:
-                                intel_arc(
-                                    &name
-                                ),
-
-                            dedicated_memory_bytes:
-                                row.adapter_ram,
-
-                            name,
-                        }
-                    )
-                }
-            )
-            .collect::<Vec<_>>();
-
-    let ram_bytes =
-        os.as_ref()
-            .and_then(
-                |value| {
-                    value
-                        .total_visible_memory_size
-                }
-            )
-            .map(
-                |kilobytes| {
-                    kilobytes
-                        .saturating_mul(
-                            1024
-                        )
-                }
+    let cached =
+        HARDWARE_CACHE
+            .get_or_init(
+                detect_system_hardware
             );
 
     Ok(
-        SystemHardwareInfo {
-            cpu_name:
-                cpu
-                    .and_then(
-                        |value| {
-                            value.name
-                        }
-                    ),
-
-            ram_bytes,
-
-            os_name:
-                os.as_ref()
-                    .and_then(
-                        |value| {
-                            value.caption
-                                .clone()
-                        }
-                    ),
-
-            os_version:
-                os.and_then(
-                    |value| {
-                        value.version
-                    }
-                ),
-
-            gpus,
-        }
+        cached.clone()
     )
 }
 

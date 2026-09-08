@@ -1,4 +1,6 @@
 import {
+  ChevronDown,
+  ChevronUp,
   EyeOff,
   Eye,
   Filter,
@@ -6,6 +8,7 @@ import {
   RefreshCcw,
   RotateCcw,
   Search,
+  Settings2,
   SlidersHorizontal,
   Star,
   Tag,
@@ -140,6 +143,7 @@ function GameRow({
   onSelect,
   onHide,
   onRestore,
+  compact = false,
 }) {
   const metadata =
     getGameUserMetadata(
@@ -169,14 +173,18 @@ function GameRow({
               game
             )
         }
-        className="
+        className={`
           block
           w-full
           px-3
-          py-3
           pr-10
           text-left
-        "
+          ${
+            compact
+              ? "py-2"
+              : "py-3"
+          }
+        `}
       >
         <div
           className="
@@ -355,6 +363,8 @@ export default function Sidebar({
   selectedGame,
   onSelectGame,
   onShowDashboard,
+  onShowSettings,
+  settingsActive = false,
   search: _externalSearch,
   onSearchChange: _onExternalSearchChange,
   loading,
@@ -413,6 +423,77 @@ export default function Sidebar({
     setMetadataRevision,
   ] =
     useState(0);
+
+  const [
+    filtersExpanded,
+    setFiltersExpanded,
+  ] =
+    useState(false);
+
+  const [
+    compactGameRows,
+    setCompactGameRows,
+  ] =
+    useState(
+      () => {
+        try {
+          const raw =
+            localStorage.getItem(
+              "game-manager-settings-v1"
+            );
+
+          return Boolean(
+            raw
+              ? JSON.parse(raw)
+                  ?.compactGameRows
+              : false
+          );
+        } catch {
+          return false;
+        }
+      }
+    );
+
+
+  useEffect(
+    () => {
+      const refreshSettings =
+        () => {
+          try {
+            const raw =
+              localStorage.getItem(
+                "game-manager-settings-v1"
+              );
+
+            setCompactGameRows(
+              Boolean(
+                raw
+                  ? JSON.parse(raw)
+                      ?.compactGameRows
+                  : false
+              )
+            );
+          } catch {
+            setCompactGameRows(
+              false
+            );
+          }
+        };
+
+      window.addEventListener(
+        "game-manager-settings-changed",
+        refreshSettings
+      );
+
+      return () => {
+        window.removeEventListener(
+          "game-manager-settings-changed",
+          refreshSettings
+        );
+      };
+    },
+    []
+  );
 
 
   useEffect(
@@ -896,6 +977,80 @@ export default function Sidebar({
         </button>
 
 
+        <button
+          type="button"
+          onClick={
+            onShowSettings
+          }
+          className={`
+            mt-2
+            flex
+            w-full
+            items-center
+            gap-3
+            rounded-xl
+            border
+            px-3
+            py-2
+            text-left
+            transition
+            ${
+              settingsActive
+                ? "border-cyan-500/30 bg-cyan-500/[0.08] text-cyan-100"
+                : "border-white/[0.07] bg-white/[0.02] text-white/45 hover:border-white/[0.11] hover:bg-white/[0.045] hover:text-white/75"
+            }
+          `}
+          title="Open Game Manager settings"
+        >
+          <div
+            className={`
+              flex
+              h-8
+              w-8
+              shrink-0
+              items-center
+              justify-center
+              rounded-lg
+              ${
+                settingsActive
+                  ? "bg-cyan-500/10 text-cyan-300"
+                  : "bg-white/[0.035] text-white/35"
+              }
+            `}
+          >
+            <Settings2
+              className="h-4 w-4"
+            />
+          </div>
+
+          <div
+            className="
+              min-w-0
+              flex-1
+            "
+          >
+            <div
+              className="
+                text-sm
+                font-semibold
+              "
+            >
+              Settings
+            </div>
+
+            <div
+              className="
+                mt-0.5
+                text-[10px]
+                opacity-55
+              "
+            >
+              Preferences & cache controls
+            </div>
+          </div>
+        </button>
+
+
         <div
           className="
             relative
@@ -1061,6 +1216,101 @@ export default function Sidebar({
 
 
         {!showHiddenGames ? (
+          <>
+            <button
+              type="button"
+              onClick={
+                () =>
+                  setFiltersExpanded(
+                    (current) =>
+                      !current
+                  )
+              }
+              className="
+                mt-3
+                flex
+                w-full
+                items-center
+                justify-between
+                gap-3
+                rounded-xl
+                border
+                border-white/[0.07]
+                bg-black/10
+                px-3
+                py-2
+                text-left
+                transition
+                hover:border-white/[0.11]
+                hover:bg-white/[0.035]
+              "
+            >
+              <div
+                className="
+                  flex
+                  min-w-0
+                  items-center
+                  gap-2
+                "
+              >
+                <SlidersHorizontal
+                  className="
+                    h-3.5
+                    w-3.5
+                    shrink-0
+                    text-cyan-300/65
+                  "
+                />
+
+                <span
+                  className="
+                    text-[11px]
+                    font-semibold
+                    text-white/55
+                  "
+                >
+                  Library Filters
+                </span>
+
+                {hasActiveFilters ? (
+                  <span
+                    className="
+                      rounded-full
+                      bg-cyan-500/10
+                      px-2
+                      py-0.5
+                      text-[9px]
+                      font-semibold
+                      text-cyan-200/75
+                    "
+                  >
+                    Active
+                  </span>
+                ) : null}
+              </div>
+
+              {filtersExpanded ? (
+                <ChevronUp
+                  className="
+                    h-3.5
+                    w-3.5
+                    shrink-0
+                    text-white/30
+                  "
+                />
+              ) : (
+                <ChevronDown
+                  className="
+                    h-3.5
+                    w-3.5
+                    shrink-0
+                    text-white/30
+                  "
+                />
+              )}
+            </button>
+
+            {filtersExpanded ? (
           <div
             className="
               mt-3
@@ -1417,6 +1667,8 @@ export default function Sidebar({
               ) : null}
             </label>
           </div>
+            ) : null}
+          </>
         ) : null}
       </div>
 
@@ -1580,6 +1832,9 @@ export default function Sidebar({
                     }
                     onRestore={
                       onRestoreGame
+                    }
+                    compact={
+                      compactGameRows
                     }
                   />
                 )

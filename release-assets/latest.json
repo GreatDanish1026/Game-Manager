@@ -1,11 +1,11 @@
-﻿{
+{
+    "version":  "1.1.0",
+    "notes":  "Game Manager v1.1.0",
+    "pub_date":  "2026-09-08T23:24:39Z",
     "platforms":  {
                       "windows-x86_64":  {
-                                             "signature":  "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTK2dVZHZhY0J4akF0M1Z3aVlwRjQ5RnJFWWx0RjVEVG5RS2xUQUJUMHR3WHNtTmUxZGJMUGFiQWUwaWRGMURxbGU5Y1NpeGJiZXBocnpOUU85SVcvUGFIU0QyV2tGUEEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODk1MzU3CWZpbGU6R2FtZSBNYW5hZ2VyXzEuMC4wX3g2NC1zZXR1cC5leGUKWEJaa1FJS1FZaW8vVnJTZDIxMlRVd2tIQUlRWXk4MTZYa1NqOWZQamF4S2xtejNyaHVFMVJpaDlMUFBmT1NPc08rRW1wV09KUmJpbWxHc3VqNnJOREE9PQo=",
-                                             "url":  "https://github.com/GreatDanish1026/Game-Manager/releases/download/v1.0.0/GameManager_1.0.0_x64-setup.exe"
+                                             "signature":  "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTK2dVZHZhY0J4akNITWJ1UkpLU2ZiWDJQQ00rV2NVZlRmVlBUczFhT3VQUlJPSXlWL21tSUZPSXFFaFU0S00ya3NVdjVpQjlXcmhQMmozRVU1bFphOG8xQmVWRHQyVWc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTA5NDgyCWZpbGU6R2FtZSBNYW5hZ2VyXzEuMS4wX3g2NC1zZXR1cC5leGUKZEJVY1RZc3V6UkREYW9uL2s0N0V4cHVNYldaS3FPNlFEb1dseGN3TFAzZS92ZG81NERJV0hGMmVoNTdZMFdNNVNaN1lEYlJtUHZXRFZPaHZPMjd6RHc9PQo=",
+                                             "url":  "https://github.com/GreatDanish1026/Game-Manager/releases/download/v1.1.0/GameManager_1.1.0_x64-setup.exe"
                                          }
-                  },
-    "pub_date":  "2026-09-08T19:23:06Z",
-    "version":  "1.0.0",
-    "notes":  "Game Manager v1.0.0"
+                  }
 }
