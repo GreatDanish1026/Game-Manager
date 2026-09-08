@@ -560,6 +560,8 @@ function modSummary(
 
 export default function GameDetails({
   game,
+  onCheckForUpdates,
+  updateCheckStatus,
 }) {
   const [
     pathError,
@@ -604,7 +606,14 @@ export default function GameDetails({
 
   if (!game) {
     return (
-      <LibraryDashboard />
+      <LibraryDashboard
+        onCheckForUpdates={
+          onCheckForUpdates
+        }
+        updateCheckStatus={
+          updateCheckStatus
+        }
+      />
     );
   }
 

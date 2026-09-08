@@ -1,6 +1,6 @@
 [package]
 name = "GameManager"
-version = "0.6.0"
+version = "1.0.0"
 description = "A Tauri App"
 authors = ["Scott Dinwiddie"]
 edition = "2021"

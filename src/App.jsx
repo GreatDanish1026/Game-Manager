@@ -6,6 +6,8 @@ import {
 
 import Sidebar from "./components/Sidebar";
 import GameDetails from "./components/GameDetails";
+import AppErrorBoundary from "./components/AppErrorBoundary";
+import UpdateNotification from "./components/UpdateNotification";
 
 import {
   getInstalledGames,
@@ -26,6 +28,10 @@ import {
 import {
   checkForUpdates,
 } from "./services/updater";
+
+import {
+  saveLibrarySnapshot,
+} from "./services/libraryInsights";
 
 
 const HIDDEN_GAMES_STORAGE_KEY =
@@ -1175,6 +1181,19 @@ export default function App() {
     useState(null);
 
 
+  const [
+    updateCheckStatus,
+    setUpdateCheckStatus,
+  ] =
+    useState({
+      state:
+        "idle",
+
+      message:
+        null,
+    });
+
+
   async function scanGames() {
     setLoading(
       true
@@ -1248,31 +1267,91 @@ export default function App() {
   );
 
 
+  async function runUpdateCheck({
+    manual = false,
+  } = {}) {
+    if (manual) {
+      setUpdateCheckStatus({
+        state:
+          "checking",
+
+        message:
+          null,
+      });
+    }
+
+    try {
+      const result =
+        await checkForUpdates();
+
+      const update =
+        result?.available
+          ? result.update
+          : null;
+
+      setAvailableUpdate(
+        update
+      );
+
+      if (manual) {
+        setUpdateCheckStatus({
+          state:
+            update
+              ? "available"
+              : "current",
+
+          message:
+            update
+              ? `Game Manager ${update.version} is available.`
+              : "You are running the latest available version.",
+        });
+      }
+    } catch (error) {
+      console.error(
+        "[Updater] Check failed:",
+        error
+      );
+
+      /*
+       * Automatic update-check failures are intentionally silent.
+       * Offline users should not receive a warning every time the
+       * application starts. Manual checks surface the error where
+       * the user explicitly requested the operation.
+       */
+      if (manual) {
+        setUpdateCheckStatus({
+          state:
+            "error",
+
+          message:
+            String(error),
+        });
+      }
+    }
+  }
+
+
   useEffect(
     () => {
-      async function checkVersion() {
-        try {
-          const result =
-            await checkForUpdates();
-
-
-          setAvailableUpdate(
-            result?.available
-              ? result.update
-              : null
-          );
-        } catch (error) {
-          console.error(
-            "[Updater] Check failed:",
-            error
-          );
-        }
-      }
-
-
-      checkVersion();
+      runUpdateCheck({
+        manual:
+          false,
+      });
     },
     []
+  );
+
+
+  useEffect(
+    () => {
+      saveLibrarySnapshot(
+        games,
+        games.length
+      );
+    },
+    [
+      games,
+    ]
   );
 
 
@@ -1666,6 +1745,7 @@ export default function App() {
         text-white
       "
     >
+      <AppErrorBoundary>
       <Sidebar
         games={
           filteredGames
@@ -1737,84 +1817,43 @@ export default function App() {
       />
 
 
-      <GameDetails
-        game={
-          selectedGame
-        }
-      />
+      </AppErrorBoundary>
+
+
+      <AppErrorBoundary>
+        <GameDetails
+          game={
+            selectedGame
+          }
+          onCheckForUpdates={
+            () =>
+              runUpdateCheck({
+                manual:
+                  true,
+              })
+          }
+          updateCheckStatus={
+            updateCheckStatus
+          }
+        />
+      </AppErrorBoundary>
 
 
       {availableUpdate ? (
-        <div
-          className="
-            fixed
-            bottom-5
-            right-5
-            z-50
-            w-[380px]
-            rounded-xl
-            border
-            border-cyan-500/30
-            bg-[#121923]
-            p-4
-            shadow-2xl
-          "
-        >
-          <div
-            className="
-              text-sm
-              font-semibold
-              text-white
-            "
-          >
-            Update Available
-          </div>
-
-          <div
-            className="
-              mt-1
-              text-sm
-              text-white/70
-            "
-          >
-            Game Manager{" "}
-
-            <span
-              className="
-                font-semibold
-                text-cyan-300
-              "
-            >
-              {
-                availableUpdate
-                  .version
-              }
-            </span>
-
-            {" "}is available.
-          </div>
-
-
-          {availableUpdate.body ? (
-            <div
-              className="
-                mt-3
-                max-h-28
-                overflow-y-auto
-                whitespace-pre-wrap
-                text-xs
-                leading-relaxed
-                text-white/45
-              "
-            >
-              {
-                availableUpdate
-                  .body
-              }
-            </div>
-          ) : null}
-        </div>
+        <UpdateNotification
+          update={
+            availableUpdate
+          }
+          onDismiss={
+            () =>
+              setAvailableUpdate(
+                null
+              )
+          }
+        />
       ) : null}
+
+
     </div>
   );
 }

@@ -32,7 +32,6 @@ import {
   getGameInsight,
   getLibraryInsights,
   insightMatchesFilter,
-  saveLibrarySnapshot,
 } from "../services/libraryInsights";
 
 
@@ -480,19 +479,6 @@ export default function Sidebar({
     ]
   );
 
-
-  useEffect(
-    () => {
-      saveLibrarySnapshot(
-        games,
-        totalGames
-      );
-    },
-    [
-      games,
-      totalGames,
-    ]
-  );
 
   const analyzedCount =
     useMemo(

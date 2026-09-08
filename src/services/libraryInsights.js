@@ -168,20 +168,7 @@ export function saveLibrarySnapshot(
   games,
   totalGames
 ) {
-  const current =
-    parseStored(
-      SNAPSHOT_KEY,
-      {
-        games: {},
-      }
-    );
-
-  const indexed = {
-    ...(
-      current.games
-      ?? {}
-    ),
-  };
+  const indexed = {};
 
   for (
     const game
@@ -190,32 +177,86 @@ export function saveLibrarySnapshot(
     const key =
       gameInsightKey(game);
 
+    if (!key) {
+      continue;
+    }
+
     indexed[key] = {
-      id: game.id ?? null,
-      name: game.name ?? "Unknown Game",
-      store: game.store ?? "Unknown",
+      id:
+        game.id
+        ?? null,
+
+      name:
+        game.name
+        ?? "Unknown Game",
+
+      store:
+        game.store
+        ?? "Unknown",
+
       launcherId:
         game.launcherId
         ?? null,
     };
   }
 
+  const snapshot = {
+    updatedAt:
+      new Date()
+        .toISOString(),
+
+    totalGames:
+      Number(
+        totalGames
+        ?? Object.keys(
+          indexed
+        ).length
+      ),
+
+    games:
+      indexed,
+  };
+
   localStorage.setItem(
     SNAPSHOT_KEY,
-    JSON.stringify({
-      totalGames:
-        Number(
-          totalGames
-          ?? Object.keys(indexed).length
-        ),
-
-      updatedAt:
-        new Date().toISOString(),
-
-      games:
-        indexed,
-    })
+    JSON.stringify(snapshot)
   );
+
+  const insights =
+    getLibraryInsights();
+
+  let changed =
+    false;
+
+  for (
+    const key
+    of Object.keys(insights)
+  ) {
+    if (
+      !Object.prototype
+        .hasOwnProperty
+        .call(
+          indexed,
+          key
+        )
+    ) {
+      delete insights[key];
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    localStorage.setItem(
+      INSIGHTS_KEY,
+      JSON.stringify(insights)
+    );
+
+    window.dispatchEvent(
+      new CustomEvent(
+        "game-manager-library-insights-changed"
+      )
+    );
+  }
 
   window.dispatchEvent(
     new CustomEvent(
@@ -223,6 +264,7 @@ export function saveLibrarySnapshot(
     )
   );
 }
+
 
 export function getLibrarySnapshot() {
   return parseStored(

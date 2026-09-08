@@ -1,0 +1,110 @@
+GAME MANAGER v1.0.0 RELEASE CANDIDATE CHECKLIST
+
+BUILD
+[ ] package.json version is 1.0.0
+[ ] src-tauri/Cargo.toml version is 1.0.0
+[ ] src-tauri/tauri.conf.json version is 1.0.0
+[ ] Repository URL is https://github.com/GreatDanish1026/Game-Manager
+[ ] cargo check passes
+[ ] npm run build passes
+[ ] npm run tauri:build passes
+
+CORE LIBRARY
+[ ] Steam scan
+[ ] Epic scan
+[ ] GOG scan
+[ ] Ubisoft scan
+[ ] Duplicate games are not shown
+[ ] Hidden games persist after restart
+[ ] Restore hidden games works
+[ ] Favorites persist
+[ ] Tags persist
+[ ] Search works
+[ ] Sorting works
+[ ] Advanced capability filters work
+
+DASHBOARD
+[ ] Library Overview navigation works
+[ ] Installed count is correct
+[ ] Storefront breakdown is correct
+[ ] Favorites count is correct
+[ ] Analyzed count/coverage is reasonable
+[ ] Uninstalled games disappear after rescan
+[ ] Hidden Games view does not corrupt dashboard totals
+[ ] About card reports 1.0.0
+[ ] GitHub button opens the correct repository
+
+GAME DETAILS
+[ ] PCGamingWiki match
+[ ] Cover artwork
+[ ] Video features
+[ ] Essential Improvements
+[ ] Known Issues & Fixes
+[ ] Controller support
+[ ] Technical paths
+[ ] Open install/config/save path
+[ ] Installation Health
+[ ] Hardware Compatibility
+[ ] Local Installation Inspector
+[ ] Local inspector Rescan
+
+GRAPHICS / MODS
+[ ] DLSS detection/version
+[ ] DLSS Frame Generation detection/version
+[ ] XeSS detection/version
+[ ] FSR detection/version
+[ ] ReShade detection
+[ ] RenoDX lookup
+[ ] Luma lookup
+[ ] RHI launch
+[ ] Vortex support
+[ ] Fluffy support
+
+GAME ACTIONS
+[ ] Steam launch
+[ ] Epic launch
+[ ] GOG launch
+[ ] Ubisoft launch
+[ ] Create save backup
+[ ] Restore save backup
+[ ] Pre-restore safety backup is created
+
+UPDATER
+[ ] No-update state is silent
+[ ] Network/update-feed error does not block startup
+[ ] Update Available shows version/body
+[ ] Later dismisses notification
+[ ] Install Update downloads successfully
+[ ] Download progress updates
+[ ] Installation failure shows readable error
+[ ] Successful install prompts restart
+[ ] latest.json endpoint uses Game-Manager repository
+[ ] Production updater signature validates
+
+INSTALLER
+[ ] Clean install on Windows 11
+[ ] App launches from Start Menu
+[ ] App icon is correct
+[ ] Upgrade over previous release works
+[ ] User preferences survive upgrade
+[ ] Uninstall works
+[ ] Reinstall works
+
+FAILURE / RESILIENCE
+[ ] Launch with internet disconnected
+[ ] PCGamingWiki failure does not blank UI
+[ ] RenoDX/Luma failure does not blank UI
+[ ] Vortex failure does not blank UI
+[ ] Update server failure does not blank UI
+[ ] Missing game directory shows readable error
+[ ] Error boundary replaces blank screen
+[ ] Dev console has no repeated React warnings
+
+FINAL
+[ ] Build final NSIS installer
+[ ] Install final NSIS build on clean/test machine
+[ ] Generate updater artifacts/signatures
+[ ] Publish GitHub Release
+[ ] Upload installer + updater artifacts
+[ ] Verify latest.json is publicly reachable
+[ ] Validate actual upgrade from previous version to 1.0.0

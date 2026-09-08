@@ -22,6 +22,8 @@ import {
   getGameUserMetadata,
 } from "../services/userGameMetadata";
 
+import AboutCard from "./AboutCard";
+
 function StatCard({
   icon: Icon,
   label,
@@ -127,7 +129,10 @@ function CountRow({
   );
 }
 
-export default function LibraryDashboard() {
+export default function LibraryDashboard({
+  onCheckForUpdates,
+  updateCheckStatus,
+}) {
   const [
     revision,
     setRevision,
@@ -224,6 +229,23 @@ export default function LibraryDashboard() {
 
           analyzed:
             insights.length,
+
+          analyzedCoverage:
+            (
+              snapshot.totalGames
+              || games.length
+            ) > 0
+              ? Math.round(
+                  (
+                    insights.length
+                    / (
+                      snapshot.totalGames
+                      || games.length
+                    )
+                  )
+                  * 100
+                )
+              : 0,
 
           favorites:
             games.filter(
@@ -395,7 +417,7 @@ export default function LibraryDashboard() {
             value={
               data.analyzed
             }
-            detail="Opened and enriched games"
+            detail={`${data.analyzedCoverage}% library coverage`}
           />
 
           <StatCard
@@ -603,6 +625,22 @@ export default function LibraryDashboard() {
         <div
           className="
             mt-5
+          "
+        >
+          <AboutCard
+            onCheckForUpdates={
+              onCheckForUpdates
+            }
+            updateCheckStatus={
+              updateCheckStatus
+            }
+          />
+        </div>
+
+
+        <div
+          className="
+            mt-4
             rounded-xl
             border
             border-cyan-500/10

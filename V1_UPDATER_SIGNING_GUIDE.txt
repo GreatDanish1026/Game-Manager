@@ -1,0 +1,115 @@
+GAME MANAGER v1.0.0 - FINAL UPDATER CONFIGURATION
+
+This package intentionally does NOT overwrite tauri.conf.json because the current
+project configuration may contain settings not present in the development ZIPs.
+
+1. REQUIRED TAURI CONFIGURATION
+
+In src-tauri/tauri.conf.json, confirm the existing configuration contains:
+
+"bundle": {
+  ...
+  "createUpdaterArtifacts": true
+}
+
+and:
+
+"plugins": {
+  ...
+  "updater": {
+    "pubkey": "<YOUR EXISTING TAURI UPDATER PUBLIC KEY>",
+    "endpoints": [
+      "https://github.com/GreatDanish1026/Game-Manager/releases/latest/download/latest.json"
+    ],
+    "windows": {
+      "installMode": "passive"
+    }
+  }
+}
+
+IMPORTANT:
+- Keep the existing Tauri identifier unchanged.
+- The updater public key must be the PUBLIC key content, not a path.
+- Never commit the private signing key.
+- HTTPS should remain enabled for production.
+- "passive" is appropriate for the Windows updater UI.
+
+2. VALIDATE CONFIGURATION
+
+From the project root:
+
+powershell -ExecutionPolicy Bypass -File ".\scripts\validate-v1-release.ps1"
+
+This verifies:
+- package.json version
+- Cargo.toml version
+- tauri.conf.json version
+- Tauri identifier exists
+- createUpdaterArtifacts is enabled
+- updater public key exists
+- updater endpoint uses the Game-Manager repository
+
+3. GENERATE A SIGNING KEY ONLY IF YOU DO NOT ALREADY HAVE ONE
+
+DO NOT replace an updater signing key after users have installed a release signed
+with it. Existing installations trust the public key embedded in the app.
+
+Example generation command:
+
+npm run tauri signer generate -- -w "$HOME\.tauri\game-manager.key"
+
+Store the private key securely and back it up.
+
+4. BUILD SIGNED UPDATE ARTIFACTS
+
+In the SAME PowerShell session used for the build:
+
+$env:TAURI_SIGNING_PRIVATE_KEY="C:\secure\path\game-manager.key"
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<your key password>"
+
+Then:
+
+npm run tauri:build
+
+Tauri will create the normal Windows installer plus updater signature artifacts
+when createUpdaterArtifacts is true.
+
+Do not put the private key or its password in:
+- source code
+- package.json
+- tauri.conf.json
+- Git
+- latest.json
+- release notes
+
+5. GITHUB RELEASE
+
+Repository:
+https://github.com/GreatDanish1026/Game-Manager
+
+The updater endpoint expects the latest release to expose:
+
+https://github.com/GreatDanish1026/Game-Manager/releases/latest/download/latest.json
+
+The latest.json manifest must point at the correct Windows updater artifact and
+include its updater signature.
+
+6. TEST THE REAL UPDATE PATH
+
+Do not consider the updater validated just because v1.0.0 launches.
+
+Recommended release-candidate test:
+- Install a signed older test build.
+- Publish a signed newer test build to a temporary/prerelease channel or controlled release.
+- Confirm Game Manager detects it.
+- Confirm Install Update downloads.
+- Confirm signature validation succeeds.
+- Confirm installation completes.
+- Reopen Game Manager.
+- Confirm About reports the new version.
+- Confirm Favorites, Tags, Hidden Games and library metadata survive the upgrade.
+
+7. SECURITY NOTE
+
+Tauri updater signatures are mandatory. The private updater key is effectively
+part of the application's long-term update trust chain. Protect it accordingly.
