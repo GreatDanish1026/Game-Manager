@@ -1,6 +1,6 @@
 {
   "name": "game-manager",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "A cross‑platform desktop app to manage your game library – built with Tauri, React, Vite, and Tailwind CSS.",
   "main": "src/index.js",

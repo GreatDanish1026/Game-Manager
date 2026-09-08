@@ -19,6 +19,10 @@ import {
   getRenoDxModStatus,
 } from "./services/renodx";
 
+import {
+  checkForUpdates,
+} from "./services/updater";
+
 
 const HIDDEN_GAMES_STORAGE_KEY =
   "game-manager-hidden-games";
@@ -392,11 +396,6 @@ function mergePcgwData(
     controllerCompatibility:
       mergedControllerCompatibility,
 
-    /*
-     * ============================================================
-     * TECHNICAL INFORMATION
-     * ============================================================
-     */
     technical: {
       ...game.technical,
 
@@ -420,8 +419,8 @@ function mergePcgwData(
 
 
   console.log(
-    "[PCGW MERGE] Technical Information:",
-    mergedGame.technical
+    "[PCGW MERGE] Final merged game:",
+    mergedGame
   );
 
   return mergedGame;
@@ -519,6 +518,16 @@ export default function App() {
     setShowHiddenGames,
   ] = useState(false);
 
+  const [
+    availableUpdate,
+    setAvailableUpdate,
+  ] = useState(null);
+
+  const [
+    updateCheckError,
+    setUpdateCheckError,
+  ] = useState(null);
+
 
   async function scanGames() {
     console.log(
@@ -587,6 +596,66 @@ export default function App() {
 
   useEffect(() => {
     scanGames();
+  }, []);
+
+
+  /*
+   * Check for a newer Game Manager version
+   * when the application starts.
+   */
+  useEffect(() => {
+    async function checkVersion() {
+      console.log(
+        "[Updater] Starting automatic update check..."
+      );
+
+      setUpdateCheckError(
+        null
+      );
+
+      try {
+        const result =
+          await checkForUpdates();
+
+        console.log(
+          "[Updater] Update check result:",
+          result
+        );
+
+        if (
+          result?.available &&
+          result?.update
+        ) {
+          console.log(
+            "[Updater] Update available:",
+            result.update.version
+          );
+
+          setAvailableUpdate(
+            result.update
+          );
+        } else {
+          console.log(
+            "[Updater] Game Manager is up to date."
+          );
+
+          setAvailableUpdate(
+            null
+          );
+        }
+      } catch (error) {
+        console.error(
+          "[Updater] Automatic update check failed:",
+          error
+        );
+
+        setUpdateCheckError(
+          String(error)
+        );
+      }
+    }
+
+    checkVersion();
   }, []);
 
 
@@ -727,11 +796,6 @@ export default function App() {
         pcgwResult.status ===
         "fulfilled"
       ) {
-        console.log(
-          "[PCGW FRONTEND] Rust returned:",
-          pcgwResult.value
-        );
-
         updatedGame =
           mergePcgwData(
             updatedGame,
@@ -787,17 +851,6 @@ export default function App() {
         };
       }
     }
-
-
-    console.log(
-      "[Game Manager] Final game:",
-      updatedGame
-    );
-
-    console.log(
-      "[Game Manager] Technical:",
-      updatedGame.technical
-    );
 
 
     setGames(
@@ -978,6 +1031,94 @@ export default function App() {
           selectedGame
         }
       />
+
+
+      {availableUpdate ? (
+        <div
+          className="
+            fixed
+            bottom-5
+            right-5
+            z-50
+            w-[380px]
+            rounded-xl
+            border
+            border-cyan-500/30
+            bg-[#121923]
+            p-4
+            shadow-2xl
+          "
+        >
+          <div
+            className="
+              text-sm
+              font-semibold
+              text-white
+            "
+          >
+            Update Available
+          </div>
+
+          <div
+            className="
+              mt-1
+              text-sm
+              text-white/70
+            "
+          >
+            Game Manager{" "}
+            <span
+              className="
+                font-semibold
+                text-cyan-300
+              "
+            >
+              {availableUpdate.version}
+            </span>{" "}
+            is available.
+          </div>
+
+
+          {availableUpdate.body ? (
+            <div
+              className="
+                mt-3
+                max-h-28
+                overflow-y-auto
+                whitespace-pre-wrap
+                text-xs
+                leading-relaxed
+                text-white/45
+              "
+            >
+              {availableUpdate.body}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+
+      {updateCheckError ? (
+        <div
+          className="
+            fixed
+            bottom-5
+            right-5
+            z-40
+            hidden
+          "
+        >
+          {/*
+            Intentionally hidden for now.
+
+            The error is logged to the console,
+            but we don't want a failed network
+            update check to interrupt normal use
+            of Game Manager.
+          */}
+          {updateCheckError}
+        </div>
+      ) : null}
     </div>
   );
 }
