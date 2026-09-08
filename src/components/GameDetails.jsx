@@ -38,6 +38,7 @@ import ModsEnhancements from "./ModsEnhancements";
 import QuickStatusBar from "./QuickStatusBar";
 import SaveBackupPanel from "./SaveBackupPanel";
 import GamePersonalization from "./GamePersonalization";
+import LocalInstallationPanel from "./LocalInstallationPanel";
 
 import {
   openGamePath,
@@ -1103,6 +1104,22 @@ export default function GameDetails({
           }
         >
           <EssentialImprovements
+            game={
+              game
+            }
+          />
+        </CollapsibleSection>
+
+
+        <CollapsibleSection
+          id="local-installation"
+          title="Local Installation"
+          description="Inspect the files actually installed on this computer."
+          icon={HardDrive}
+          defaultOpen={true}
+          summary="Executable, graphics DLLs, ReShade & mod-manager evidence"
+        >
+          <LocalInstallationPanel
             game={
               game
             }

@@ -7,6 +7,7 @@ mod fluffy;
 mod local_paths;
 mod save_backups;
 mod game_launcher;
+mod local_installation;
 
 
 #[cfg_attr(
@@ -50,7 +51,9 @@ pub fn run() {
                 save_backups::create_save_backup,
                 save_backups::restore_save_backup,
 
-                game_launcher::launch_game
+                game_launcher::launch_game,
+
+                local_installation::inspect_local_installation
             ]
         )
 
