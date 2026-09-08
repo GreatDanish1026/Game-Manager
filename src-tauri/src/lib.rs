@@ -4,6 +4,9 @@ mod renodx;
 mod rhi;
 mod vortex;
 mod fluffy;
+mod local_paths;
+mod save_backups;
+mod game_launcher;
 
 
 #[cfg_attr(
@@ -39,7 +42,15 @@ pub fn run() {
 
                 vortex::get_vortex_support,
 
-                fluffy::get_fluffy_support
+                fluffy::get_fluffy_support,
+
+                local_paths::open_game_path,
+
+                save_backups::get_save_backup_status,
+                save_backups::create_save_backup,
+                save_backups::restore_save_backup,
+
+                game_launcher::launch_game
             ]
         )
 

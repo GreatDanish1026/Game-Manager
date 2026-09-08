@@ -1,49 +1,116 @@
 import {
-  Eye,
   EyeOff,
-  Gamepad2,
-  RefreshCw,
+  Eye,
+  Filter,
+  RefreshCcw,
   RotateCcw,
   Search,
+  SlidersHorizontal,
+  Star,
+  Tag,
+  X,
 } from "lucide-react";
 
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
-function getStoreLabel(store) {
-  if (!store) {
-    return "Unknown";
+import StoreBadge from "./StoreBadge";
+
+import {
+  gameHasTag,
+  gameMatchesUserMetadataSearch,
+  getAllGameTags,
+  getGameUserMetadata,
+  isGameFavorite,
+} from "../services/userGameMetadata";
+
+
+const FILTER_STORAGE_KEY =
+  "game-manager-library-filters";
+
+
+function loadLibraryPreferences() {
+  try {
+    const stored =
+      localStorage.getItem(
+        FILTER_STORAGE_KEY
+      );
+
+    if (!stored) {
+      return {
+        favoritesOnly:
+          false,
+
+        selectedTag:
+          "",
+
+        sortMode:
+          "name",
+      };
+    }
+
+    const parsed =
+      JSON.parse(
+        stored
+      );
+
+    return {
+      favoritesOnly:
+        Boolean(
+          parsed?.favoritesOnly
+        ),
+
+      selectedTag:
+        typeof parsed?.selectedTag
+          === "string"
+          ? parsed.selectedTag
+          : "",
+
+      sortMode:
+        [
+          "name",
+          "favorites",
+          "store",
+        ].includes(
+          parsed?.sortMode
+        )
+          ? parsed.sortMode
+          : "name",
+    };
+  } catch {
+    return {
+      favoritesOnly:
+        false,
+
+      selectedTag:
+        "",
+
+      sortMode:
+        "name",
+    };
   }
+}
 
-  const normalized =
-    store
-      .trim()
-      .toLowerCase();
 
-  if (normalized === "steam") {
-    return "Steam";
+function saveLibraryPreferences(
+  value
+) {
+  try {
+    localStorage.setItem(
+      FILTER_STORAGE_KEY,
+      JSON.stringify(
+        value
+      )
+    );
+  } catch (error) {
+    console.error(
+      "[Library Filters] Failed to save:",
+      error
+    );
   }
-
-  if (
-    normalized === "epic" ||
-    normalized === "epic games"
-  ) {
-    return "Epic";
-  }
-
-  if (
-    normalized === "gog" ||
-    normalized === "gog galaxy"
-  ) {
-    return "GOG";
-  }
-
-  if (
-    normalized === "ubisoft" ||
-    normalized === "ubisoft connect"
-  ) {
-    return "Ubisoft";
-  }
-
-  return store;
 }
 
 
@@ -55,176 +122,208 @@ function GameRow({
   onHide,
   onRestore,
 }) {
+  const metadata =
+    getGameUserMetadata(
+      game
+    );
+
   return (
-    <button
-      type="button"
-      onClick={() => {
-        onSelect(game);
-      }}
+    <div
       className={`
         group
         relative
-        w-full
         rounded-xl
         border
-        px-3
-        py-3
-        text-left
         transition
-
         ${
           selected
-            ? `
-              border-cyan-500/30
-              bg-cyan-500/10
-            `
-            : `
-              border-transparent
-              bg-transparent
-              hover:border-white/[0.06]
-              hover:bg-white/[0.04]
-            `
+            ? "border-cyan-500/30 bg-cyan-500/[0.08]"
+            : "border-transparent hover:border-white/[0.08] hover:bg-white/[0.025]"
         }
       `}
     >
-      <div
+      <button
+        type="button"
+        onClick={
+          () =>
+            onSelect(
+              game
+            )
+        }
         className="
-          flex
-          items-center
-          gap-3
+          block
+          w-full
+          px-3
+          py-3
+          pr-10
+          text-left
         "
       >
         <div
-          className={`
-            flex
-            h-10
-            w-10
-            shrink-0
-            items-center
-            justify-center
-            rounded-lg
-
-            ${
-              selected
-                ? `
-                  bg-cyan-500/15
-                  text-cyan-300
-                `
-                : `
-                  bg-white/[0.05]
-                  text-white/45
-                `
-            }
-          `}
-        >
-          <Gamepad2
-            className="h-5 w-5"
-          />
-        </div>
-
-        <div
           className="
-            min-w-0
-            flex-1
+            flex
+            items-start
+            gap-2
           "
         >
           <div
             className="
-              truncate
-              pr-2
-              text-sm
-              font-medium
-              text-white/90
-            "
-            title={
-              game.name
-            }
-          >
-            {game.name}
-          </div>
-
-          <div
-            className="
-              mt-1
-              flex
-              items-center
-              gap-2
+              min-w-0
+              flex-1
             "
           >
-            <span
+            <div
               className="
-                rounded
-                bg-white/[0.05]
-                px-1.5
-                py-0.5
-                text-[10px]
-                font-medium
-                uppercase
-                tracking-wide
-                text-white/40
+                flex
+                items-center
+                gap-2
               "
             >
-              {getStoreLabel(
-                game.store
-              )}
-            </span>
+              {metadata.favorite ? (
+                <Star
+                  className="
+                    h-3.5
+                    w-3.5
+                    shrink-0
+                    fill-amber-300
+                    text-amber-300
+                  "
+                />
+              ) : null}
+
+              <div
+                className="
+                  truncate
+                  text-sm
+                  font-semibold
+                  text-white/80
+                "
+                title={
+                  game.name
+                }
+              >
+                {game.name}
+              </div>
+            </div>
+
+            <div
+              className="
+                mt-1.5
+                flex
+                flex-wrap
+                items-center
+                gap-1.5
+              "
+            >
+              <StoreBadge
+                store={
+                  game.store
+                }
+              />
+
+              {metadata.tags
+                .slice(
+                  0,
+                  2
+                )
+                .map(
+                  (tag) => (
+                    <span
+                      key={
+                        tag.toLocaleLowerCase()
+                      }
+                      className="
+                        max-w-[90px]
+                        truncate
+                        rounded-full
+                        border
+                        border-white/[0.08]
+                        bg-white/[0.025]
+                        px-1.5
+                        py-0.5
+                        text-[9px]
+                        font-medium
+                        text-white/35
+                      "
+                      title={
+                        tag
+                      }
+                    >
+                      {tag}
+                    </span>
+                  )
+                )}
+
+              {metadata.tags.length
+                > 2 ? (
+                <span
+                  className="
+                    text-[9px]
+                    text-white/25
+                  "
+                >
+                  +{
+                    metadata.tags.length
+                    - 2
+                  }
+                </span>
+              ) : null}
+            </div>
           </div>
         </div>
+      </button>
 
-        <button
-          type="button"
-          title={
-            hiddenView
-              ? "Restore game"
-              : "Hide game"
-          }
-          onClick={(event) => {
+      <button
+        type="button"
+        onClick={
+          (event) => {
             event.stopPropagation();
 
             if (hiddenView) {
-              onRestore(game);
+              onRestore(
+                game
+              );
             } else {
-              onHide(game);
+              onHide(
+                game
+              );
             }
-          }}
-          className={`
-            flex
-            h-8
-            w-8
-            shrink-0
-            items-center
-            justify-center
-            rounded-lg
-            opacity-60
-            transition
-            hover:opacity-100
-
-            ${
-              hiddenView
-                ? `
-                  text-emerald-300
-                  hover:bg-emerald-500/10
-                `
-                : `
-                  text-white/40
-                  hover:bg-white/[0.07]
-                  hover:text-white/80
-                `
-            }
-          `}
-        >
-          {hiddenView ? (
-            <RotateCcw
-              className="h-4 w-4"
-            />
-          ) : (
-            <EyeOff
-              className="h-4 w-4"
-            />
-          )}
-        </button>
-      </div>
-    </button>
+          }
+        }
+        className="
+          absolute
+          right-2
+          top-2.5
+          flex
+          h-7
+          w-7
+          items-center
+          justify-center
+          rounded-lg
+          text-white/20
+          opacity-0
+          transition
+          hover:bg-white/[0.07]
+          hover:text-white/65
+          group-hover:opacity-100
+        "
+        title={
+          hiddenView
+            ? "Restore game"
+            : "Hide game"
+        }
+      >
+        {hiddenView ? (
+          <RotateCcw
+            className="h-3.5 w-3.5"
+          />
+        ) : (
+          <EyeOff
+            className="h-3.5 w-3.5"
+          />
+        )}
+      </button>
+    </div>
   );
 }
 
@@ -234,30 +333,328 @@ export default function Sidebar({
   totalGames,
   visibleGameCount,
   hiddenGameCount,
-
   selectedGame,
   onSelectGame,
-
-  search,
-  onSearchChange,
-
+  search: _externalSearch,
+  onSearchChange: _onExternalSearchChange,
   loading,
   scanError,
   onRescan,
-
   showHiddenGames,
   onShowHiddenGamesChange,
-
   onHideGame,
   onRestoreGame,
   onRestoreAllHiddenGames,
 }) {
+  const initial =
+    loadLibraryPreferences();
+
+  const [
+    query,
+    setQuery,
+  ] =
+    useState("");
+
+  const [
+    favoritesOnly,
+    setFavoritesOnly,
+  ] =
+    useState(
+      initial.favoritesOnly
+    );
+
+  const [
+    selectedTag,
+    setSelectedTag,
+  ] =
+    useState(
+      initial.selectedTag
+    );
+
+  const [
+    sortMode,
+    setSortMode,
+  ] =
+    useState(
+      initial.sortMode
+    );
+
+  const [
+    metadataRevision,
+    setMetadataRevision,
+  ] =
+    useState(0);
+
+
+  useEffect(
+    () => {
+      const refresh =
+        () =>
+          setMetadataRevision(
+            (current) =>
+              current + 1
+          );
+
+      window.addEventListener(
+        "game-manager-user-metadata-changed",
+        refresh
+      );
+
+      window.addEventListener(
+        "storage",
+        refresh
+      );
+
+      return () => {
+        window.removeEventListener(
+          "game-manager-user-metadata-changed",
+          refresh
+        );
+
+        window.removeEventListener(
+          "storage",
+          refresh
+        );
+      };
+    },
+    []
+  );
+
+
+  useEffect(
+    () => {
+      saveLibraryPreferences(
+        {
+          favoritesOnly,
+          selectedTag,
+          sortMode,
+        }
+      );
+    },
+    [
+      favoritesOnly,
+      selectedTag,
+      sortMode,
+    ]
+  );
+
+
+  const availableTags =
+    useMemo(
+      () =>
+        getAllGameTags(
+          games
+        ),
+      [
+        games,
+        metadataRevision,
+      ]
+    );
+
+
+  useEffect(
+    () => {
+      if (
+        selectedTag
+        && !availableTags
+          .some(
+            (entry) =>
+              entry.tag
+                .toLocaleLowerCase()
+              === selectedTag
+                .toLocaleLowerCase()
+          )
+      ) {
+        setSelectedTag(
+          ""
+        );
+      }
+    },
+    [
+      availableTags,
+      selectedTag,
+    ]
+  );
+
+
+  const filteredGames =
+    useMemo(
+      () => {
+        const normalizedQuery =
+          query
+            .trim()
+            .toLocaleLowerCase();
+
+        let next =
+          (games ?? [])
+            .filter(
+              (game) => {
+                if (
+                  favoritesOnly
+                  && !isGameFavorite(
+                    game
+                  )
+                ) {
+                  return false;
+                }
+
+                if (
+                  selectedTag
+                  && !gameHasTag(
+                    game,
+                    selectedTag
+                  )
+                ) {
+                  return false;
+                }
+
+                if (!normalizedQuery) {
+                  return true;
+                }
+
+                const basicMatch =
+                  game.name
+                    ?.toLocaleLowerCase()
+                    .includes(
+                      normalizedQuery
+                    )
+                  || game.store
+                    ?.toLocaleLowerCase()
+                    .includes(
+                      normalizedQuery
+                    );
+
+                return (
+                  basicMatch
+                  || gameMatchesUserMetadataSearch(
+                    game,
+                    normalizedQuery
+                  )
+                );
+              }
+            );
+
+        next =
+          [
+            ...next,
+          ];
+
+        next.sort(
+          (left, right) => {
+            if (
+              sortMode
+              === "favorites"
+            ) {
+              const favoriteDifference =
+                Number(
+                  isGameFavorite(
+                    right
+                  )
+                )
+                - Number(
+                    isGameFavorite(
+                      left
+                    )
+                  );
+
+              if (
+                favoriteDifference
+                !== 0
+              ) {
+                return favoriteDifference;
+              }
+            }
+
+            if (
+              sortMode
+              === "store"
+            ) {
+              const storeDifference =
+                String(
+                  left.store
+                  ?? ""
+                )
+                .localeCompare(
+                  String(
+                    right.store
+                    ?? ""
+                  ),
+                  undefined,
+                  {
+                    sensitivity:
+                      "base",
+                  }
+                );
+
+              if (
+                storeDifference
+                !== 0
+              ) {
+                return storeDifference;
+              }
+            }
+
+            return String(
+              left.name
+              ?? ""
+            )
+              .localeCompare(
+                String(
+                  right.name
+                  ?? ""
+                ),
+                undefined,
+                {
+                  sensitivity:
+                    "base",
+                }
+              );
+          }
+        );
+
+        return next;
+      },
+      [
+        games,
+        query,
+        favoritesOnly,
+        selectedTag,
+        sortMode,
+        metadataRevision,
+      ]
+    );
+
+
+  const hasActiveFilters =
+    favoritesOnly
+    || Boolean(
+      selectedTag
+    )
+    || sortMode
+      !== "name";
+
+
+  function resetFilters() {
+    setFavoritesOnly(
+      false
+    );
+
+    setSelectedTag(
+      ""
+    );
+
+    setSortMode(
+      "name"
+    );
+  }
+
+
   return (
     <aside
       className="
         flex
         h-screen
-        w-[330px]
+        w-[340px]
         shrink-0
         flex-col
         border-r
@@ -265,60 +662,49 @@ export default function Sidebar({
         bg-[#0d121b]
       "
     >
-      {/* Header */}
       <div
         className="
           border-b
           border-white/[0.07]
-          px-4
-          pb-4
-          pt-5
+          p-4
         "
       >
         <div
           className="
             flex
-            items-start
+            items-center
             justify-between
             gap-3
           "
         >
           <div>
-            <h1
+            <div
               className="
-                text-lg
-                font-semibold
+                text-base
+                font-bold
+                tracking-tight
                 text-white
               "
             >
-              Installed Games
-            </h1>
+              Game Manager
+            </div>
 
             <div
               className="
-                mt-1
-                text-xs
-                text-white/40
+                mt-0.5
+                text-[11px]
+                text-white/30
               "
             >
-              {showHiddenGames ? (
-                <>
-                  {hiddenGameCount} hidden
-                </>
-              ) : (
-                <>
-                  {visibleGameCount} visible
-                  {hiddenGameCount > 0
-                    ? ` · ${hiddenGameCount} hidden`
-                    : ""}
-                </>
-              )}
+              {showHiddenGames
+                ? `${hiddenGameCount} hidden`
+                : `${visibleGameCount} of ${totalGames} installed`
+              }
             </div>
           </div>
 
           <button
             type="button"
-            title="Rescan installed games"
             onClick={
               onRescan
             }
@@ -333,21 +719,20 @@ export default function Sidebar({
               justify-center
               rounded-lg
               border
-              border-white/10
-              bg-white/[0.04]
-              text-white/55
+              border-white/[0.08]
+              bg-white/[0.025]
+              text-white/40
               transition
-              hover:bg-white/[0.08]
-              hover:text-white
-              disabled:cursor-not-allowed
-              disabled:opacity-40
+              hover:bg-white/[0.06]
+              hover:text-white/70
+              disabled:opacity-30
             "
+            title="Rescan installed games"
           >
-            <RefreshCw
+            <RefreshCcw
               className={`
                 h-4
                 w-4
-
                 ${
                   loading
                     ? "animate-spin"
@@ -359,7 +744,6 @@ export default function Sidebar({
         </div>
 
 
-        {/* Search */}
         <div
           className="
             relative
@@ -368,385 +752,555 @@ export default function Sidebar({
         >
           <Search
             className="
-              pointer-events-none
               absolute
               left-3
               top-1/2
               h-4
               w-4
               -translate-y-1/2
-              text-white/30
+              text-white/25
             "
           />
 
           <input
             type="text"
             value={
-              search
+              query
             }
-            onChange={(event) => {
-              onSearchChange(
-                event.target.value
-              );
-            }}
-            placeholder={
-              showHiddenGames
-                ? "Search hidden games..."
-                : "Search installed games..."
+            onChange={
+              (event) =>
+                setQuery(
+                  event.target.value
+                )
             }
+            placeholder="Search games or tags…"
             className="
-              h-10
               w-full
-              rounded-lg
+              rounded-xl
               border
-              border-white/10
+              border-white/[0.08]
               bg-black/20
+              py-2.5
               pl-9
-              pr-3
+              pr-9
               text-sm
-              text-white
+              text-white/80
               outline-none
               transition
-              placeholder:text-white/25
-              focus:border-cyan-500/40
-              focus:bg-black/30
+              placeholder:text-white/20
+              focus:border-cyan-500/30
             "
           />
+
+          {query ? (
+            <button
+              type="button"
+              onClick={
+                () =>
+                  setQuery(
+                    ""
+                  )
+              }
+              className="
+                absolute
+                right-2
+                top-1/2
+                flex
+                h-6
+                w-6
+                -translate-y-1/2
+                items-center
+                justify-center
+                rounded-md
+                text-white/25
+                hover:bg-white/[0.06]
+                hover:text-white/60
+              "
+            >
+              <X
+                className="h-3.5 w-3.5"
+              />
+            </button>
+          ) : null}
         </div>
 
 
-        {/* Hidden games toggle */}
-        <button
-          type="button"
-          onClick={() => {
-            onShowHiddenGamesChange(
-              !showHiddenGames
-            );
-          }}
-          className={`
+        <div
+          className="
             mt-3
-            flex
-            h-10
-            w-full
-            items-center
-            justify-center
+            grid
+            grid-cols-2
             gap-2
-            rounded-lg
-            border
-            text-sm
-            font-medium
-            transition
-
-            ${
-              showHiddenGames
-                ? `
-                  border-cyan-500/30
-                  bg-cyan-500/10
-                  text-cyan-300
-                `
-                : `
-                  border-white/10
-                  bg-white/[0.03]
-                  text-white/55
-                  hover:bg-white/[0.07]
-                  hover:text-white/80
-                `
-            }
-          `}
+          "
         >
-          {showHiddenGames ? (
-            <>
-              <Eye
-                className="h-4 w-4"
-              />
-
-              Show Visible Games
-            </>
-          ) : (
-            <>
-              <EyeOff
-                className="h-4 w-4"
-              />
-
-              Hidden Games
-
-              {hiddenGameCount > 0 ? (
-                <span
-                  className="
-                    ml-1
-                    rounded-full
-                    bg-white/[0.08]
-                    px-2
-                    py-0.5
-                    text-xs
-                  "
-                >
-                  {hiddenGameCount}
-                </span>
-              ) : null}
-            </>
-          )}
-        </button>
-
-
-        {/* Restore all */}
-        {showHiddenGames &&
-        hiddenGameCount > 0 ? (
           <button
             type="button"
             onClick={
-              onRestoreAllHiddenGames
+              () =>
+                onShowHiddenGamesChange(
+                  false
+                )
             }
-            className="
-              mt-2
-              flex
-              h-9
-              w-full
+            className={`
+              inline-flex
               items-center
               justify-center
-              gap-2
+              gap-1.5
               rounded-lg
-              text-xs
-              font-medium
-              text-emerald-300/80
+              border
+              px-2
+              py-1.5
+              text-[11px]
+              font-semibold
               transition
-              hover:bg-emerald-500/10
-              hover:text-emerald-300
-            "
+              ${
+                !showHiddenGames
+                  ? "border-cyan-500/25 bg-cyan-500/[0.08] text-cyan-200"
+                  : "border-white/[0.07] bg-white/[0.02] text-white/35 hover:text-white/60"
+              }
+            `}
           >
-            <RotateCcw
+            <Eye
               className="h-3.5 w-3.5"
             />
 
-            Restore All Hidden Games
+            Library
           </button>
-        ) : null}
-      </div>
 
-
-      {/* Game list */}
-      <div
-        className="
-          min-h-0
-          flex-1
-          overflow-y-auto
-          p-3
-        "
-      >
-        {loading ? (
-          <div
-            className="
-              flex
-              h-32
-              flex-col
+          <button
+            type="button"
+            onClick={
+              () =>
+                onShowHiddenGamesChange(
+                  true
+                )
+            }
+            className={`
+              inline-flex
               items-center
               justify-center
-              gap-3
-              text-sm
-              text-white/40
-            "
-          >
-            <RefreshCw
-              className="
-                h-5
-                w-5
-                animate-spin
-              "
-            />
-
-            Scanning installed games...
-          </div>
-        ) : scanError ? (
-          <div
-            className="
+              gap-1.5
               rounded-lg
               border
-              border-red-500/20
-              bg-red-500/[0.06]
-              p-4
+              px-2
+              py-1.5
+              text-[11px]
+              font-semibold
+              transition
+              ${
+                showHiddenGames
+                  ? "border-cyan-500/25 bg-cyan-500/[0.08] text-cyan-200"
+                  : "border-white/[0.07] bg-white/[0.02] text-white/35 hover:text-white/60"
+              }
+            `}
+          >
+            <EyeOff
+              className="h-3.5 w-3.5"
+            />
+
+            Hidden
+            {
+              hiddenGameCount > 0
+                ? ` (${hiddenGameCount})`
+                : ""
+            }
+          </button>
+        </div>
+
+
+        {!showHiddenGames ? (
+          <div
+            className="
+              mt-3
+              rounded-xl
+              border
+              border-white/[0.07]
+              bg-black/10
+              p-2.5
             "
           >
             <div
               className="
-                text-sm
-                font-medium
-                text-red-300
+                flex
+                items-center
+                justify-between
+                gap-2
               "
             >
-              Game scan failed
+              <button
+                type="button"
+                onClick={
+                  () =>
+                    setFavoritesOnly(
+                      (current) =>
+                        !current
+                    )
+                }
+                className={`
+                  inline-flex
+                  items-center
+                  gap-1.5
+                  rounded-lg
+                  border
+                  px-2.5
+                  py-1.5
+                  text-[11px]
+                  font-semibold
+                  transition
+                  ${
+                    favoritesOnly
+                      ? "border-amber-400/30 bg-amber-400/[0.09] text-amber-200"
+                      : "border-white/[0.07] bg-white/[0.02] text-white/40 hover:text-white/65"
+                  }
+                `}
+              >
+                <Star
+                  className={`
+                    h-3.5
+                    w-3.5
+                    ${
+                      favoritesOnly
+                        ? "fill-current"
+                        : ""
+                    }
+                  `}
+                />
+
+                Favorites
+              </button>
+
+              {hasActiveFilters ? (
+                <button
+                  type="button"
+                  onClick={
+                    resetFilters
+                  }
+                  className="
+                    text-[10px]
+                    font-medium
+                    text-white/30
+                    transition
+                    hover:text-white/60
+                  "
+                >
+                  Reset
+                </button>
+              ) : null}
             </div>
+
 
             <div
               className="
                 mt-2
-                break-words
-                text-xs
-                leading-relaxed
-                text-red-200/50
+                grid
+                grid-cols-2
+                gap-2
               "
             >
-              {scanError}
+              <label
+                className="
+                  min-w-0
+                "
+              >
+                <div
+                  className="
+                    mb-1
+                    flex
+                    items-center
+                    gap-1
+                    text-[9px]
+                    font-semibold
+                    uppercase
+                    tracking-wide
+                    text-white/25
+                  "
+                >
+                  <Tag
+                    className="h-3 w-3"
+                  />
+
+                  Tag
+                </div>
+
+                <select
+                  value={
+                    selectedTag
+                  }
+                  onChange={
+                    (event) =>
+                      setSelectedTag(
+                        event.target.value
+                      )
+                  }
+                  className="
+                    w-full
+                    rounded-lg
+                    border
+                    border-white/[0.08]
+                    bg-[#111823]
+                    px-2
+                    py-1.5
+                    text-[11px]
+                    text-white/60
+                    outline-none
+                  "
+                >
+                  <option value="">
+                    Any tag
+                  </option>
+
+                  {availableTags.map(
+                    (entry) => (
+                      <option
+                        key={
+                          entry.tag
+                            .toLocaleLowerCase()
+                        }
+                        value={
+                          entry.tag
+                        }
+                      >
+                        {entry.tag} ({entry.count})
+                      </option>
+                    )
+                  )}
+                </select>
+              </label>
+
+
+              <label
+                className="
+                  min-w-0
+                "
+              >
+                <div
+                  className="
+                    mb-1
+                    flex
+                    items-center
+                    gap-1
+                    text-[9px]
+                    font-semibold
+                    uppercase
+                    tracking-wide
+                    text-white/25
+                  "
+                >
+                  <SlidersHorizontal
+                    className="h-3 w-3"
+                  />
+
+                  Sort
+                </div>
+
+                <select
+                  value={
+                    sortMode
+                  }
+                  onChange={
+                    (event) =>
+                      setSortMode(
+                        event.target.value
+                      )
+                  }
+                  className="
+                    w-full
+                    rounded-lg
+                    border
+                    border-white/[0.08]
+                    bg-[#111823]
+                    px-2
+                    py-1.5
+                    text-[11px]
+                    text-white/60
+                    outline-none
+                  "
+                >
+                  <option value="name">
+                    Name
+                  </option>
+
+                  <option value="favorites">
+                    Favorites First
+                  </option>
+
+                  <option value="store">
+                    Store
+                  </option>
+                </select>
+              </label>
             </div>
-
-            <button
-              type="button"
-              onClick={
-                onRescan
-              }
-              className="
-                mt-3
-                rounded-lg
-                bg-white/[0.06]
-                px-3
-                py-2
-                text-xs
-                text-white/70
-                hover:bg-white/[0.1]
-              "
-            >
-              Try Again
-            </button>
           </div>
-        ) : games.length === 0 ? (
-          <div
-            className="
-              flex
-              h-48
-              flex-col
-              items-center
-              justify-center
-              px-5
-              text-center
-            "
-          >
-            {showHiddenGames ? (
-              <>
-                <Eye
-                  className="
-                    mb-3
-                    h-8
-                    w-8
-                    text-white/20
-                  "
-                />
-
-                <div
-                  className="
-                    text-sm
-                    font-medium
-                    text-white/60
-                  "
-                >
-                  No hidden games
-                </div>
-
-                <div
-                  className="
-                    mt-1
-                    text-xs
-                    leading-relaxed
-                    text-white/30
-                  "
-                >
-                  Games you hide will
-                  appear here so they
-                  can be restored later.
-                </div>
-              </>
-            ) : (
-              <>
-                <Gamepad2
-                  className="
-                    mb-3
-                    h-8
-                    w-8
-                    text-white/20
-                  "
-                />
-
-                <div
-                  className="
-                    text-sm
-                    font-medium
-                    text-white/60
-                  "
-                >
-                  No games found
-                </div>
-
-                <div
-                  className="
-                    mt-1
-                    text-xs
-                    leading-relaxed
-                    text-white/30
-                  "
-                >
-                  Try changing your search
-                  or rescan your installed
-                  game libraries.
-                </div>
-              </>
-            )}
-          </div>
-        ) : (
-          <div
-            className="
-              space-y-1
-            "
-          >
-            {games.map(
-              (game) => (
-                <GameRow
-                  key={
-                    `${game.store}-${game.launcherId ?? game.id}-${game.installPath}`
-                  }
-
-                  game={
-                    game
-                  }
-
-                  selected={
-                    selectedGame?.id ===
-                    game.id
-                  }
-
-                  hiddenView={
-                    showHiddenGames
-                  }
-
-                  onSelect={
-                    onSelectGame
-                  }
-
-                  onHide={
-                    onHideGame
-                  }
-
-                  onRestore={
-                    onRestoreGame
-                  }
-                />
-              )
-            )}
-          </div>
-        )}
+        ) : null}
       </div>
 
 
-      {/* Footer */}
+      {scanError ? (
+        <div
+          className="
+            mx-3
+            mt-3
+            rounded-xl
+            border
+            border-red-500/20
+            bg-red-500/[0.05]
+            px-3
+            py-2.5
+            text-xs
+            leading-relaxed
+            text-red-300/70
+          "
+        >
+          {scanError}
+        </div>
+      ) : null}
+
+
       <div
         className="
-          border-t
-          border-white/[0.07]
-          px-4
-          py-3
-          text-center
-          text-[11px]
-          text-white/25
+          flex
+          min-h-0
+          flex-1
+          flex-col
         "
       >
-        {totalGames} installed
+        <div
+          className="
+            flex
+            items-center
+            justify-between
+            px-4
+            py-3
+            text-[11px]
+            text-white/30
+          "
+        >
+          <span>
+            {filteredGames.length}{" "}
+            {filteredGames.length === 1
+              ? "game"
+              : "games"
+            }
+          </span>
+
+          {showHiddenGames
+            && hiddenGameCount > 0 ? (
+            <button
+              type="button"
+              onClick={
+                onRestoreAllHiddenGames
+              }
+              className="
+                font-medium
+                text-cyan-300/60
+                hover:text-cyan-200
+              "
+            >
+              Restore all
+            </button>
+          ) : null}
+        </div>
+
+
+        <div
+          className="
+            min-h-0
+            flex-1
+            overflow-y-auto
+            px-2
+            pb-4
+          "
+        >
+          {loading
+            && games.length === 0 ? (
+            <div
+              className="
+                px-3
+                py-8
+                text-center
+                text-sm
+                text-white/30
+              "
+            >
+              Scanning installed games…
+            </div>
+          ) : filteredGames.length === 0 ? (
+            <div
+              className="
+                px-4
+                py-8
+                text-center
+              "
+            >
+              <Filter
+                className="
+                  mx-auto
+                  h-6
+                  w-6
+                  text-white/20
+                "
+              />
+
+              <div
+                className="
+                  mt-3
+                  text-sm
+                  font-medium
+                  text-white/40
+                "
+              >
+                No games match
+              </div>
+
+              <div
+                className="
+                  mt-1
+                  text-xs
+                  leading-relaxed
+                  text-white/25
+                "
+              >
+                Try clearing the search
+                or library filters.
+              </div>
+            </div>
+          ) : (
+            <div
+              className="
+                space-y-1
+              "
+            >
+              {filteredGames.map(
+                (game) => (
+                  <GameRow
+                    key={
+                      `${game.store}-${game.launcherId ?? game.id}-${game.installPath}`
+                    }
+                    game={
+                      game
+                    }
+                    selected={
+                      selectedGame?.id
+                      === game.id
+                    }
+                    hiddenView={
+                      showHiddenGames
+                    }
+                    onSelect={
+                      onSelectGame
+                    }
+                    onHide={
+                      onHideGame
+                    }
+                    onRestore={
+                      onRestoreGame
+                    }
+                  />
+                )
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </aside>
   );

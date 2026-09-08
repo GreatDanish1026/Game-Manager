@@ -7,34 +7,54 @@ import {
   FileCode2,
   FolderOpen,
   Gamepad2,
-  Gauge,
+  HardDrive,
+  Info,
   Monitor,
   Package,
+  Play,
+  LoaderCircle,
+  Puzzle,
   Radio,
-  Sparkles,
+  Settings2,
   Store,
   UserRoundCog,
-  WandSparkles,
+  Wrench,
 } from "lucide-react";
 
-import VortexCard from "./VortexCard";
-import FluffyCard from "./FluffyCard";
+import {
+  useState,
+} from "react";
 
 import {
   openUrl,
 } from "@tauri-apps/plugin-opener";
 
-import FeatureCard from "./FeatureCard";
 import StoreBadge from "./StoreBadge";
-import RenoDxCard from "./RenoDxCard";
 import ControllerCompatibility from "./ControllerCompatibility";
 import EssentialImprovements from "./EssentialImprovements";
+import CollapsibleSection from "./CollapsibleSection";
+import CompactFeatureGrid from "./CompactFeatureGrid";
+import ModsEnhancements from "./ModsEnhancements";
+import QuickStatusBar from "./QuickStatusBar";
+import SaveBackupPanel from "./SaveBackupPanel";
+import GamePersonalization from "./GamePersonalization";
+
+import {
+  openGamePath,
+} from "../services/pathActions";
+
+import {
+  launchGame,
+} from "../services/gameLaunch";
 
 
 function InfoRow({
   icon: Icon,
   label,
   value,
+  actionLabel = null,
+  onAction = null,
+  actionDisabled = false,
 }) {
   return (
     <div
@@ -44,26 +64,26 @@ function InfoRow({
         gap-3
         rounded-xl
         border
-        border-white/10
-        bg-white/[0.025]
-        p-4
+        border-white/[0.08]
+        bg-black/10
+        p-3.5
       "
     >
       <div
         className="
           flex
-          h-10
-          w-10
+          h-9
+          w-9
           shrink-0
           items-center
           justify-center
           rounded-lg
           bg-cyan-500/10
-          text-cyan-400
+          text-cyan-300
         "
       >
         <Icon
-          className="h-5 w-5"
+          className="h-4 w-4"
         />
       </div>
 
@@ -75,279 +95,75 @@ function InfoRow({
       >
         <div
           className="
-            text-xs
-            font-semibold
-            uppercase
-            tracking-wide
-            text-white/40
+            flex
+            items-center
+            justify-between
+            gap-3
           "
         >
-          {label}
+          <div
+            className="
+              text-[11px]
+              font-semibold
+              uppercase
+              tracking-wide
+              text-white/35
+            "
+          >
+            {label}
+          </div>
+
+          {actionLabel ? (
+            <button
+              type="button"
+              onClick={
+                onAction
+              }
+              disabled={
+                actionDisabled
+              }
+              className="
+                inline-flex
+                shrink-0
+                items-center
+                gap-1.5
+                rounded-md
+                border
+                border-white/10
+                bg-white/[0.035]
+                px-2
+                py-1
+                text-[11px]
+                font-medium
+                text-white/55
+                transition
+                hover:bg-white/[0.07]
+                hover:text-white/75
+                disabled:cursor-not-allowed
+                disabled:opacity-30
+              "
+            >
+              <FolderOpen
+                className="h-3 w-3"
+              />
+
+              {actionLabel}
+            </button>
+          ) : null}
         </div>
 
         <div
           className="
-            mt-2
+            mt-1.5
             break-words
             text-sm
             leading-relaxed
-            text-white/85
+            text-white/80
           "
         >
           {value || "Unknown"}
         </div>
       </div>
-    </div>
-  );
-}
-
-
-function SectionHeader({
-  title,
-  description,
-}) {
-  return (
-    <div
-      className="
-        mb-6
-      "
-    >
-      <h2
-        className="
-          text-2xl
-          font-semibold
-          text-white
-        "
-      >
-        {title}
-      </h2>
-
-      {description ? (
-        <p
-          className="
-            mt-2
-            text-sm
-            leading-relaxed
-            text-white/40
-          "
-        >
-          {description}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-
-function combineFeatureDescription(
-  technology,
-  notes
-) {
-  const parts = [];
-
-  if (technology) {
-    parts.push(
-      `Technology: ${technology}`
-    );
-  }
-
-  if (notes) {
-    parts.push(
-      notes
-    );
-  }
-
-  return parts.length > 0
-    ? parts.join(" — ")
-    : null;
-}
-
-
-function PcgwMatch({
-  game,
-}) {
-  async function handleOpenPcgw() {
-    if (
-      !game?.pcgwPageUrl
-    ) {
-      return;
-    }
-
-    try {
-      await openUrl(
-        game.pcgwPageUrl
-      );
-    } catch (error) {
-      console.error(
-        "[PCGW] Failed to open page:",
-        error
-      );
-    }
-  }
-
-
-  if (
-    game.pcgwLoading
-  ) {
-    return (
-      <div
-        className="
-          rounded-xl
-          border
-          border-white/10
-          bg-white/[0.025]
-          p-5
-          text-sm
-          text-white/45
-        "
-      >
-        Loading PCGamingWiki information...
-      </div>
-    );
-  }
-
-
-  if (
-    game.pcgwError
-  ) {
-    return (
-      <div
-        className="
-          rounded-xl
-          border
-          border-red-500/20
-          bg-red-500/[0.06]
-          p-5
-        "
-      >
-        <div
-          className="
-            text-sm
-            font-semibold
-            text-red-300
-          "
-        >
-          PCGamingWiki lookup failed
-        </div>
-
-        <div
-          className="
-            mt-2
-            text-sm
-            text-red-200/50
-          "
-        >
-          {game.pcgwError}
-        </div>
-      </div>
-    );
-  }
-
-
-  if (
-    !game.pcgwPageName
-  ) {
-    return (
-      <div
-        className="
-          rounded-xl
-          border
-          border-white/10
-          bg-white/[0.025]
-          p-5
-          text-sm
-          text-white/40
-        "
-      >
-        No PCGamingWiki match found.
-      </div>
-    );
-  }
-
-
-  return (
-    <div
-      className="
-        flex
-        flex-col
-        gap-5
-        rounded-xl
-        border
-        border-white/10
-        bg-white/[0.025]
-        p-5
-        lg:flex-row
-        lg:items-center
-        lg:justify-between
-      "
-    >
-      <div>
-        <div
-          className="
-            flex
-            items-center
-            gap-3
-          "
-        >
-          <BadgeCheck
-            className="
-              h-5
-              w-5
-              text-emerald-400
-            "
-          />
-
-          <div
-            className="
-              font-semibold
-              text-white
-            "
-          >
-            PCGamingWiki Match
-          </div>
-        </div>
-
-        <div
-          className="
-            mt-3
-            text-sm
-            text-white/55
-          "
-        >
-          {game.pcgwPageName}
-        </div>
-      </div>
-
-
-      <button
-        type="button"
-        onClick={
-          handleOpenPcgw
-        }
-        className="
-          inline-flex
-          items-center
-          justify-center
-          gap-2
-          rounded-lg
-          border
-          border-white/10
-          bg-white/[0.04]
-          px-4
-          py-2.5
-          text-sm
-          font-medium
-          text-white/80
-          transition
-          hover:bg-white/[0.08]
-        "
-      >
-        View on PCGamingWiki
-
-        <ExternalLink
-          className="h-4 w-4"
-        />
-      </button>
     </div>
   );
 }
@@ -371,9 +187,7 @@ function WsgfInfo({
 
 
   async function openWsgf() {
-    if (
-      !features?.wsgfLink
-    ) {
+    if (!features?.wsgfLink) {
       return;
     }
 
@@ -393,107 +207,341 @@ function WsgfInfo({
   return (
     <div
       className="
-        mt-5
+        mt-4
+        flex
+        flex-col
+        gap-3
         rounded-xl
         border
-        border-white/10
-        bg-white/[0.025]
-        p-5
+        border-white/[0.08]
+        bg-black/10
+        p-4
+        lg:flex-row
+        lg:items-center
+        lg:justify-between
+      "
+    >
+      <div>
+        <div
+          className="
+            text-sm
+            font-semibold
+            text-white/75
+          "
+        >
+          Widescreen Gaming Forum
+        </div>
+
+        <div
+          className="
+            mt-2
+            flex
+            flex-wrap
+            gap-x-4
+            gap-y-1
+            text-xs
+            text-white/40
+          "
+        >
+          {awards?.widescreen ? (
+            <span>
+              Widescreen:{" "}
+              {awards.widescreen}
+            </span>
+          ) : null}
+
+          {awards?.multimonitor ? (
+            <span>
+              Multi-monitor:{" "}
+              {awards.multimonitor}
+            </span>
+          ) : null}
+
+          {awards?.ultrawide ? (
+            <span>
+              Ultrawide:{" "}
+              {awards.ultrawide}
+            </span>
+          ) : null}
+
+          {awards?.fourK ? (
+            <span>
+              4K:{" "}
+              {awards.fourK}
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      {features?.wsgfLink ? (
+        <button
+          type="button"
+          onClick={
+            openWsgf
+          }
+          className="
+            inline-flex
+            items-center
+            justify-center
+            gap-2
+            rounded-lg
+            border
+            border-white/10
+            bg-white/[0.035]
+            px-3
+            py-2
+            text-xs
+            font-medium
+            text-white/65
+            transition
+            hover:bg-white/[0.07]
+          "
+        >
+          View WSGF
+
+          <ExternalLink
+            className="h-3.5 w-3.5"
+          />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+
+function PcgwMatch({
+  game,
+}) {
+  async function handleOpenPcgw() {
+    if (!game?.pcgwPageUrl) {
+      return;
+    }
+
+    try {
+      await openUrl(
+        game.pcgwPageUrl
+      );
+    } catch (error) {
+      console.error(
+        "[PCGW] Failed to open page:",
+        error
+      );
+    }
+  }
+
+
+  if (game.pcgwLoading) {
+    return (
+      <div
+        className="
+          rounded-xl
+          border
+          border-white/[0.08]
+          bg-black/10
+          p-4
+          text-sm
+          text-white/40
+        "
+      >
+        Loading PCGamingWiki information...
+      </div>
+    );
+  }
+
+
+  if (game.pcgwError) {
+    return (
+      <div
+        className="
+          rounded-xl
+          border
+          border-red-500/20
+          bg-red-500/[0.06]
+          p-4
+        "
+      >
+        <div
+          className="
+            text-sm
+            font-semibold
+            text-red-300
+          "
+        >
+          PCGamingWiki lookup failed
+        </div>
+
+        <div
+          className="
+            mt-2
+            text-xs
+            text-red-200/50
+          "
+        >
+          {game.pcgwError}
+        </div>
+      </div>
+    );
+  }
+
+
+  if (!game.pcgwPageName) {
+    return (
+      <div
+        className="
+          rounded-xl
+          border
+          border-white/[0.08]
+          bg-black/10
+          p-4
+          text-sm
+          text-white/35
+        "
+      >
+        No PCGamingWiki match found.
+      </div>
+    );
+  }
+
+
+  return (
+    <div
+      className="
+        flex
+        flex-col
+        gap-4
+        rounded-xl
+        border
+        border-white/[0.08]
+        bg-black/10
+        p-4
+        sm:flex-row
+        sm:items-center
+        sm:justify-between
       "
     >
       <div
         className="
           flex
-          flex-col
-          gap-4
-          lg:flex-row
-          lg:items-center
-          lg:justify-between
+          items-center
+          gap-3
         "
       >
+        <BadgeCheck
+          className="
+            h-5
+            w-5
+            text-emerald-400
+          "
+        />
+
         <div>
           <div
             className="
+              text-sm
               font-semibold
-              text-white
+              text-white/75
             "
           >
-            Widescreen Gaming Forum
+            PCGamingWiki Match
           </div>
 
           <div
             className="
-              mt-2
-              flex
-              flex-wrap
-              gap-x-5
-              gap-y-2
+              mt-1
               text-xs
-              text-white/55
+              text-white/40
             "
           >
-            {awards?.widescreen ? (
-              <span>
-                Widescreen:{" "}
-                {awards.widescreen}
-              </span>
-            ) : null}
-
-            {awards?.multimonitor ? (
-              <span>
-                Multi-monitor:{" "}
-                {awards.multimonitor}
-              </span>
-            ) : null}
-
-            {awards?.ultrawide ? (
-              <span>
-                Ultrawide:{" "}
-                {awards.ultrawide}
-              </span>
-            ) : null}
-
-            {awards?.fourK ? (
-              <span>
-                4K:{" "}
-                {awards.fourK}
-              </span>
-            ) : null}
+            {game.pcgwPageName}
           </div>
         </div>
-
-
-        {features?.wsgfLink ? (
-          <button
-            type="button"
-            onClick={
-              openWsgf
-            }
-            className="
-              inline-flex
-              items-center
-              gap-2
-              rounded-lg
-              border
-              border-white/10
-              bg-white/[0.04]
-              px-4
-              py-2
-              text-sm
-              text-white/75
-              hover:bg-white/[0.08]
-            "
-          >
-            View WSGF
-
-            <ExternalLink
-              className="h-4 w-4"
-            />
-          </button>
-        ) : null}
       </div>
+
+      <button
+        type="button"
+        onClick={
+          handleOpenPcgw
+        }
+        className="
+          inline-flex
+          items-center
+          justify-center
+          gap-2
+          rounded-lg
+          border
+          border-white/10
+          bg-white/[0.035]
+          px-3
+          py-2
+          text-xs
+          font-medium
+          text-white/65
+          transition
+          hover:bg-white/[0.07]
+        "
+      >
+        View on PCGamingWiki
+
+        <ExternalLink
+          className="h-3.5 w-3.5"
+        />
+      </button>
     </div>
   );
+}
+
+
+function controllerSummary(
+  game
+) {
+  const controllers =
+    game?.controllerCompatibility
+    ?? {};
+
+  const values = [
+    controllers?.xbox
+      ?.supported,
+    controllers?.playstation
+      ?.supported,
+    controllers?.nintendo
+      ?.supported,
+  ];
+
+  const supported =
+    values.filter(
+      (value) =>
+        value === true
+    ).length;
+
+  if (supported > 0) {
+    return `${supported} controller families supported`;
+  }
+
+  return "Controller details";
+}
+
+
+function modSummary(
+  game
+) {
+  const items = [
+    game?.renodx?.renodx
+      ?.available,
+    game?.renodx?.luma
+      ?.available,
+    game?.vortex
+      ?.supported,
+    game?.fluffy
+      ?.supported,
+  ];
+
+  const count =
+    items.filter(Boolean)
+      .length;
+
+  return count > 0
+    ? `${count} integrations detected`
+    : "No integrations detected";
 }
 
 
@@ -566,7 +614,84 @@ export default function GameDetails({
 
 
   const features =
-    game.features ?? {};
+    game.features
+    ?? {};
+
+
+  const [
+    pathError,
+    setPathError,
+  ] =
+    useState(null);
+
+  const [
+    launchingGame,
+    setLaunchingGame,
+  ] =
+    useState(false);
+
+  const [
+    launchError,
+    setLaunchError,
+  ] =
+    useState(null);
+
+
+  async function handleLaunchGame() {
+    setLaunchingGame(
+      true
+    );
+
+    setLaunchError(
+      null
+    );
+
+    try {
+      await launchGame(
+        game
+      );
+    } catch (error) {
+      console.error(
+        "[Launch] Failed:",
+        error
+      );
+
+      setLaunchError(
+        String(
+          error
+        )
+      );
+    } finally {
+      setLaunchingGame(
+        false
+      );
+    }
+  }
+
+
+  async function handleOpenPath(
+    path
+  ) {
+    setPathError(
+      null
+    );
+
+    try {
+      await openGamePath(
+        path,
+        game.installPath
+      );
+    } catch (error) {
+      console.error(
+        "[Paths] Failed to open:",
+        error
+      );
+
+      setPathError(
+        String(error)
+      );
+    }
+  }
 
 
   return (
@@ -588,14 +713,13 @@ export default function GameDetails({
           xl:px-8
         "
       >
-
         {/* ====================================================
-            HEADER
+            HEADER + AT-A-GLANCE STATUS
         ==================================================== */}
 
         <section
           className="
-            mb-10
+            mb-7
           "
         >
           <div
@@ -676,6 +800,112 @@ export default function GameDetails({
                   </div>
                 ) : null}
               </div>
+
+              <div
+                className="
+                  mt-5
+                  flex
+                  flex-wrap
+                  items-center
+                  gap-3
+                "
+              >
+                <button
+                  type="button"
+                  onClick={
+                    handleLaunchGame
+                  }
+                  disabled={
+                    launchingGame
+                  }
+                  className="
+                    inline-flex
+                    items-center
+                    justify-center
+                    gap-2
+                    rounded-xl
+                    border
+                    border-cyan-400/30
+                    bg-cyan-500/15
+                    px-5
+                    py-2.5
+                    text-sm
+                    font-semibold
+                    text-cyan-100
+                    shadow-lg
+                    shadow-cyan-950/20
+                    transition
+                    hover:border-cyan-300/40
+                    hover:bg-cyan-500/20
+                    disabled:cursor-not-allowed
+                    disabled:opacity-45
+                  "
+                >
+                  {launchingGame ? (
+                    <LoaderCircle
+                      className="
+                        h-4
+                        w-4
+                        animate-spin
+                      "
+                    />
+                  ) : (
+                    <Play
+                      className="
+                        h-4
+                        w-4
+                        fill-current
+                      "
+                    />
+                  )}
+
+                  {launchingGame
+                    ? "Launching..."
+                    : "Play Game"
+                  }
+                </button>
+
+                <div
+                  className="
+                    text-xs
+                    text-white/30
+                  "
+                >
+                  Launch through {game.store}
+                </div>
+              </div>
+
+              {launchError ? (
+                <div
+                  className="
+                    mt-3
+                    max-w-2xl
+                    rounded-xl
+                    border
+                    border-amber-500/20
+                    bg-amber-500/[0.06]
+                    px-4
+                    py-3
+                    text-xs
+                    leading-relaxed
+                    text-amber-200/75
+                  "
+                >
+                  {launchError}
+                </div>
+              ) : null}
+
+              <QuickStatusBar
+                game={
+                  game
+                }
+              />
+
+              <GamePersonalization
+                game={
+                  game
+                }
+              />
             </div>
 
 
@@ -739,24 +969,26 @@ export default function GameDetails({
 
 
         {/* ====================================================
-            OVERVIEW
+            PROGRESSIVE-DISCLOSURE SECTIONS
         ==================================================== */}
 
-        <section
-          className="
-            mb-10
-          "
+        <CollapsibleSection
+          id="overview"
+          title="Quick Overview"
+          description="Core game information."
+          icon={Info}
+          defaultOpen
+          summary={
+            game.developer
+              ? game.developer
+              : game.store
+          }
         >
-          <SectionHeader
-            title="Overview"
-            description="General game information reported by PCGamingWiki."
-          />
-
           <div
             className="
               grid
               grid-cols-1
-              gap-4
+              gap-3
               md:grid-cols-2
               xl:grid-cols-4
             "
@@ -793,311 +1025,143 @@ export default function GameDetails({
               }
             />
           </div>
-        </section>
+        </CollapsibleSection>
 
 
-        {/* ====================================================
-            PC FEATURES
-        ==================================================== */}
-
-        <section
-          className="
-            mb-10
-          "
+        <CollapsibleSection
+          id="pc-features"
+          title="PC Features"
+          description="Graphics, display, frame-rate, and video features from PCGamingWiki. Click any tile with notes to expand it."
+          icon={Monitor}
+          defaultOpen
+          summary="17 feature checks"
         >
-          <SectionHeader
-            title="PC Features"
-            description="Graphics, display, frame-rate, and video-feature information from PCGamingWiki."
+          <CompactFeatureGrid
+            features={
+              features
+            }
           />
-
-          <div
-            className="
-              grid
-              grid-cols-1
-              gap-4
-              md:grid-cols-2
-              xl:grid-cols-3
-            "
-          >
-            <FeatureCard
-              icon={Monitor}
-              title="Widescreen Resolution"
-              value={
-                features.widescreen
-              }
-              description={
-                features.widescreenNotes
-              }
-            />
-
-            <FeatureCard
-              icon={Monitor}
-              title="Multi-Monitor"
-              value={
-                features.multimonitor
-              }
-              description={
-                features.multimonitorNotes
-              }
-            />
-
-            <FeatureCard
-              icon={Monitor}
-              title="Ultrawide"
-              value={
-                features.ultrawide
-              }
-              description={
-                features.ultrawideNotes
-              }
-            />
-
-            <FeatureCard
-              icon={Monitor}
-              title="4K Ultra HD"
-              value={
-                features.fourK
-              }
-              description={
-                features.fourKNotes
-              }
-            />
-
-            <FeatureCard
-              icon={Monitor}
-              title="Field of View (FOV)"
-              value={
-                features.fov
-              }
-              description={
-                features.fovNotes
-              }
-            />
-
-            <FeatureCard
-              icon={Monitor}
-              title="Windowed Mode"
-              value={
-                features.windowed
-              }
-              description={
-                features.windowedNotes
-              }
-            />
-
-            <FeatureCard
-              icon={Monitor}
-              title="Borderless Windowed"
-              value={
-                features.borderless
-              }
-              description={
-                features.borderlessNotes
-              }
-            />
-
-            <FeatureCard
-              icon={Gauge}
-              title="Anisotropic Filtering"
-              value={
-                features.anisotropic
-              }
-              description={
-                features.anisotropicNotes
-              }
-            />
-
-            <FeatureCard
-              icon={Sparkles}
-              title="Anti-Aliasing"
-              value={
-                features.antialiasing
-              }
-              description={
-                features.antialiasingNotes
-              }
-            />
-
-            <FeatureCard
-              icon={WandSparkles}
-              title="Upscaling"
-              value={
-                features.upscaling
-              }
-              description={
-                combineFeatureDescription(
-                  features.upscalingTech,
-                  features.upscalingNotes
-                )
-              }
-            />
-
-            <FeatureCard
-              icon={Gauge}
-              title="Frame Generation"
-              value={
-                features.frameGeneration
-              }
-              description={
-                combineFeatureDescription(
-                  features.frameGenerationTech,
-                  features.frameGenerationNotes
-                )
-              }
-            />
-
-            <FeatureCard
-              icon={Monitor}
-              title="Vsync"
-              value={
-                features.vsync
-              }
-              description={
-                features.vsyncNotes
-              }
-            />
-
-            <FeatureCard
-              icon={Gauge}
-              title="60 FPS"
-              value={
-                features.sixtyFps
-              }
-              description={
-                features.sixtyFpsNotes
-              }
-            />
-
-            <FeatureCard
-              icon={Gauge}
-              title="120+ FPS"
-              value={
-                features.oneTwentyFps
-              }
-              description={
-                features.oneTwentyFpsNotes
-              }
-            />
-
-            <FeatureCard
-              icon={Sparkles}
-              title="HDR"
-              value={
-                features.hdr
-              }
-              description={
-                features.hdrNotes
-              }
-            />
-
-            <FeatureCard
-              icon={Sparkles}
-              title="Ray Tracing"
-              value={
-                features.rayTracing
-              }
-              description={
-                features.rayTracingNotes
-              }
-            />
-
-            <FeatureCard
-              icon={Monitor}
-              title="Color Blind Mode"
-              value={
-                features.colorBlind
-              }
-              description={
-                features.colorBlindNotes
-              }
-            />
-          </div>
-
 
           <WsgfInfo
             features={
               features
             }
           />
-        </section>
+        </CollapsibleSection>
 
 
-        {/* ====================================================
-            CONTROLLERS
-        ==================================================== */}
-
-        <ControllerCompatibility
-          game={
-            game
+        <CollapsibleSection
+          id="mods"
+          title="Mods & Enhancements"
+          description="HDR mod support and mod-manager compatibility in one compact panel."
+          icon={Puzzle}
+          defaultOpen
+          summary={
+            modSummary(
+              game
+            )
           }
-        />
-
-
-        {/* ====================================================
-            RENODX
-        ==================================================== */}
-
-        <section
-  className="
-    mb-10
-    mt-10
-  "
->
-  <SectionHeader
-    title="Mods & Enhancements"
-    description="HDR enhancement and mod-management support available for this game."
-  />
-
-  <RenoDxCard
-    game={
-      game
-    }
-  />
-
-  <VortexCard
-    game={
-      game
-    }
-  />
-
-  <FluffyCard
-    game={
-      game
-    }
-  />
-</section>
-
-
-        {/* ====================================================
-            NEW: ESSENTIAL IMPROVEMENTS
-        ==================================================== */}
-
-        <EssentialImprovements
-          game={
-            game
-          }
-        />
-
-
-        {/* ====================================================
-            TECHNICAL
-        ==================================================== */}
-
-        <section
-          className="
-            mb-10
-          "
         >
-          <SectionHeader
-            title="Technical Information"
-            description="Engine, graphics API, installation, configuration, and save data."
+          <ModsEnhancements
+            game={
+              game
+            }
           />
+        </CollapsibleSection>
+
+
+        <CollapsibleSection
+          id="controllers"
+          title="Controller Support"
+          description="Xbox, PlayStation, DualSense, Nintendo, and hot-plug information."
+          icon={Gamepad2}
+          defaultOpen={false}
+          summary={
+            controllerSummary(
+              game
+            )
+          }
+        >
+          <ControllerCompatibility
+            game={
+              game
+            }
+          />
+        </CollapsibleSection>
+
+
+        <CollapsibleSection
+          id="essential-improvements"
+          title="Essential Improvements"
+          description="Recommended fixes and improvements from PCGamingWiki."
+          icon={Wrench}
+          defaultOpen={false}
+          summary={
+            game.essentialImprovementsHtml
+              ? "Recommendations available"
+              : "No recommendations listed"
+          }
+        >
+          <EssentialImprovements
+            game={
+              game
+            }
+          />
+        </CollapsibleSection>
+
+
+        <CollapsibleSection
+          id="save-backups"
+          title="Save Backups"
+          description="Create and restore timestamped backups of this game's save data."
+          icon={HardDrive}
+          defaultOpen={false}
+          summary="Backup & restore"
+        >
+          <SaveBackupPanel
+            game={
+              game
+            }
+          />
+        </CollapsibleSection>
+
+
+        <CollapsibleSection
+          id="technical"
+          title="Technical Information"
+          description="Engine, graphics API, installation, configuration, and save locations."
+          icon={Settings2}
+          defaultOpen={false}
+          summary={
+            game.technical?.engine
+            ?? game.technical?.api
+            ?? "Technical details"
+          }
+        >
+          {pathError ? (
+            <div
+              className="
+                mb-3
+                rounded-xl
+                border
+                border-amber-500/20
+                bg-amber-500/[0.06]
+                px-4
+                py-3
+                text-xs
+                leading-relaxed
+                text-amber-200/75
+              "
+            >
+              {pathError}
+            </div>
+          ) : null}
 
           <div
             className="
               grid
               grid-cols-1
-              gap-4
+              gap-3
               xl:grid-cols-2
             "
           >
@@ -1123,6 +1187,16 @@ export default function GameDetails({
               value={
                 game.installPath
               }
+              actionLabel="Open"
+              actionDisabled={
+                !game.installPath
+              }
+              onAction={
+                () =>
+                  handleOpenPath(
+                    game.installPath
+                  )
+              }
             />
 
             <InfoRow
@@ -1132,6 +1206,18 @@ export default function GameDetails({
                 game.technical
                   ?.configLocation
               }
+              actionLabel="Open"
+              actionDisabled={
+                !game.technical
+                  ?.configLocation
+              }
+              onAction={
+                () =>
+                  handleOpenPath(
+                    game.technical
+                      ?.configLocation
+                  )
+              }
             />
 
             <InfoRow
@@ -1140,6 +1226,18 @@ export default function GameDetails({
               value={
                 game.technical
                   ?.saveLocation
+              }
+              actionLabel="Open"
+              actionDisabled={
+                !game.technical
+                  ?.saveLocation
+              }
+              onAction={
+                () =>
+                  handleOpenPath(
+                    game.technical
+                      ?.saveLocation
+                  )
               }
             />
 
@@ -1151,34 +1249,28 @@ export default function GameDetails({
               }
             />
           </div>
-        </section>
+        </CollapsibleSection>
 
 
-        {/* ====================================================
-            PCGAMINGWIKI
-        ==================================================== */}
-
-        <section
-          className="
-            pb-10
-          "
+        <CollapsibleSection
+          id="pcgamingwiki"
+          title="PCGamingWiki"
+          description="Source match and direct link to the full game article."
+          icon={BadgeCheck}
+          defaultOpen={false}
+          summary={
+            game.pcgwPageName
+              ? "Matched"
+              : "No match"
+          }
+          className="mb-10"
         >
-          <SectionHeader
-            title="PCGamingWiki"
-            description={
-              game.pcgwPageName
-                ? `${game.pcgwPageName} matched to this installed game.`
-                : "PCGamingWiki match information."
-            }
-          />
-
           <PcgwMatch
             game={
               game
             }
           />
-        </section>
-
+        </CollapsibleSection>
       </div>
     </main>
   );
