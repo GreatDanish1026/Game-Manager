@@ -1,5 +1,6 @@
 use std::{
     cmp::Reverse,
+    env,
     fs,
     io::{
         Read,
@@ -68,8 +69,90 @@ pub struct ReShadeInfo {
 pub struct LocalModManagerInfo {
     pub vortex_evidence: bool,
     pub vortex_evidence_path: Option<String>,
+    pub vortex_executable_path: Option<String>,
     pub fluffy_evidence: bool,
     pub fluffy_evidence_path: Option<String>,
+    pub fluffy_executable_path: Option<String>,
+    pub generic_manager_name: Option<String>,
+    pub generic_manager_path: Option<String>,
+}
+
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpecialKInfo {
+    pub detected: bool,
+    pub evidence_path: Option<String>,
+}
+
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheatEngineInfo {
+    pub tables_found: usize,
+    pub first_table_path: Option<String>,
+}
+
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TechnicalDetailsInfo {
+    pub engine: Option<String>,
+    pub engine_version: Option<String>,
+    pub graphics_apis: Vec<String>,
+    pub executable_architecture: Option<String>,
+    pub anti_cheat: Vec<String>,
+    pub drm: Vec<String>,
+    pub detection_notes: Vec<String>,
+}
+
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryStorageInfo {
+    pub available: bool,
+    pub resolved_path: Option<String>,
+    pub size_bytes: Option<u64>,
+    pub file_count: Option<usize>,
+    pub truncated: bool,
+}
+
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LargestFileInfo {
+    pub file_name: String,
+    pub relative_path: String,
+    pub size_bytes: u64,
+}
+
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageDetailsInfo {
+    pub install_size_bytes: u64,
+    pub install_file_count: usize,
+    pub install_size_complete: bool,
+    pub drive_root: Option<String>,
+    pub drive_free_bytes: Option<u64>,
+    pub drive_total_bytes: Option<u64>,
+    pub executable_size_bytes: Option<u64>,
+    pub save_data: DirectoryStorageInfo,
+    pub config_data: DirectoryStorageInfo,
+    pub largest_files: Vec<LargestFileInfo>,
+}
+
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenshotInfo {
+    pub found: bool,
+    pub source: Option<String>,
+    pub folder_path: Option<String>,
+    pub screenshot_count: usize,
+    pub newest_path: Option<String>,
+    pub newest_modified_unix: Option<u64>,
+    pub newest_file_name: Option<String>,
 }
 
 
@@ -81,6 +164,11 @@ pub struct LocalInstallationInfo {
     pub graphics: GraphicsTechnologyInfo,
     pub reshade: ReShadeInfo,
     pub mod_managers: LocalModManagerInfo,
+    pub special_k: SpecialKInfo,
+    pub cheat_engine: CheatEngineInfo,
+    pub technical_details: TechnicalDetailsInfo,
+    pub storage_details: StorageDetailsInfo,
+    pub screenshots: ScreenshotInfo,
     pub files_scanned: usize,
     pub scan_truncated: bool,
 }
@@ -1232,12 +1320,209 @@ fn detect_reshade(
 }
 
 
+fn first_existing_path(
+    candidates: &[PathBuf],
+) -> Option<PathBuf> {
+    candidates
+        .iter()
+        .find(
+            |path| {
+                path.is_file()
+            }
+        )
+        .cloned()
+}
+
+
+#[cfg(target_os = "windows")]
+fn detect_vortex_executable() -> Option<PathBuf> {
+    let mut candidates =
+        Vec::new();
+
+    if let Ok(local_app_data) =
+        env::var(
+            "LOCALAPPDATA"
+        )
+    {
+        candidates.push(
+            PathBuf::from(
+                &local_app_data
+            )
+            .join(
+                "Programs"
+            )
+            .join(
+                "Vortex"
+            )
+            .join(
+                "Vortex.exe"
+            )
+        );
+    }
+
+    for variable in [
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+    ] {
+        if let Ok(program_files) =
+            env::var(
+                variable
+            )
+        {
+            candidates.push(
+                PathBuf::from(
+                    &program_files
+                )
+                .join(
+                    "Black Tree Gaming Ltd"
+                )
+                .join(
+                    "Vortex"
+                )
+                .join(
+                    "Vortex.exe"
+                )
+            );
+
+            candidates.push(
+                PathBuf::from(
+                    &program_files
+                )
+                .join(
+                    "Vortex"
+                )
+                .join(
+                    "Vortex.exe"
+                )
+            );
+        }
+    }
+
+    first_existing_path(
+        &candidates
+    )
+}
+
+
+#[cfg(not(target_os = "windows"))]
+fn detect_vortex_executable() -> Option<PathBuf> {
+    None
+}
+
+
+fn find_executable_by_names(
+    files: &[ScannedFile],
+    names: &[&str],
+) -> Option<PathBuf> {
+    find_named_file(
+        files,
+        names,
+    )
+}
+
+
+fn detect_special_k(
+    files: &[ScannedFile],
+) -> SpecialKInfo {
+    let evidence =
+        find_named_file(
+            files,
+            &[
+                "SpecialK.ini",
+                "SpecialK64.dll",
+                "SpecialK32.dll",
+                "SKIF.exe",
+            ],
+        )
+        .or_else(
+            || {
+                find_name_contains(
+                    files,
+                    &[
+                        "specialk",
+                        "special_k",
+                    ],
+                )
+            }
+        );
+
+    SpecialKInfo {
+        detected:
+            evidence.is_some(),
+
+        evidence_path:
+            evidence
+                .as_deref()
+                .map(
+                    path_string
+                ),
+    }
+}
+
+
+fn detect_cheat_engine_tables(
+    files: &[ScannedFile],
+) -> CheatEngineInfo {
+    let mut tables =
+        files
+            .iter()
+            .filter(
+                |file| {
+                    file
+                        .path
+                        .extension()
+                        .and_then(
+                            |value| {
+                                value.to_str()
+                            }
+                        )
+                        .map(
+                            |value| {
+                                value
+                                    .eq_ignore_ascii_case(
+                                        "ct"
+                                    )
+                            }
+                        )
+                        .unwrap_or(
+                            false
+                        )
+                }
+            )
+            .map(
+                |file| {
+                    file.path.clone()
+                }
+            )
+            .collect::<Vec<_>>();
+
+    tables.sort();
+
+    CheatEngineInfo {
+        tables_found:
+            tables.len(),
+
+        first_table_path:
+            tables
+                .first()
+                .map(
+                    |path| {
+                        path_string(
+                            path
+                        )
+                    }
+                ),
+    }
+}
+
+
 fn detect_mod_managers(
     files: &[ScannedFile],
 ) -> LocalModManagerInfo {
     /*
-     * These are intentionally conservative "evidence" checks.
-     * They do not claim a manager is actively controlling the game.
+     * Keep support, installation, and per-game evidence separate.
+     * Evidence inside the game directory does not prove that a manager
+     * is currently controlling the game.
      */
     let vortex =
         find_name_contains(
@@ -1257,12 +1542,101 @@ fn detect_mod_managers(
             ],
         );
 
+    let fluffy_executable =
+        find_executable_by_names(
+            files,
+            &[
+                "Modmanager.exe",
+                "FluffyModManager.exe",
+                "Fluffy Manager 5000.exe",
+            ],
+        );
+
+    let generic_managers =
+        [
+            (
+                "Mod Organizer 2",
+                "ModOrganizer.exe",
+            ),
+            (
+                "Mod Organizer 2",
+                "ModOrganizer2.exe",
+            ),
+            (
+                "r2modman",
+                "r2modman.exe",
+            ),
+            (
+                "Thunderstore Mod Manager",
+                "Thunderstore Mod Manager.exe",
+            ),
+            (
+                "Generic Mod Manager",
+                "modmanager.exe",
+            ),
+        ];
+
+    let mut generic_manager_name =
+        None;
+
+    let mut generic_manager_path =
+        None;
+
+    for (
+        label,
+        executable_name,
+    ) in generic_managers
+    {
+        if let Some(path) =
+            find_named_file(
+                files,
+                &[
+                    executable_name,
+                ],
+            )
+        {
+            /*
+             * Fluffy frequently uses Modmanager.exe. Do not report the
+             * same executable twice when Fluffy evidence is present.
+             */
+            if executable_name
+                .eq_ignore_ascii_case(
+                    "modmanager.exe"
+                )
+                && fluffy.is_some()
+            {
+                continue;
+            }
+
+            generic_manager_name =
+                Some(
+                    label.to_string()
+                );
+
+            generic_manager_path =
+                Some(
+                    path_string(
+                        &path
+                    )
+                );
+
+            break;
+        }
+    }
+
     LocalModManagerInfo {
         vortex_evidence:
             vortex.is_some(),
 
         vortex_evidence_path:
             vortex
+                .as_deref()
+                .map(
+                    path_string
+                ),
+
+        vortex_executable_path:
+            detect_vortex_executable()
                 .as_deref()
                 .map(
                     path_string
@@ -1277,14 +1651,1667 @@ fn detect_mod_managers(
                 .map(
                     path_string
                 ),
+
+        fluffy_executable_path:
+            fluffy_executable
+                .as_deref()
+                .map(
+                    path_string
+                ),
+
+        generic_manager_name,
+
+        generic_manager_path,
     }
 }
+
+fn file_name_equals(
+    file: &ScannedFile,
+    target: &str,
+) -> bool {
+    file
+        .path
+        .file_name()
+        .and_then(
+            |value| {
+                value.to_str()
+            }
+        )
+        .map(
+            |value| {
+                value
+                    .eq_ignore_ascii_case(
+                        target
+                    )
+            }
+        )
+        .unwrap_or(
+            false
+        )
+}
+
+
+fn path_contains_ci(
+    path: &Path,
+    term: &str,
+) -> bool {
+    path
+        .to_string_lossy()
+        .to_ascii_lowercase()
+        .contains(
+            &term
+                .to_ascii_lowercase()
+        )
+}
+
+
+#[derive(Debug, Default)]
+struct ExecutableSignatureSnapshot {
+    ue5_release: bool,
+    ue4_release: bool,
+    unreal_engine_5: bool,
+    unreal_engine_4: bool,
+    d3d12: bool,
+    d3d11: bool,
+    d3d9: bool,
+    vulkan: bool,
+    opengl: bool,
+    denuvo: bool,
+    denuvo_anti_tamper: bool,
+}
+
+
+fn scan_executable_signatures(
+    executable: &ExecutableInfo,
+) -> ExecutableSignatureSnapshot {
+    /*
+     * FAST PATH ONLY.
+     *
+     * Do not scan arbitrary portions of large game executables during the
+     * normal local-installation inspection. In debug/Tauri development
+     * builds, byte-by-byte case-insensitive string scanning of a 50–100+ MiB
+     * executable can stall the UI for tens of seconds.
+     *
+     * The normal technical profile instead relies on:
+     * - PE headers for architecture
+     * - installation file/folder evidence for engines and integrations
+     * - PCGamingWiki metadata as the frontend fallback for engine/API
+     * - lightweight local DLL/file evidence such as Vulkan loader files
+     *
+     * A future explicit "Deep Scan" can use a proper PE import parser or
+     * background worker without blocking normal game selection.
+     */
+    let _ =
+        executable;
+
+    ExecutableSignatureSnapshot::default()
+}
+
+
+
+fn detect_engine(
+    root: &Path,
+    files: &[ScannedFile],
+    executable: &ExecutableInfo,
+    signatures: &ExecutableSignatureSnapshot,
+) -> (
+    Option<String>,
+    Option<String>,
+    Vec<String>,
+) {
+    let mut notes =
+        Vec::new();
+
+    let unity_player =
+        find_named_file(
+            files,
+            &[
+                "UnityPlayer.dll",
+            ],
+        );
+
+    if let Some(path) =
+        unity_player
+    {
+        let version =
+            file_version(
+                &path
+            );
+
+        notes.push(
+            "UnityPlayer.dll was found in the game installation."
+                .to_string()
+        );
+
+        return (
+            Some(
+                "Unity"
+                    .to_string()
+            ),
+            version,
+            notes,
+        );
+    }
+
+    let unreal_path_evidence =
+        files
+            .iter()
+            .any(
+                |file| {
+                    path_contains_ci(
+                        &file.path,
+                        "\\engine\\binaries\\"
+                    )
+                        || path_contains_ci(
+                            &file.path,
+                            "/engine/binaries/"
+                        )
+                }
+            );
+
+    let ue4_named =
+        files
+            .iter()
+            .any(
+                |file| {
+                    file_name_equals(
+                        file,
+                        "UE4PrereqSetup_x64.exe"
+                    )
+                        || path_contains_ci(
+                            &file.path,
+                            "ue4"
+                        )
+                }
+            );
+
+    let ue5_named =
+        files
+            .iter()
+            .any(
+                |file| {
+                    path_contains_ci(
+                        &file.path,
+                        "ue5"
+                    )
+                        || file_name_equals(
+                            file,
+                            "UnrealEditor.exe"
+                        )
+                }
+            );
+
+    let unreal_version =
+        if signatures.ue5_release
+            || signatures.unreal_engine_5
+        {
+            Some(
+                "Unreal Engine 5"
+                    .to_string()
+            )
+        } else if signatures.ue4_release
+            || signatures.unreal_engine_4
+        {
+            Some(
+                "Unreal Engine 4"
+                    .to_string()
+            )
+        } else {
+            None
+        };
+
+    if unreal_path_evidence
+        || ue4_named
+        || ue5_named
+        || unreal_version.is_some()
+    {
+        notes.push(
+            "Unreal Engine directory or executable signatures were detected."
+                .to_string()
+        );
+
+        let version =
+            unreal_version
+                .or_else(
+                    || {
+                        if ue5_named {
+                            Some(
+                                "Unreal Engine 5"
+                                    .to_string()
+                            )
+                        } else if ue4_named {
+                            Some(
+                                "Unreal Engine 4"
+                                    .to_string()
+                            )
+                        } else {
+                            None
+                        }
+                    }
+                );
+
+        return (
+            Some(
+                "Unreal Engine"
+                    .to_string()
+            ),
+            version,
+            notes,
+        );
+    }
+
+    let re_engine =
+        files
+            .iter()
+            .any(
+                |file| {
+                    let name =
+                        file
+                            .path
+                            .file_name()
+                            .and_then(
+                                |value| {
+                                    value.to_str()
+                                }
+                            )
+                            .unwrap_or("")
+                            .to_ascii_lowercase();
+
+                    name.starts_with(
+                        "re_chunk_"
+                    )
+                        && name
+                            .ends_with(
+                                ".pak"
+                            )
+                }
+            );
+
+    if re_engine {
+        notes.push(
+            "RE Engine package naming was detected."
+                .to_string()
+        );
+
+        return (
+            Some(
+                "RE Engine"
+                    .to_string()
+            ),
+            None,
+            notes,
+        );
+    }
+
+    let source2 =
+        files
+            .iter()
+            .any(
+                |file| {
+                    file_name_equals(
+                        file,
+                        "engine2.dll"
+                    )
+                        || path_contains_ci(
+                            &file.path,
+                            "\\game\\bin\\win64\\"
+                        )
+                            && file_name_equals(
+                                file,
+                                "tier0.dll"
+                            )
+                }
+            );
+
+    if source2 {
+        notes.push(
+            "Source 2 engine binaries were detected."
+                .to_string()
+        );
+
+        return (
+            Some(
+                "Source 2"
+                    .to_string()
+            ),
+            None,
+            notes,
+        );
+    }
+
+    let source =
+        find_named_file(
+            files,
+            &[
+                "engine.dll",
+            ],
+        )
+        .is_some()
+        && find_named_file(
+            files,
+            &[
+                "tier0.dll",
+            ],
+        )
+        .is_some();
+
+    if source {
+        notes.push(
+            "Source engine.dll and tier0.dll were detected."
+                .to_string()
+        );
+
+        return (
+            Some(
+                "Source"
+                    .to_string()
+            ),
+            None,
+            notes,
+        );
+    }
+
+    let _ =
+        root;
+
+    (
+        None,
+        None,
+        notes,
+    )
+}
+
+
+fn detect_graphics_apis(
+    files: &[ScannedFile],
+    signatures: &ExecutableSignatureSnapshot,
+) -> (
+    Vec<String>,
+    Vec<String>,
+) {
+    let mut apis =
+        Vec::new();
+
+    let mut notes =
+        Vec::new();
+
+    for (
+        detected,
+        api,
+    ) in [
+        (
+            signatures.d3d12,
+            "DirectX 12",
+        ),
+        (
+            signatures.d3d11,
+            "DirectX 11",
+        ),
+        (
+            signatures.d3d9,
+            "DirectX 9",
+        ),
+        (
+            signatures.vulkan,
+            "Vulkan",
+        ),
+        (
+            signatures.opengl,
+            "OpenGL",
+        ),
+    ] {
+        if detected {
+            apis.push(
+                api.to_string()
+            );
+        }
+    }
+
+    if !apis.is_empty() {
+        notes.push(
+            "Graphics API imports/signatures were found in the selected game executable."
+                .to_string()
+        );
+    }
+
+    /*
+     * Vulkan loader files shipped with a title are useful secondary
+     * evidence when executable string/import scanning is inconclusive.
+     */
+    if find_named_file(
+        files,
+        &[
+            "vulkan-1.dll",
+        ],
+    )
+    .is_some()
+        && !apis
+            .iter()
+            .any(
+                |value| {
+                    value == "Vulkan"
+                }
+            )
+    {
+        apis.push(
+            "Vulkan"
+                .to_string()
+        );
+
+        notes.push(
+            "A Vulkan loader DLL was found in the installation."
+                .to_string()
+        );
+    }
+
+    apis.sort();
+
+    (
+        apis,
+        notes,
+    )
+}
+
+
+fn detect_anti_cheat(
+    files: &[ScannedFile],
+) -> Vec<String> {
+    let mut detected =
+        Vec::new();
+
+    let checks =
+        [
+            (
+                "Easy Anti-Cheat",
+                &[
+                    "EasyAntiCheat.exe",
+                    "EasyAntiCheat_EOS.exe",
+                    "EasyAntiCheat_x64.dll",
+                    "EasyAntiCheat_x86.dll",
+                ][..],
+            ),
+            (
+                "BattlEye",
+                &[
+                    "BEService.exe",
+                    "BEClient_x64.dll",
+                    "BEClient.dll",
+                ][..],
+            ),
+            (
+                "XIGNCODE3",
+                &[
+                    "x3.xem",
+                    "xigncode3.dll",
+                ][..],
+            ),
+            (
+                "nProtect GameGuard",
+                &[
+                    "GameMon.des",
+                    "GameGuard.des",
+                ][..],
+            ),
+            (
+                "PunkBuster",
+                &[
+                    "pbcl.dll",
+                    "pbsvc.exe",
+                ][..],
+            ),
+        ];
+
+    for (
+        label,
+        names,
+    ) in checks
+    {
+        if find_named_file(
+            files,
+            names,
+        )
+        .is_some()
+        {
+            detected.push(
+                label.to_string()
+            );
+        }
+    }
+
+    detected
+}
+
+
+fn detect_drm(
+    files: &[ScannedFile],
+    signatures: &ExecutableSignatureSnapshot,
+) -> (
+    Vec<String>,
+    Vec<String>,
+) {
+    let mut detected =
+        Vec::new();
+
+    let mut notes =
+        Vec::new();
+
+    if signatures.denuvo
+        || signatures.denuvo_anti_tamper
+    {
+        detected.push(
+            "Denuvo Anti-Tamper"
+                .to_string()
+        );
+
+        notes.push(
+            "Denuvo text signatures were found in the selected executable."
+                .to_string()
+        );
+    }
+
+    if find_named_file(
+        files,
+        &[
+            "steam_api64.dll",
+            "steam_api.dll",
+        ],
+    )
+    .is_some()
+    {
+        detected.push(
+            "Steamworks integration"
+                .to_string()
+        );
+
+        notes.push(
+            "Steamworks API files are present; this does not by itself prove Steam DRM is enabled."
+                .to_string()
+        );
+    }
+
+    if find_named_file(
+        files,
+        &[
+            "uplay_r1_loader64.dll",
+            "uplay_r1_loader.dll",
+        ],
+    )
+    .is_some()
+    {
+        detected.push(
+            "Ubisoft Connect integration"
+                .to_string()
+        );
+    }
+
+    if find_named_file(
+        files,
+        &[
+            "EOSSDK-Win64-Shipping.dll",
+            "EOSSDK-Win32-Shipping.dll",
+        ],
+    )
+    .is_some()
+    {
+        detected.push(
+            "Epic Online Services integration"
+                .to_string()
+        );
+
+        notes.push(
+            "EOS SDK presence is platform/service evidence, not proof of DRM."
+                .to_string()
+        );
+    }
+
+    if find_named_file(
+        files,
+        &[
+            "Galaxy64.dll",
+            "Galaxy.dll",
+        ],
+    )
+    .is_some()
+    {
+        detected.push(
+            "GOG Galaxy integration"
+                .to_string()
+        );
+
+        notes.push(
+            "GOG Galaxy integration is not equivalent to DRM."
+                .to_string()
+        );
+    }
+
+    (
+        detected,
+        notes,
+    )
+}
+
+
+fn detect_technical_details(
+    root: &Path,
+    files: &[ScannedFile],
+    executable: &ExecutableInfo,
+    signatures: &ExecutableSignatureSnapshot,
+) -> TechnicalDetailsInfo {
+    let (
+        engine,
+        engine_version,
+        mut detection_notes,
+    ) =
+        detect_engine(
+            root,
+            files,
+            executable,
+            signatures,
+        );
+
+    let (
+        graphics_apis,
+        api_notes,
+    ) =
+        detect_graphics_apis(
+            files,
+            signatures,
+        );
+
+    detection_notes.extend(
+        api_notes
+    );
+
+    let anti_cheat =
+        detect_anti_cheat(
+            files
+        );
+
+    let (
+        drm,
+        drm_notes,
+    ) =
+        detect_drm(
+            files,
+            signatures,
+        );
+
+    detection_notes.extend(
+        drm_notes
+    );
+
+    TechnicalDetailsInfo {
+        engine,
+        engine_version,
+        graphics_apis,
+
+        executable_architecture:
+            executable
+                .architecture
+                .clone(),
+
+        anti_cheat,
+        drm,
+        detection_notes,
+    }
+}
+
+
+fn directory_storage_info(
+    raw_path: Option<&str>,
+    install_path: &Path,
+) -> DirectoryStorageInfo {
+    let Some(raw_path) =
+        raw_path
+            .map(str::trim)
+            .filter(
+                |value| {
+                    !value.is_empty()
+                }
+            )
+    else {
+        return DirectoryStorageInfo {
+            available:
+                false,
+            resolved_path:
+                None,
+            size_bytes:
+                None,
+            file_count:
+                None,
+            truncated:
+                false,
+        };
+    };
+
+    let install_path_text =
+        install_path
+            .to_string_lossy()
+            .to_string();
+
+    let resolved =
+        match crate::local_paths::resolve_game_path(
+            raw_path,
+            Some(
+                install_path_text
+                    .as_str()
+            ),
+        ) {
+            Ok(path) =>
+                path,
+
+            Err(_) =>
+                return DirectoryStorageInfo {
+                    available:
+                        false,
+                    resolved_path:
+                        None,
+                    size_bytes:
+                        None,
+                    file_count:
+                        None,
+                    truncated:
+                        false,
+                },
+        };
+
+    const MAX_AUX_FILES: usize =
+        50_000;
+
+    const MAX_AUX_DEPTH: usize =
+        12;
+
+    let mut stack =
+        vec![
+            (
+                resolved.clone(),
+                0usize,
+            ),
+        ];
+
+    let mut file_count =
+        0usize;
+
+    let mut size_bytes =
+        0u64;
+
+    let mut truncated =
+        false;
+
+    while let Some(
+        (
+            directory,
+            depth,
+        )
+    ) = stack.pop()
+    {
+        if depth
+            > MAX_AUX_DEPTH
+        {
+            truncated =
+                true;
+
+            continue;
+        }
+
+        let Ok(entries) =
+            fs::read_dir(
+                &directory
+            )
+        else {
+            continue;
+        };
+
+        for entry in
+            entries.flatten()
+        {
+            if file_count
+                >= MAX_AUX_FILES
+            {
+                truncated =
+                    true;
+
+                break;
+            }
+
+            let Ok(metadata) =
+                entry.metadata()
+            else {
+                continue;
+            };
+
+            let path =
+                entry.path();
+
+            if metadata.is_dir() {
+                stack.push(
+                    (
+                        path,
+                        depth + 1,
+                    )
+                );
+
+                continue;
+            }
+
+            if metadata.is_file() {
+                file_count +=
+                    1;
+
+                size_bytes =
+                    size_bytes
+                        .saturating_add(
+                            metadata.len()
+                        );
+            }
+        }
+
+        if truncated
+            && file_count
+                >= MAX_AUX_FILES
+        {
+            break;
+        }
+    }
+
+    DirectoryStorageInfo {
+        available:
+            true,
+
+        resolved_path:
+            Some(
+                path_string(
+                    &resolved
+                )
+            ),
+
+        size_bytes:
+            Some(
+                size_bytes
+            ),
+
+        file_count:
+            Some(
+                file_count
+            ),
+
+        truncated,
+    }
+}
+
+
+#[cfg(target_os = "windows")]
+fn windows_drive_space(
+    path: &Path,
+) -> (
+    Option<String>,
+    Option<u64>,
+    Option<u64>,
+) {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetDiskFreeSpaceExW(
+            lp_directory_name:
+                *const u16,
+            lp_free_bytes_available_to_caller:
+                *mut u64,
+            lp_total_number_of_bytes:
+                *mut u64,
+            lp_total_number_of_free_bytes:
+                *mut u64,
+        ) -> i32;
+    }
+
+    let path_text =
+        path
+            .to_string_lossy()
+            .to_string();
+
+    let drive_root =
+        if path_text.len()
+            >= 2
+            && path_text
+                .as_bytes()
+                .get(1)
+                == Some(
+                    &b':'
+                )
+        {
+            Some(
+                format!(
+                    "{}:\\",
+                    &path_text[
+                        0..1
+                    ]
+                )
+            )
+        } else {
+            None
+        };
+
+    let query_path =
+        drive_root
+            .as_deref()
+            .unwrap_or(
+                path_text
+                    .as_str()
+            );
+
+    let wide =
+        std::ffi::OsStr::new(
+            query_path
+        )
+        .encode_wide()
+        .chain(
+            std::iter::once(
+                0
+            )
+        )
+        .collect::<Vec<_>>();
+
+    let mut available =
+        0u64;
+
+    let mut total =
+        0u64;
+
+    let mut total_free =
+        0u64;
+
+    let ok =
+        unsafe {
+            GetDiskFreeSpaceExW(
+                wide.as_ptr(),
+                &mut available,
+                &mut total,
+                &mut total_free,
+            )
+        };
+
+    if ok == 0 {
+        return (
+            drive_root,
+            None,
+            None,
+        );
+    }
+
+    (
+        drive_root,
+        Some(
+            available
+        ),
+        Some(
+            total
+        ),
+    )
+}
+
+
+#[cfg(not(target_os = "windows"))]
+fn windows_drive_space(
+    _path: &Path,
+) -> (
+    Option<String>,
+    Option<u64>,
+    Option<u64>,
+) {
+    (
+        None,
+        None,
+        None,
+    )
+}
+
+
+fn build_storage_details(
+    root: &Path,
+    scan: &ScanResult,
+    executable: &ExecutableInfo,
+    save_path: Option<&str>,
+    config_path: Option<&str>,
+) -> StorageDetailsInfo {
+    let install_size_bytes =
+        scan
+            .files
+            .iter()
+            .fold(
+                0u64,
+                |total, file| {
+                    total
+                        .saturating_add(
+                            file.size_bytes
+                        )
+                }
+            );
+
+    let mut largest_files =
+        scan
+            .files
+            .iter()
+            .map(
+                |file| {
+                    let relative_path =
+                        file
+                            .path
+                            .strip_prefix(
+                                root
+                            )
+                            .unwrap_or(
+                                &file.path
+                            )
+                            .to_string_lossy()
+                            .to_string();
+
+                    let file_name =
+                        file
+                            .path
+                            .file_name()
+                            .map(
+                                |value| {
+                                    value
+                                        .to_string_lossy()
+                                        .to_string()
+                                }
+                            )
+                            .unwrap_or_else(
+                                || {
+                                    relative_path
+                                        .clone()
+                                }
+                            );
+
+                    LargestFileInfo {
+                        file_name,
+                        relative_path,
+                        size_bytes:
+                            file.size_bytes,
+                    }
+                }
+            )
+            .collect::<Vec<_>>();
+
+    largest_files.sort_by(
+        |left, right| {
+            right
+                .size_bytes
+                .cmp(
+                    &left
+                        .size_bytes
+                )
+        }
+    );
+
+    largest_files.truncate(
+        5
+    );
+
+    let (
+        drive_root,
+        drive_free_bytes,
+        drive_total_bytes,
+    ) =
+        windows_drive_space(
+            root
+        );
+
+    StorageDetailsInfo {
+        install_size_bytes,
+
+        install_file_count:
+            scan.files.len(),
+
+        install_size_complete:
+            !scan.truncated,
+
+        drive_root,
+
+        drive_free_bytes,
+
+        drive_total_bytes,
+
+        executable_size_bytes:
+            executable
+                .size_bytes,
+
+        save_data:
+            directory_storage_info(
+                save_path,
+                root,
+            ),
+
+        config_data:
+            directory_storage_info(
+                config_path,
+                root,
+            ),
+
+        largest_files,
+    }
+}
+
+
+fn is_screenshot_extension(
+    path: &Path,
+) -> bool {
+    path
+        .extension()
+        .and_then(
+            |value| {
+                value.to_str()
+            }
+        )
+        .map(
+            |value| {
+                matches!(
+                    value
+                        .to_ascii_lowercase()
+                        .as_str(),
+                    "png"
+                        | "jpg"
+                        | "jpeg"
+                        | "bmp"
+                        | "webp"
+                )
+            }
+        )
+        .unwrap_or(
+            false
+        )
+}
+
+
+fn inspect_screenshot_folder(
+    folder: &Path,
+    source: &str,
+) -> Option<ScreenshotInfo> {
+    if !folder.is_dir() {
+        return None;
+    }
+
+    let mut screenshot_count =
+        0usize;
+
+    let mut newest_path:
+        Option<PathBuf> =
+        None;
+
+    let mut newest_modified_unix:
+        Option<u64> =
+        None;
+
+    let Ok(entries) =
+        fs::read_dir(
+            folder
+        )
+    else {
+        return None;
+    };
+
+    for entry in
+        entries.flatten()
+    {
+        let path =
+            entry.path();
+
+        let Ok(metadata) =
+            entry.metadata()
+        else {
+            continue;
+        };
+
+        if !metadata.is_file()
+            || !is_screenshot_extension(
+                &path
+            )
+        {
+            continue;
+        }
+
+        screenshot_count +=
+            1;
+
+        let modified =
+            metadata
+                .modified()
+                .ok()
+                .and_then(
+                    |time| {
+                        time
+                            .duration_since(
+                                std::time::UNIX_EPOCH
+                            )
+                            .ok()
+                    }
+                )
+                .map(
+                    |duration| {
+                        duration.as_secs()
+                    }
+                );
+
+        let is_newer =
+            match (
+                modified,
+                newest_modified_unix,
+            ) {
+                (
+                    Some(candidate),
+                    Some(current),
+                ) =>
+                    candidate
+                        > current,
+
+                (
+                    Some(_),
+                    None,
+                ) =>
+                    true,
+
+                _ =>
+                    newest_path
+                        .is_none(),
+            };
+
+        if is_newer {
+            newest_modified_unix =
+                modified;
+
+            newest_path =
+                Some(
+                    path
+                );
+        }
+    }
+
+    if screenshot_count
+        == 0
+    {
+        return None;
+    }
+
+    let newest_file_name =
+        newest_path
+            .as_deref()
+            .and_then(
+                |path| {
+                    path
+                        .file_name()
+                }
+            )
+            .map(
+                |value| {
+                    value
+                        .to_string_lossy()
+                        .to_string()
+                }
+            );
+
+    Some(
+        ScreenshotInfo {
+            found:
+                true,
+
+            source:
+                Some(
+                    source
+                        .to_string()
+                ),
+
+            folder_path:
+                Some(
+                    path_string(
+                        folder
+                    )
+                ),
+
+            screenshot_count,
+
+            newest_path:
+                newest_path
+                    .as_deref()
+                    .map(
+                        path_string
+                    ),
+
+            newest_modified_unix,
+
+            newest_file_name,
+        }
+    )
+}
+
+
+#[cfg(target_os = "windows")]
+fn steam_roots() -> Vec<PathBuf> {
+    let mut roots =
+        Vec::new();
+
+    for variable in [
+        "PROGRAMFILES(X86)",
+        "PROGRAMFILES",
+    ] {
+        if let Ok(program_files) =
+            env::var(
+                variable
+            )
+        {
+            roots.push(
+                PathBuf::from(
+                    program_files
+                )
+                .join(
+                    "Steam"
+                )
+            );
+        }
+    }
+
+    if let Ok(local_app_data) =
+        env::var(
+            "LOCALAPPDATA"
+        )
+    {
+        roots.push(
+            PathBuf::from(
+                local_app_data
+            )
+            .join(
+                "Steam"
+            )
+        );
+    }
+
+    roots.sort();
+
+    roots.dedup();
+
+    roots
+}
+
+
+#[cfg(not(target_os = "windows"))]
+fn steam_roots() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+
+fn detect_steam_screenshots(
+    app_id: &str,
+) -> Option<ScreenshotInfo> {
+    let app_id =
+        app_id
+            .trim();
+
+    if app_id.is_empty() {
+        return None;
+    }
+
+    let mut best:
+        Option<ScreenshotInfo> =
+        None;
+
+    for steam_root in
+        steam_roots()
+    {
+        let userdata =
+            steam_root
+                .join(
+                    "userdata"
+                );
+
+        let Ok(users) =
+            fs::read_dir(
+                userdata
+            )
+        else {
+            continue;
+        };
+
+        for user in
+            users.flatten()
+        {
+            let screenshot_folder =
+                user
+                    .path()
+                    .join(
+                        "760"
+                    )
+                    .join(
+                        "remote"
+                    )
+                    .join(
+                        app_id
+                    )
+                    .join(
+                        "screenshots"
+                    );
+
+            let Some(info) =
+                inspect_screenshot_folder(
+                    &screenshot_folder,
+                    "Steam",
+                )
+            else {
+                continue;
+            };
+
+            let replace =
+                best
+                    .as_ref()
+                    .map(
+                        |current| {
+                            info
+                                .newest_modified_unix
+                                .unwrap_or(
+                                    0
+                                )
+                                > current
+                                    .newest_modified_unix
+                                    .unwrap_or(
+                                        0
+                                    )
+                        }
+                    )
+                    .unwrap_or(
+                        true
+                    );
+
+            if replace {
+                best =
+                    Some(
+                        info
+                    );
+            }
+        }
+    }
+
+    best
+}
+
+
+fn detect_common_screenshot_folder(
+    game_name: &str,
+    root: &Path,
+) -> Option<ScreenshotInfo> {
+    let common_install_candidates =
+        [
+            root.join(
+                "Screenshots"
+            ),
+            root.join(
+                "screenshots"
+            ),
+            root.join(
+                "ScreenShots"
+            ),
+            root.join(
+                "Screenshot"
+            ),
+            root.join(
+                "Captures"
+            ),
+        ];
+
+    for candidate in
+        common_install_candidates
+    {
+        if let Some(info) =
+            inspect_screenshot_folder(
+                &candidate,
+                "Game folder",
+            )
+        {
+            return Some(
+                info
+            );
+        }
+    }
+
+    let Ok(user_profile) =
+        env::var(
+            "USERPROFILE"
+        )
+    else {
+        return None;
+    };
+
+    let safe_game_name =
+        game_name
+            .trim();
+
+    if safe_game_name.is_empty() {
+        return None;
+    }
+
+    let user_root =
+        PathBuf::from(
+            user_profile
+        );
+
+    let candidates =
+        [
+            user_root
+                .join(
+                    "Pictures"
+                )
+                .join(
+                    safe_game_name
+                ),
+            user_root
+                .join(
+                    "Pictures"
+                )
+                .join(
+                    safe_game_name
+                )
+                .join(
+                    "Screenshots"
+                ),
+            user_root
+                .join(
+                    "Documents"
+                )
+                .join(
+                    safe_game_name
+                )
+                .join(
+                    "Screenshots"
+                ),
+        ];
+
+    for candidate in
+        candidates
+    {
+        if let Some(info) =
+            inspect_screenshot_folder(
+                &candidate,
+                "Common folder",
+            )
+        {
+            return Some(
+                info
+            );
+        }
+    }
+
+    None
+}
+
+
+fn detect_screenshots(
+    game_name: &str,
+    store: Option<&str>,
+    launcher_id: Option<&str>,
+    root: &Path,
+) -> ScreenshotInfo {
+    let is_steam =
+        store
+            .map(
+                |value| {
+                    value
+                        .eq_ignore_ascii_case(
+                            "steam"
+                        )
+                }
+            )
+            .unwrap_or(
+                false
+            );
+
+    if is_steam {
+        if let Some(app_id) =
+            launcher_id
+        {
+            if let Some(info) =
+                detect_steam_screenshots(
+                    app_id
+                )
+            {
+                return info;
+            }
+        }
+    }
+
+    if let Some(info) =
+        detect_common_screenshot_folder(
+            game_name,
+            root,
+        )
+    {
+        return info;
+    }
+
+    ScreenshotInfo {
+        found:
+            false,
+        source:
+            None,
+        folder_path:
+            None,
+        screenshot_count:
+            0,
+        newest_path:
+            None,
+        newest_modified_unix:
+            None,
+        newest_file_name:
+            None,
+    }
+}
+
 
 
 #[tauri::command]
 pub fn inspect_local_installation(
     game_name: String,
     install_path: String,
+    save_path: Option<String>,
+    config_path: Option<String>,
+    store: Option<String>,
+    launcher_id: Option<String>,
 ) -> Result<LocalInstallationInfo, String> {
     let total_started =
         Instant::now();
@@ -1353,6 +3380,56 @@ pub fn inspect_local_installation(
             &scan.files
         );
 
+    let special_k =
+        detect_special_k(
+            &scan.files
+        );
+
+    let cheat_engine =
+        detect_cheat_engine_tables(
+            &scan.files
+        );
+
+    let signature_started =
+        Instant::now();
+
+    let executable_signatures =
+        scan_executable_signatures(
+            &executable
+        );
+
+    let signature_elapsed =
+        signature_started.elapsed();
+
+    let technical_details =
+        detect_technical_details(
+            &root,
+            &scan.files,
+            &executable,
+            &executable_signatures,
+        );
+
+    let storage_details =
+        build_storage_details(
+            &root,
+            &scan,
+            &executable,
+            save_path
+                .as_deref(),
+            config_path
+                .as_deref(),
+        );
+
+    let screenshots =
+        detect_screenshots(
+            &game_name,
+            store
+                .as_deref(),
+            launcher_id
+                .as_deref(),
+            &root,
+        );
+
     println!(
         "[LOCAL INSPECTOR] Files visited: {}, truncated: {}",
         scan.visited,
@@ -1362,6 +3439,11 @@ pub fn inspect_local_installation(
     println!(
         "[PERFORMANCE] Local directory scan: {} ms",
         scan_elapsed.as_millis()
+    );
+
+    println!(
+        "[PERFORMANCE] Executable signature fast path: {} ms",
+        signature_elapsed.as_millis()
     );
 
     println!(
@@ -1380,6 +3462,11 @@ pub fn inspect_local_installation(
             graphics,
             reshade,
             mod_managers,
+            special_k,
+            cheat_engine,
+            technical_details,
+            storage_details,
+            screenshots,
 
             files_scanned:
                 scan.visited,

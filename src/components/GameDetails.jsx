@@ -38,11 +38,15 @@ import ControllerCompatibility from "./ControllerCompatibility";
 import EssentialImprovements from "./EssentialImprovements";
 import CollapsibleSection from "./CollapsibleSection";
 import CompactFeatureGrid from "./CompactFeatureGrid";
-import ModsEnhancements from "./ModsEnhancements";
+import ModDashboard from "./ModDashboard";
 import QuickStatusBar from "./QuickStatusBar";
 import SaveBackupPanel from "./SaveBackupPanel";
 import GamePersonalization from "./GamePersonalization";
 import LocalInstallationPanel from "./LocalInstallationPanel";
+import StorageInstallPanel from "./StorageInstallPanel";
+import ScreenshotBrowserPanel from "./ScreenshotBrowserPanel";
+import TechnicalDetailsPanel from "./TechnicalDetailsPanel";
+import ExternalToolsPanel from "./ExternalToolsPanel";
 import GameHealthPanel from "./GameHealthPanel";
 import HardwareCapabilityPanel from "./HardwareCapabilityPanel";
 import KnownIssuesPanel from "./KnownIssuesPanel";
@@ -594,8 +598,8 @@ function modSummary(
       .length;
 
   return count > 0
-    ? `${count} integrations detected`
-    : "No integrations detected";
+    ? `${count} known enhancement${count === 1 ? "" : "s"}`
+    : "Local & provider mod status";
 }
 
 
@@ -1121,7 +1125,7 @@ export default function GameDetails({
         <CollapsibleSection
           id="mods"
           title="Mods & Enhancements"
-          description="HDR mod support and mod-manager compatibility in one compact panel."
+          description="Consolidated enhancement support, mod managers, and local mod evidence."
           icon={Puzzle}
           defaultOpen
           summary={
@@ -1130,7 +1134,23 @@ export default function GameDetails({
             )
           }
         >
-          <ModsEnhancements
+          <ModDashboard
+            game={
+              game
+            }
+          />
+        </CollapsibleSection>
+
+
+        <CollapsibleSection
+          id="external-tools"
+          title="External Tools"
+          description="Detected game tools, mod managers, local integrations, and quick launch actions."
+          icon={Wrench}
+          defaultOpen={true}
+          summary="Game tools & launch hub"
+        >
+          <ExternalToolsPanel
             game={
               game
             }
@@ -1243,6 +1263,38 @@ export default function GameDetails({
 
 
         <CollapsibleSection
+          id="storage-installation"
+          title="Storage & Installation"
+          description="Install size, drive capacity, executable size, save/config data, and largest local files."
+          icon={HardDrive}
+          defaultOpen={true}
+          summary="Disk usage & local storage"
+        >
+          <StorageInstallPanel
+            game={
+              game
+            }
+          />
+        </CollapsibleSection>
+
+
+        <CollapsibleSection
+          id="screenshots"
+          title="Screenshots"
+          description="Detected Steam and common local screenshot folders."
+          icon={Monitor}
+          defaultOpen={false}
+          summary="Count, newest screenshot & folder"
+        >
+          <ScreenshotBrowserPanel
+            game={
+              game
+            }
+          />
+        </CollapsibleSection>
+
+
+        <CollapsibleSection
           id="save-backups"
           title="Save Backups"
           description="Create and restore timestamped backups of this game's save data."
@@ -1270,6 +1322,12 @@ export default function GameDetails({
             ?? "Technical details"
           }
         >
+          <TechnicalDetailsPanel
+            game={
+              game
+            }
+          />
+
           <div
             className="
               mb-4

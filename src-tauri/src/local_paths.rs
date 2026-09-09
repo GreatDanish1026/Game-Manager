@@ -689,6 +689,228 @@ fn open_in_file_manager(
 }
 
 
+fn validate_openable_game_file(
+    path: &Path,
+) -> Result<(), String> {
+    if !path.exists() {
+        return Err(
+            format!(
+                "The file does not exist: {}",
+                path.display()
+            )
+        );
+    }
+
+    if !path.is_file() {
+        return Err(
+            format!(
+                "The path is not a file: {}",
+                path.display()
+            )
+        );
+    }
+
+    let extension =
+        path
+            .extension()
+            .and_then(
+                |value| {
+                    value.to_str()
+                }
+            )
+            .unwrap_or("")
+            .to_ascii_lowercase();
+
+    /*
+     * This command is intentionally narrow. It exists for GameAtlas
+     * screenshot/media actions, not as an unrestricted shell launcher.
+     */
+    let allowed =
+        matches!(
+            extension.as_str(),
+            "png"
+                | "jpg"
+                | "jpeg"
+                | "bmp"
+                | "webp"
+                | "gif"
+        );
+
+    if !allowed {
+        return Err(
+            format!(
+                "GameAtlas does not open this file type through the screenshot viewer: .{}",
+                extension
+            )
+        );
+    }
+
+    Ok(())
+}
+
+
+#[cfg(target_os = "windows")]
+fn open_file_with_default_app(
+    path: &Path,
+) -> Result<(), String> {
+    use std::{
+        ffi::OsStr,
+        os::windows::ffi::OsStrExt,
+        ptr,
+    };
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: *mut std::ffi::c_void,
+            operation: *const u16,
+            file: *const u16,
+            parameters: *const u16,
+            directory: *const u16,
+            show_command: i32,
+        ) -> isize;
+    }
+
+    let operation =
+        OsStr::new(
+            "open"
+        )
+        .encode_wide()
+        .chain(
+            std::iter::once(
+                0
+            )
+        )
+        .collect::<Vec<_>>();
+
+    let file =
+        path
+            .as_os_str()
+            .encode_wide()
+            .chain(
+                std::iter::once(
+                    0
+                )
+            )
+            .collect::<Vec<_>>();
+
+    let result =
+        unsafe {
+            ShellExecuteW(
+                ptr::null_mut(),
+                operation.as_ptr(),
+                file.as_ptr(),
+                ptr::null(),
+                ptr::null(),
+                1,
+            )
+        };
+
+    /*
+     * ShellExecute returns a value greater than 32 on success.
+     */
+    if result <= 32 {
+        return Err(
+            format!(
+                "Windows could not open the file with its default application (ShellExecute code {}).",
+                result
+            )
+        );
+    }
+
+    Ok(())
+}
+
+
+#[cfg(target_os = "linux")]
+fn open_file_with_default_app(
+    path: &Path,
+) -> Result<(), String> {
+    Command::new(
+        "xdg-open"
+    )
+    .arg(
+        path
+    )
+    .spawn()
+    .map_err(
+        |error| {
+            format!(
+                "Failed to open the file: {}",
+                error
+            )
+        }
+    )?;
+
+    Ok(())
+}
+
+
+#[cfg(target_os = "macos")]
+fn open_file_with_default_app(
+    path: &Path,
+) -> Result<(), String> {
+    Command::new(
+        "open"
+    )
+    .arg(
+        path
+    )
+    .spawn()
+    .map_err(
+        |error| {
+            format!(
+                "Failed to open the file: {}",
+                error
+            )
+        }
+    )?;
+
+    Ok(())
+}
+
+
+#[cfg(not(any(
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "macos"
+)))]
+fn open_file_with_default_app(
+    _path: &Path,
+) -> Result<(), String> {
+    Err(
+        "Opening local files is not supported on this operating system."
+            .to_string()
+    )
+}
+
+
+#[tauri::command]
+pub fn open_game_file(
+    path: String,
+) -> Result<(), String> {
+    let path =
+        PathBuf::from(
+            path
+                .trim()
+                .trim_matches('"')
+        );
+
+    validate_openable_game_file(
+        &path
+    )?;
+
+    println!(
+        "[PATHS] Opening file: {}",
+        path.display()
+    );
+
+    open_file_with_default_app(
+        &path
+    )
+}
+
+
 #[tauri::command]
 pub fn open_game_path(
     path: String,

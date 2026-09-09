@@ -15,6 +15,16 @@ function cacheKey(
       ?? "",
     game?.installPath
       ?? "",
+    game?.technical
+      ?.saveLocation
+      ?? "",
+    game?.technical
+      ?.configLocation
+      ?? "",
+    game?.store
+      ?? "",
+    game?.launcherId
+      ?? "",
   ].join(
     "::"
   );
@@ -52,6 +62,24 @@ export async function inspectLocalInstallation(
 
         installPath:
           game.installPath,
+
+        savePath:
+          game.technical
+            ?.saveLocation
+          ?? null,
+
+        configPath:
+          game.technical
+            ?.configLocation
+          ?? null,
+
+        store:
+          game.store
+          ?? null,
+
+        launcherId:
+          game.launcherId
+          ?? null,
       }
     )
     .catch(

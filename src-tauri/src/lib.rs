@@ -56,6 +56,7 @@ pub fn run() {
                 fluffy::get_fluffy_support,
 
                 local_paths::open_game_path,
+                local_paths::open_game_file,
 
                 save_backups::get_save_backup_status,
                 save_backups::get_backup_storage_summary,
