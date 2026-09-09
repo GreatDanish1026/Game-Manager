@@ -357,12 +357,6 @@ latest.json
 
 The `latest.json` file is used by the in-app updater.
 
-## Current Release
-
-**GameAtlas v1.0.0**
-
-v1.0.0 is the first production-ready release and includes the full game library, PCGamingWiki, installation inspection, hardware awareness, mod compatibility, backup, dashboard, updater, and production-hardening feature set.
-
 ## Data and External Services
 
 GameAtlas may retrieve information from external sources including:
