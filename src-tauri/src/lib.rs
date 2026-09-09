@@ -1,3 +1,5 @@
+mod ea_games;
+mod xbox_games;
 mod logging;
 mod installed_games;
 mod pcgamingwiki;
@@ -35,7 +37,10 @@ pub fn run() {
 
         .invoke_handler(
             tauri::generate_handler![
-                installed_games::get_installed_games,
+                
+
+                ea_games::get_ea_installed_games,
+                xbox_games::get_xbox_installed_games,installed_games::get_installed_games,
 
                 pcgamingwiki::get_pcgw_game_data,
 

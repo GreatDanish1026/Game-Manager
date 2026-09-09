@@ -3,7 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
-} from "react";
+  } from "react";
 
 import Sidebar from "./components/Sidebar";
 import GameDetails from "./components/GameDetails";
@@ -13,28 +13,32 @@ import LibraryAnalysisPanel from "./components/LibraryAnalysisPanel";
 import SettingsScreen from "./components/SettingsScreen";
 
 import {
+  gameMatchesLauncher,
   getInstalledGames,
-} from "./services/gameLibrary";
+  getInstalledGamesForLauncher,
+  } from "./services/gameLibrary";
 
 import {
   getPcGamingWikiData,
-} from "./services/pcgamingwiki";
+  } from "./services/pcgamingwiki";
 
 import {
   getRenoDxModStatus,
-} from "./services/renodx";
+  } from "./services/renodx";
 
 import {
   getVortexSupport,
-} from "./services/vortex";
+  } from "./services/vortex";
 
 import {
   checkForUpdates,
-} from "./services/updater";
+  } from "./services/updater";
 
 import {
   saveLibrarySnapshot,
   storeGameInsight,
+  getGameInsight,
+  insightMatchesFilter,
 } from "./services/libraryInsights";
 
 import {
@@ -676,6 +680,128 @@ function prepareGameForUi(
   };
 }
 
+
+
+
+function prepareGameForUiWithCachedInsight(
+  game
+) {
+  const prepared =
+    prepareGameForUi(
+      game
+    );
+
+  const insight =
+    getGameInsight(
+      game
+    );
+
+  if (!insight) {
+    return prepared;
+  }
+
+  return {
+    ...prepared,
+
+    features: {
+      ...(prepared.features
+        ?? {}),
+
+      hdr:
+        insightMatchesFilter(
+          insight,
+          "hdr"
+        ),
+
+      rayTracing:
+        insightMatchesFilter(
+          insight,
+          "ray-tracing"
+        ),
+
+      frameGeneration:
+        insightMatchesFilter(
+          insight,
+          "frame-generation"
+        ),
+
+      ultrawide:
+        insightMatchesFilter(
+          insight,
+          "ultrawide"
+        ),
+
+      fourK:
+        insightMatchesFilter(
+          insight,
+          "4k"
+        ),
+
+      oneTwentyFps:
+        insightMatchesFilter(
+          insight,
+          "120fps"
+        ),
+
+      upscaling:
+        insightMatchesFilter(
+          insight,
+          "upscaling"
+        ),
+    },
+
+    renodx: {
+      ...(prepared.renodx
+        ?? {}),
+
+      renodx: {
+        ...(prepared.renodx
+          ?.renodx
+          ?? {}),
+
+        available:
+          insightMatchesFilter(
+            insight,
+            "renodx"
+          ),
+      },
+
+      luma: {
+        ...(prepared.renodx
+          ?.luma
+          ?? {}),
+
+        available:
+          insightMatchesFilter(
+            insight,
+            "luma"
+          ),
+      },
+    },
+
+    vortex: {
+      ...(prepared.vortex
+        ?? {}),
+
+      supported:
+        insightMatchesFilter(
+          insight,
+          "vortex"
+        ),
+    },
+
+    fluffy: {
+      ...(prepared.fluffy
+        ?? {}),
+
+      supported:
+        insightMatchesFilter(
+          insight,
+          "fluffy"
+        ),
+    },
+  };
+}
 
 function mergePcgwData(
   game,
@@ -1399,6 +1525,10 @@ function markLookupFailure(
   );
 }
 
+
+import {
+  applyLibraryOverride,
+} from "./services/libraryOverrides";
 
 export default function App() {
   const [
@@ -2541,7 +2671,7 @@ export default function App() {
 
       setGames(
         uniqueGames.map(
-          prepareGameForUi
+          prepareGameForUiWithCachedInsight
         )
       );
 
@@ -2574,6 +2704,226 @@ export default function App() {
       );
     }
   }
+
+  async function rescanLauncher(
+    launcherId
+  ) {
+    const normalizedLauncher =
+      String(
+        launcherId
+        ?? ""
+      )
+      .trim()
+      .toLowerCase();
+
+    try {
+      const scannedGames =
+        await getInstalledGamesForLauncher(
+          normalizedLauncher
+        );
+
+      const uniqueGames =
+        Array.from(
+          new Map(
+            scannedGames.map(
+              (game) => [
+                game.id,
+                game,
+              ]
+            )
+          ).values()
+        );
+
+      setGames(
+        (current) => {
+          const existingById =
+            new Map(
+              current.map(
+                (game) => [
+                  game.id,
+                  game,
+                ]
+              )
+            );
+
+          const refreshed =
+            uniqueGames.map(
+              (game) => {
+                const existing =
+                  existingById.get(
+                    game.id
+                  );
+
+                return existing
+                  ? {
+                      ...existing,
+                      ...game,
+                    }
+                  : prepareGameForUi(
+                      game
+                    );
+              }
+            );
+
+          const preserved =
+            current.filter(
+              (game) =>
+                !gameMatchesLauncher(
+                  game,
+                  normalizedLauncher
+                )
+            );
+
+          return [
+            ...preserved,
+            ...refreshed,
+          ];
+        }
+      );
+
+      setSelectedGame(
+        (current) => {
+          if (
+            !current
+            || !gameMatchesLauncher(
+              current,
+              normalizedLauncher
+            )
+          ) {
+            return current;
+          }
+
+          const refreshed =
+            uniqueGames.find(
+              (game) =>
+                game.id
+                === current.id
+            );
+
+          if (!refreshed) {
+            return null;
+          }
+
+          return {
+            ...current,
+            ...refreshed,
+          };
+        }
+      );
+
+      window.dispatchEvent(
+        new CustomEvent(
+          "gameatlas-launcher-rescan-result",
+          {
+            detail: {
+              launcherId:
+                normalizedLauncher,
+
+              success:
+                true,
+
+              count:
+                uniqueGames.length,
+
+              message:
+                `${uniqueGames.length} game${uniqueGames.length === 1 ? "" : "s"} found.`,
+            },
+          }
+        )
+      );
+    } catch (error) {
+      window.dispatchEvent(
+        new CustomEvent(
+          "gameatlas-launcher-rescan-result",
+          {
+            detail: {
+              launcherId:
+                normalizedLauncher,
+
+              success:
+                false,
+
+              message:
+                String(
+                  error
+                ),
+            },
+          }
+        )
+      );
+    }
+  }
+
+
+  useEffect(
+    () => {
+      const handleLauncherRescan =
+        (event) => {
+          const launcherId =
+            event.detail
+              ?.launcherId;
+
+          if (
+            launcherId
+          ) {
+            rescanLauncher(
+              launcherId
+            );
+          }
+        };
+
+      window.addEventListener(
+        "gameatlas-rescan-launcher",
+        handleLauncherRescan
+      );
+
+      return () => {
+        window.removeEventListener(
+          "gameatlas-rescan-launcher",
+          handleLauncherRescan
+        );
+      };
+    },
+    []
+  );
+
+  useEffect(
+    () => {
+      const refreshOverrides =
+        () => {
+          setGames(
+            (current) =>
+              current.map(
+                applyLibraryOverride
+              )
+          );
+
+          setSelectedGame(
+            (current) =>
+              current
+                ? applyLibraryOverride(
+                    current
+                  )
+                : current
+          );
+        };
+
+      window.addEventListener(
+        "game-manager-library-overrides-changed",
+        refreshOverrides
+      );
+
+      return () => {
+        window.removeEventListener(
+          "game-manager-library-overrides-changed",
+          refreshOverrides
+        );
+      };
+    },
+    []
+  );
+
+
 
 
   useEffect(
@@ -2730,22 +3080,7 @@ export default function App() {
     },
     []
   );
-
-
-  useEffect(
-    () => {
-      saveLibrarySnapshot(
-        games,
-        games.length
-      );
-    },
-    [
-      games,
-    ]
-  );
-
-
-  function hideGame(
+function hideGame(
     game
   ) {
     setHiddenGameIds(
@@ -3444,10 +3779,7 @@ export default function App() {
             game={
               selectedGame
             }
-            libraryGames={
-              games
-            }
-            onAnalyzeRemaining={
+onAnalyzeRemaining={
               () =>
                 startLibraryAnalysis(
                   "remaining"
@@ -3489,7 +3821,12 @@ export default function App() {
                     )
                 : null
             }
-          />
+        libraryGames={
+          games
+        }
+        onSelectLibraryGame={
+          selectGame
+        }/>
         )}
       </AppErrorBoundary>
 

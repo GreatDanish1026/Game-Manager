@@ -12,6 +12,7 @@ import {
   Settings2,
   SlidersHorizontal,
   Save,
+  Sparkles,
   Star,
   Tag,
   Trash2,
@@ -40,6 +41,10 @@ import {
   insightMatchesFilter,
 } from "../services/libraryInsights";
 
+
+import {
+  getBatchHealthResult,
+} from "../services/installationHealthBatch";
 
 const CAPABILITY_FILTERS = [
   { id: "hdr", label: "HDR", group: "Graphics" },
@@ -184,6 +189,76 @@ const FILTER_STORAGE_KEY =
   "game-manager-library-filters";
 
 
+const STORE_FILTER_ALIASES = {
+  steam: [
+    "steam",
+  ],
+
+  epic: [
+    "epic",
+    "epic games",
+    "epic games store",
+    "epic games launcher",
+  ],
+
+  ea: [
+    "ea",
+    "ea app",
+    "origin",
+    "origin games",
+  ],
+
+  gog: [
+    "gog",
+    "gog.com",
+    "gog galaxy",
+  ],
+
+  ubisoft: [
+    "ubisoft",
+    "ubisoft connect",
+    "uplay",
+  ],
+
+  xbox: [
+    "xbox",
+    "microsoft store",
+    "xbox / microsoft store",
+    "xbox app",
+  ],
+};
+
+
+function normalizeStoreFilterValue(
+  value
+) {
+  const normalized =
+    String(
+      value
+      ?? ""
+    )
+    .trim()
+    .toLocaleLowerCase();
+
+  for (const [
+    canonical,
+    aliases,
+  ] of Object.entries(
+    STORE_FILTER_ALIASES
+  )) {
+    if (
+      aliases.includes(
+        normalized
+      )
+    ) {
+      return canonical;
+    }
+  }
+
+  return normalized;
+}
+
+
 const SAVED_VIEWS_STORAGE_KEY =
   "game-manager-saved-views-v1";
 
@@ -238,6 +313,24 @@ function loadSavedViews() {
                 ? view.filters.selectedTag
                 : "",
 
+            selectedStore:
+              typeof view.filters
+                ?.selectedStore === "string"
+                ? view.filters.selectedStore
+                : "",
+
+            specialFilter:
+              [
+                "",
+                "needs-installation-attention",
+                "unanalyzed",
+              ].includes(
+                view.filters
+                  ?.specialFilter
+              )
+                ? view.filters.specialFilter
+                : "",
+
             includedCapabilities:
               normalizeCapabilityList(
                 view.filters
@@ -259,6 +352,9 @@ function loadSavedViews() {
             sortMode:
               [
                 "name",
+                "name-desc",
+                "analyzed-first",
+                "unanalyzed-first",
                 "favorites",
                 "store",
               ].includes(
@@ -324,6 +420,12 @@ function loadLibraryPreferences() {
     selectedTag:
       "",
 
+    selectedStore:
+      "",
+
+    specialFilter:
+      "",
+
     includedCapabilities:
       [],
 
@@ -385,6 +487,23 @@ function loadLibraryPreferences() {
           ? parsed.selectedTag
           : "",
 
+      selectedStore:
+        typeof parsed?.selectedStore
+          === "string"
+          ? parsed.selectedStore
+          : "",
+
+      specialFilter:
+        [
+          "",
+          "needs-installation-attention",
+          "unanalyzed",
+        ].includes(
+          parsed?.specialFilter
+        )
+          ? parsed.specialFilter
+          : "",
+
       includedCapabilities,
 
       excludedCapabilities:
@@ -406,6 +525,9 @@ function loadLibraryPreferences() {
       sortMode:
         [
           "name",
+          "name-desc",
+          "analyzed-first",
+          "unanalyzed-first",
           "favorites",
           "store",
         ].includes(
@@ -776,6 +898,25 @@ export default function Sidebar({
       initial.selectedTag
     );
 
+
+  const [
+    selectedStore,
+    setSelectedStore,
+  ] =
+    useState(
+      initial.selectedStore
+      ?? ""
+    );
+
+  const [
+    specialFilter,
+    setSpecialFilter,
+  ] =
+    useState(
+      initial.specialFilter
+      ?? ""
+    );
+
   const [
     includedCapabilities,
     setIncludedCapabilities,
@@ -1017,6 +1158,8 @@ export default function Sidebar({
         {
           favoritesOnly,
           selectedTag,
+          selectedStore,
+          specialFilter,
           includedCapabilities,
           excludedCapabilities,
           capabilityMatchMode,
@@ -1027,6 +1170,8 @@ export default function Sidebar({
     [
       favoritesOnly,
       selectedTag,
+      selectedStore,
+      specialFilter,
       includedCapabilities,
       excludedCapabilities,
       capabilityMatchMode,
@@ -1114,6 +1259,52 @@ export default function Sidebar({
                 ) {
                   return false;
                 }
+
+                if (
+                  selectedStore
+                  && normalizeStoreFilterValue(
+                    game.store
+                  )
+                    !== normalizeStoreFilterValue(
+                      selectedStore
+                    )
+                ) {
+                  return false;
+                }
+
+
+                if (
+                  specialFilter ===
+                  "unanalyzed"
+                  && getGameInsight(
+                    game
+                  )
+                ) {
+                  return false;
+                }
+
+                if (
+                  specialFilter ===
+                  "needs-installation-attention"
+                ) {
+                  const health =
+                    getBatchHealthResult(
+                      game
+                    );
+
+                  if (
+                    !health
+                    || ![
+                      "Needs Attention",
+                      "Incomplete",
+                    ].includes(
+                      health.state
+                    )
+                  ) {
+                    return false;
+                  }
+                }
+
 
                 const hasCapabilityFilters =
                   includedCapabilities.length > 0
@@ -1211,6 +1402,65 @@ export default function Sidebar({
           (left, right) => {
             if (
               sortMode
+              === "name-desc"
+            ) {
+              return String(
+                right.name
+                ?? ""
+              ).localeCompare(
+                String(
+                  left.name
+                  ?? ""
+                ),
+                undefined,
+                {
+                  sensitivity:
+                    "base",
+                }
+              );
+            }
+
+            if (
+              sortMode
+              === "analyzed-first"
+              || sortMode
+                === "unanalyzed-first"
+            ) {
+              const leftAnalyzed =
+                Boolean(
+                  getGameInsight(
+                    left
+                  )
+                );
+
+              const rightAnalyzed =
+                Boolean(
+                  getGameInsight(
+                    right
+                  )
+                );
+
+              if (
+                leftAnalyzed
+                !== rightAnalyzed
+              ) {
+                const analyzedDifference =
+                  Number(
+                    rightAnalyzed
+                  )
+                  - Number(
+                      leftAnalyzed
+                    );
+
+                return sortMode
+                  === "analyzed-first"
+                    ? analyzedDifference
+                    : -analyzedDifference;
+              }
+            }
+
+            if (
+              sortMode
               === "favorites"
             ) {
               const favoriteDifference =
@@ -1287,6 +1537,8 @@ export default function Sidebar({
         query,
         favoritesOnly,
         selectedTag,
+        selectedStore,
+        specialFilter,
         includedCapabilities,
         excludedCapabilities,
         capabilityMatchMode,
@@ -1304,6 +1556,12 @@ export default function Sidebar({
     favoritesOnly
     || Boolean(
       selectedTag
+    )
+    || Boolean(
+      selectedStore
+    )
+    || Boolean(
+      specialFilter
     )
     || hasCapabilityFilters
     || sortMode
@@ -1373,6 +1631,10 @@ export default function Sidebar({
 
       selectedTag,
 
+      selectedStore,
+
+      specialFilter,
+
       includedCapabilities:
         [
           ...includedCapabilities,
@@ -1410,6 +1672,25 @@ export default function Sidebar({
         : ""
     );
 
+    setSelectedStore(
+      typeof filters.selectedStore
+        === "string"
+        ? filters.selectedStore
+        : ""
+    );
+
+    setSpecialFilter(
+      [
+        "",
+        "needs-installation-attention",
+        "unanalyzed",
+      ].includes(
+        filters.specialFilter
+      )
+        ? filters.specialFilter
+        : ""
+    );
+
     setIncludedCapabilities(
       normalizeCapabilityList(
         filters.includedCapabilities
@@ -1432,6 +1713,9 @@ export default function Sidebar({
     setSortMode(
       [
         "name",
+        "name-desc",
+        "analyzed-first",
+        "unanalyzed-first",
         "favorites",
         "store",
       ].includes(
@@ -1650,6 +1934,121 @@ export default function Sidebar({
   }
 
 
+
+  function applyBuiltInPreset(
+    presetId
+  ) {
+    setActiveSavedViewId(
+      null
+    );
+
+    setFavoritesOnly(
+      false
+    );
+
+    setSelectedTag(
+      ""
+    );
+
+    setSelectedStore(
+      ""
+    );
+
+    setSpecialFilter(
+      ""
+    );
+
+    setIncludedCapabilities(
+      []
+    );
+
+    setExcludedCapabilities(
+      []
+    );
+
+    setCapabilityMatchMode(
+      "all"
+    );
+
+    setSortMode(
+      "name"
+    );
+
+    switch (presetId) {
+      case "hdr":
+        setIncludedCapabilities(
+          [
+            "hdr",
+          ]
+        );
+        break;
+
+      case "ray-tracing":
+        setIncludedCapabilities(
+          [
+            "ray-tracing",
+          ]
+        );
+        break;
+
+      case "frame-generation":
+        setIncludedCapabilities(
+          [
+            "frame-generation",
+          ]
+        );
+        break;
+
+      case "modding-friendly":
+        setIncludedCapabilities(
+          [
+            "renodx",
+            "luma",
+            "vortex",
+            "fluffy",
+          ]
+        );
+
+        setCapabilityMatchMode(
+          "any"
+        );
+        break;
+
+      case "needs-installation-attention":
+        setSpecialFilter(
+          "needs-installation-attention"
+        );
+        break;
+
+      case "ea-app":
+        setSelectedStore(
+          "ea"
+        );
+        break;
+
+      case "unanalyzed":
+        setSpecialFilter(
+          "unanalyzed"
+        );
+
+        setSortMode(
+          "name"
+        );
+        break;
+
+      default:
+        break;
+    }
+
+    setSavedViewMessage(
+      presetId ===
+        "needs-installation-attention"
+        ? "Applied built-in preset. Run Installation Health first if no games appear."
+        : "Applied built-in preset."
+    );
+  }
+
+
   function resetFilters() {
     setActiveSavedViewId(
       null
@@ -1660,6 +2059,14 @@ export default function Sidebar({
     );
 
     setSelectedTag(
+      ""
+    );
+
+    setSelectedStore(
+      ""
+    );
+
+    setSpecialFilter(
       ""
     );
 
@@ -2280,8 +2687,9 @@ export default function Sidebar({
               className="
                 mt-2
                 grid
-                grid-cols-2
+                grid-cols-1
                 gap-2
+                sm:grid-cols-3
               "
             >
               <label
@@ -2363,6 +2771,78 @@ export default function Sidebar({
                 <div
                   className="
                     mb-1
+                    text-[9px]
+                    font-semibold
+                    uppercase
+                    tracking-wide
+                    text-white/25
+                  "
+                >
+                  Store
+                </div>
+
+                <select
+                  value={
+                    selectedStore
+                  }
+                  onChange={
+                    (event) =>
+                      setSelectedStore(
+                        event.target.value
+                      )
+                  }
+                  className="
+                    w-full
+                    rounded-lg
+                    border
+                    border-white/[0.08]
+                    bg-[#111823]
+                    px-2
+                    py-1.5
+                    text-[11px]
+                    text-white/60
+                    outline-none
+                  "
+                >
+                  <option value="">
+                    All Stores
+                  </option>
+
+                  <option value="steam">
+                    Steam
+                  </option>
+
+                  <option value="epic">
+                    Epic Games
+                  </option>
+
+                  <option value="ea">
+                    EA App
+                  </option>
+
+                  <option value="gog">
+                    GOG Galaxy
+                  </option>
+
+                  <option value="ubisoft">
+                    Ubisoft
+                  </option>
+
+                  <option value="xbox">
+                    Xbox / Microsoft Store
+                  </option>
+                </select>
+              </label>
+
+
+              <label
+                className="
+                  min-w-0
+                "
+              >
+                <div
+                  className="
+                    mb-1
                     flex
                     items-center
                     gap-1
@@ -2404,7 +2884,11 @@ export default function Sidebar({
                   "
                 >
                   <option value="name">
-                    Name
+                    Name A–Z
+                  </option>
+
+                  <option value="name-desc">
+                    Name Z–A
                   </option>
 
                   <option value="favorites">
@@ -2414,8 +2898,113 @@ export default function Sidebar({
                   <option value="store">
                     Store
                   </option>
+
+                  <option value="analyzed-first">
+                    Analyzed First
+                  </option>
+
+                  <option value="unanalyzed-first">
+                    Unanalyzed First
+                  </option>
                 </select>
               </label>
+            </div>
+
+            <div
+              className="
+                mt-3
+                border-t
+                border-white/[0.06]
+                pt-2.5
+              "
+            >
+              <div
+                className="
+                  flex
+                  items-center
+                  gap-2
+                  text-[9px]
+                  font-semibold
+                  uppercase
+                  tracking-wide
+                  text-white/25
+                "
+              >
+                <Sparkles
+                  className="
+                    h-3
+                    w-3
+                  "
+                />
+
+                Built-in Presets
+              </div>
+
+              <div
+                className="
+                  mt-2
+                  grid
+                  grid-cols-2
+                  gap-1.5
+                "
+              >
+                {[
+                  ["hdr", "HDR Games"],
+                  ["ray-tracing", "Ray Tracing"],
+                  ["frame-generation", "Frame Generation"],
+                  ["modding-friendly", "Modding Friendly"],
+                  ["needs-installation-attention", "Needs Install Attention"],
+                  ["ea-app", "EA App Games"],
+                  ["unanalyzed", "Unanalyzed Games"],
+                ].map(
+                  ([
+                    presetId,
+                    label,
+                  ]) => (
+                    <button
+                      key={
+                        presetId
+                      }
+                      type="button"
+                      onClick={
+                        () =>
+                          applyBuiltInPreset(
+                            presetId
+                          )
+                      }
+                      className="
+                        rounded-lg
+                        border
+                        border-white/[0.07]
+                        bg-white/[0.02]
+                        px-2
+                        py-1.5
+                        text-left
+                        text-[10px]
+                        font-semibold
+                        text-white/40
+                        transition
+                        hover:border-cyan-500/20
+                        hover:bg-cyan-500/[0.05]
+                        hover:text-cyan-100/70
+                      "
+                    >
+                      {label}
+                    </button>
+                  )
+                )}
+              </div>
+
+              <div
+                className="
+                  mt-1.5
+                  text-[9px]
+                  leading-relaxed
+                  text-white/18
+                "
+              >
+                Presets apply instantly and can be saved as a normal Saved View.
+              </div>
             </div>
 
             <div

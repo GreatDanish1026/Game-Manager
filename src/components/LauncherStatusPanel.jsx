@@ -35,6 +35,19 @@ export default function LauncherStatusPanel() {
     useState(null);
 
 
+  const [
+    scanningLauncher,
+    setScanningLauncher,
+  ] =
+    useState(null);
+
+  const [
+    scanMessages,
+    setScanMessages,
+  ] =
+    useState({});
+
+
   async function refresh() {
     setLoading(
       true
@@ -71,6 +84,102 @@ export default function LauncherStatusPanel() {
     },
     []
   );
+
+
+  useEffect(
+    () => {
+      const handleResult =
+        (event) => {
+          const detail =
+            event.detail
+            ?? {};
+
+          if (
+            !detail.launcherId
+          ) {
+            return;
+          }
+
+          setScanningLauncher(
+            (current) =>
+              current
+              === detail.launcherId
+                ? null
+                : current
+          );
+
+          setScanMessages(
+            (current) => ({
+              ...current,
+
+              [detail.launcherId]:
+                {
+                  success:
+                    Boolean(
+                      detail.success
+                    ),
+
+                  message:
+                    detail.message
+                    ?? (
+                      detail.success
+                        ? `${detail.count ?? 0} games found.`
+                        : "Launcher rescan failed."
+                    ),
+                },
+            })
+          );
+        };
+
+      window.addEventListener(
+        "gameatlas-launcher-rescan-result",
+        handleResult
+      );
+
+      return () => {
+        window.removeEventListener(
+          "gameatlas-launcher-rescan-result",
+          handleResult
+        );
+      };
+    },
+    []
+  );
+
+
+  function rescanLauncher(
+    launcherId
+  ) {
+    if (
+      scanningLauncher
+    ) {
+      return;
+    }
+
+    setScanningLauncher(
+      launcherId
+    );
+
+    setScanMessages(
+      (current) => ({
+        ...current,
+
+        [launcherId]:
+          null,
+      })
+    );
+
+    window.dispatchEvent(
+      new CustomEvent(
+        "gameatlas-rescan-launcher",
+        {
+          detail: {
+            launcherId,
+          },
+        }
+      )
+    );
+  }
 
 
   const available =
@@ -121,7 +230,7 @@ export default function LauncherStatusPanel() {
           >
             {loading
               ? "Checking installed launchers…"
-              : `${available} of ${launchers.length || 4} supported launchers detected.`}
+              : `${available} of ${launchers.length || 5} supported launchers detected.`}
           </div>
         </div>
 
@@ -340,6 +449,96 @@ export default function LauncherStatusPanel() {
                   >
                     {launcher.path
                       ?? launcher.launchMethod}
+                  </div>
+
+
+                  <div
+                    className="
+                      mt-3
+                      flex
+                      flex-wrap
+                      items-center
+                      gap-2
+                    "
+                  >
+                    <button
+                      type="button"
+                      onClick={
+                        () =>
+                          rescanLauncher(
+                            launcher.id
+                          )
+                      }
+                      disabled={
+                        Boolean(
+                          scanningLauncher
+                        )
+                      }
+                      className="
+                        inline-flex
+                        items-center
+                        justify-center
+                        gap-1.5
+                        rounded-lg
+                        border
+                        border-white/[0.08]
+                        bg-white/[0.025]
+                        px-2.5
+                        py-1.5
+                        text-[10px]
+                        font-semibold
+                        text-white/45
+                        transition
+                        hover:bg-white/[0.06]
+                        hover:text-white/70
+                        disabled:cursor-not-allowed
+                        disabled:opacity-30
+                      "
+                      title={
+                        `Rescan ${launcher.label} games`
+                      }
+                    >
+                      <RefreshCcw
+                        className={`
+                          h-3
+                          w-3
+                          ${
+                            scanningLauncher
+                              === launcher.id
+                              ? "animate-spin"
+                              : ""
+                          }
+                        `}
+                      />
+
+                      {scanningLauncher
+                        === launcher.id
+                        ? "Scanning…"
+                        : "Rescan Games"}
+                    </button>
+
+                    {scanMessages[
+                      launcher.id
+                    ] ? (
+                      <span
+                        className={`
+                          text-[10px]
+                          ${
+                            scanMessages[
+                              launcher.id
+                            ].success
+                              ? "text-emerald-300/55"
+                              : "text-red-300/60"
+                          }
+                        `}
+                      >
+                        {
+                          scanMessages[
+                            launcher.id
+                          ].message
+                        }
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               </div>

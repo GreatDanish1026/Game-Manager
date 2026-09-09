@@ -9,6 +9,13 @@ use std::{
 
 use serde::Serialize;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 =
+    0x08000000;
+
 use crate::logging;
 
 #[cfg(target_os = "windows")]
@@ -235,6 +242,88 @@ fn epic_candidates() -> Vec<PathBuf> {
 
 
 #[cfg(target_os = "windows")]
+fn ea_app_candidates() -> Vec<PathBuf> {
+    let mut candidates =
+        Vec::new();
+
+    if let Ok(program_files) =
+        env::var(
+            "ProgramFiles"
+        )
+    {
+        let root =
+            PathBuf::from(
+                program_files
+            )
+            .join(
+                "Electronic Arts"
+            )
+            .join(
+                "EA Desktop"
+            )
+            .join(
+                "EA Desktop"
+            );
+
+        candidates.push(
+            root.join(
+                "EADesktop.exe"
+            )
+        );
+
+        candidates.push(
+            root.join(
+                "EALauncher.exe"
+            )
+        );
+    }
+
+    /*
+     * Older/migrated installations can still be under x86 Program Files.
+     */
+    if let Ok(program_files_x86) =
+        env::var(
+            "ProgramFiles(x86)"
+        )
+    {
+        let root =
+            PathBuf::from(
+                program_files_x86
+            )
+            .join(
+                "Electronic Arts"
+            )
+            .join(
+                "EA Desktop"
+            )
+            .join(
+                "EA Desktop"
+            );
+
+        candidates.push(
+            root.join(
+                "EADesktop.exe"
+            )
+        );
+
+        candidates.push(
+            root.join(
+                "EALauncher.exe"
+            )
+        );
+    }
+
+    candidates
+}
+
+
+#[cfg(not(target_os = "windows"))]
+fn ea_app_candidates() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+
+#[cfg(target_os = "windows")]
 fn ubisoft_candidates() -> Vec<PathBuf> {
     let mut candidates =
         Vec::new();
@@ -394,6 +483,176 @@ fn launcher_status(
 }
 
 
+fn ea_launcher_status() -> LauncherStatus {
+    let path =
+        existing_path(
+            ea_app_candidates()
+        );
+
+    let origin2 =
+        protocol_registered(
+            "origin2"
+        );
+
+    let link2ea =
+        protocol_registered(
+            "link2ea"
+        );
+
+    let protocol_ok =
+        origin2
+        || link2ea;
+
+    let installed =
+        path.is_some()
+        || protocol_ok;
+
+    let message =
+        if installed {
+            if path.is_some()
+                && protocol_ok
+            {
+                "EA app executable and Windows launch protocol detected."
+                    .to_string()
+            } else if path.is_some() {
+                "EA app executable detected."
+                    .to_string()
+            } else {
+                "EA Windows launch protocol detected."
+                    .to_string()
+            }
+        } else {
+            "EA app was not detected. EA games may not start until the EA app is installed or repaired."
+                .to_string()
+        };
+
+    LauncherStatus {
+        id:
+            "ea"
+                .to_string(),
+
+        label:
+            "EA app"
+                .to_string(),
+
+        installed,
+
+        path:
+            path.map(
+                |entry| {
+                    entry
+                        .to_string_lossy()
+                        .to_string()
+                }
+            ),
+
+        protocol_registered:
+            protocol_ok,
+
+        launch_method:
+            "origin2:// game launch"
+                .to_string(),
+
+        message,
+    }
+}
+
+
+
+#[cfg(target_os = "windows")]
+fn xbox_launcher_status() -> LauncherStatus {
+let script =
+    r#"$gamingApp = Get-AppxPackage -Name Microsoft.GamingApp -ErrorAction SilentlyContinue;
+    $gamingServices = Get-AppxPackage -Name Microsoft.GamingServices -ErrorAction SilentlyContinue;
+    if ($gamingApp -or $gamingServices) { exit 0 } else { exit 1 }"#;
+
+    let detected =
+        Command::new(
+            "powershell.exe"
+        )
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ])
+        .creation_flags(
+            CREATE_NO_WINDOW
+        )
+        .status()
+        .map(
+            |status| {
+                status.success()
+            }
+        )
+        .unwrap_or(false);
+
+    LauncherStatus {
+        id:
+            "xbox"
+                .to_string(),
+
+        label:
+            "Xbox / Microsoft Store"
+                .to_string(),
+
+        installed:
+            detected,
+
+        path:
+            None,
+
+        protocol_registered:
+            detected,
+
+        launch_method:
+            "Windows package registration / AUMID"
+                .to_string(),
+
+        message:
+            if detected {
+                "Xbox app or Windows Gaming Services detected. Microsoft Store games launch through Windows package registration."
+                    .to_string()
+            } else {
+                "Xbox app / Windows Gaming Services were not detected. Xbox or Microsoft Store games may not launch until Gaming Services is installed."
+                    .to_string()
+            },
+    }
+}
+
+
+#[cfg(not(target_os = "windows"))]
+fn xbox_launcher_status() -> LauncherStatus {
+    LauncherStatus {
+        id:
+            "xbox"
+                .to_string(),
+
+        label:
+            "Xbox / Microsoft Store"
+                .to_string(),
+
+        installed:
+            false,
+
+        path:
+            None,
+
+        protocol_registered:
+            false,
+
+        launch_method:
+            "Windows package registration / AUMID"
+                .to_string(),
+
+        message:
+            "Xbox / Microsoft Store integration is currently available on Windows."
+                .to_string(),
+    }
+}
+
 fn all_launcher_statuses() -> Vec<LauncherStatus> {
     vec![
         launcher_status(
@@ -414,6 +673,8 @@ fn all_launcher_statuses() -> Vec<LauncherStatus> {
             "Epic Games protocol",
         ),
 
+        ea_launcher_status(),
+
         launcher_status(
             "gog",
             "GOG Galaxy",
@@ -429,7 +690,8 @@ fn all_launcher_statuses() -> Vec<LauncherStatus> {
             Some("uplay"),
             "uplay:// protocol",
         ),
-    ]
+
+        xbox_launcher_status(),    ]
 }
 
 
@@ -463,11 +725,23 @@ fn launcher_status_for_store(
             || normalized == "gog galaxy"
         {
             "gog"
+        } else if normalized == "ea"
+            || normalized == "ea app"
+            || normalized == "origin"
+            || normalized == "origin games"
+        {
+            "ea"
         } else if normalized == "ubisoft"
             || normalized == "ubisoft connect"
             || normalized == "uplay"
         {
             "ubisoft"
+        } else if normalized == "xbox"
+            || normalized == "microsoft store"
+            || normalized == "xbox / microsoft store"
+            || normalized == "xbox app"
+        {
+            "xbox"
         } else {
             return None;
         };
@@ -486,34 +760,38 @@ fn launcher_status_for_store(
 fn open_protocol(
     uri: &str,
 ) -> Result<(), String> {
-    let status =
-        Command::new(
-            "cmd.exe"
-        )
-        .args([
-            "/C",
-            "start",
-            "",
-            uri,
-        ])
-        .status()
-        .map_err(
-            |error| {
-                format!(
-                    "Windows could not hand the launch request to the game launcher: {}",
-                    error
-                )
-            }
-        )?;
-
-    if !status.success() {
-        return Err(
+    /*
+     * `cmd /C start` can return exit code 1 for custom URI protocols even
+     * after Windows successfully hands the URI to the registered launcher.
+     * EA App is one confirmed example: the game starts, but waiting for the
+     * short-lived cmd.exe process reports a false failure.
+     *
+     * For protocol launches, the meaningful synchronous check is whether
+     * Windows was able to start the shell handoff process. The launcher itself
+     * is asynchronous, so its eventual game-start result cannot be inferred
+     * from cmd.exe's exit code.
+     */
+    Command::new(
+        "cmd.exe"
+    )
+    .args([
+        "/C",
+        "start",
+        "",
+        uri,
+    ])
+    .creation_flags(
+        CREATE_NO_WINDOW
+    )
+    .spawn()
+    .map_err(
+        |error| {
             format!(
-                "Windows launcher protocol request failed with exit code {:?}.",
-                status.code()
+                "Windows could not hand the launch request to the game launcher: {}",
+                error
             )
-        );
-    }
+        }
+    )?;
 
     Ok(())
 }
@@ -685,6 +963,43 @@ pub fn launch_game(
             &store
         );
 
+    if store_normalized == "xbox"
+        || store_normalized == "microsoft store"
+        || store_normalized == "xbox / microsoft store"
+        || store_normalized == "xbox app"
+    {
+        let aumid =
+            clean_launcher_id(
+                launcher_id
+                    .as_deref()
+            )
+            .ok_or_else(
+                || {
+                    "Xbox / Microsoft Store is available, but this game is missing its Windows AUMID."
+                        .to_string()
+                }
+            )?;
+
+        crate::xbox_games::launch_xbox_aumid(
+            &aumid
+        )?;
+
+        return Ok(
+            LaunchResult {
+                launched:
+                    true,
+
+                method:
+                    "windows_aumid"
+                        .to_string(),
+
+                message:
+                    "Launch request sent to Windows / Xbox."
+                        .to_string(),
+            }
+        );
+    }
+
     logging::dev_log(
         &format!(
             "[LAUNCH] Game: {:?}",
@@ -801,6 +1116,58 @@ pub fn launch_game(
             }
         );
     }
+
+    if store_normalized == "ea"
+        || store_normalized == "ea app"
+        || store_normalized == "origin"
+        || store_normalized == "origin games"
+    {
+        let content_id =
+            clean_launcher_id(
+                launcher_id
+                    .as_deref()
+            )
+            .or_else(
+                || {
+                    clean_launcher_id(
+                        game_id
+                            .as_deref()
+                    )
+                }
+            )
+            .ok_or_else(
+                || {
+                    "EA app is available, but this game is missing its EA Content ID."
+                        .to_string()
+                }
+            )?;
+
+        let uri =
+            format!(
+                "origin2://game/launch?offerIds={}&autoDownload=1",
+                content_id
+            );
+
+        open_protocol(
+            &uri
+        )?;
+
+        return Ok(
+            LaunchResult {
+                launched:
+                    true,
+
+                method:
+                    "ea_origin2_uri"
+                        .to_string(),
+
+                message:
+                    "Launch request sent to the EA app."
+                        .to_string(),
+            }
+        );
+    }
+
 
     if store_normalized == "ubisoft"
         || store_normalized == "ubisoft connect"

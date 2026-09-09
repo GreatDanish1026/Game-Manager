@@ -47,6 +47,7 @@ import GameHealthPanel from "./GameHealthPanel";
 import HardwareCapabilityPanel from "./HardwareCapabilityPanel";
 import KnownIssuesPanel from "./KnownIssuesPanel";
 import LibraryDashboard from "./LibraryDashboard";
+import LibraryEntryEditor from "./LibraryEntryEditor";
 
 import {
   error as logError,
@@ -1269,6 +1270,18 @@ export default function GameDetails({
             ?? "Technical details"
           }
         >
+          <div
+            className="
+              mb-4
+            "
+          >
+            <LibraryEntryEditor
+              game={
+                game
+              }
+            />
+          </div>
+
           {pathError ? (
             <div
               className="

@@ -45,6 +45,7 @@ import {
 import AboutCard from "./AboutCard";
 import ExternalServiceStatusPanel from "./ExternalServiceStatusPanel";
 import LauncherStatusPanel from "./LauncherStatusPanel";
+import LibraryHealthCenter from "./LibraryHealthCenter";
 
 
 function StatCard({
@@ -1207,7 +1208,22 @@ export default function LibraryDashboard({
             mt-5
           "
         >
-          <LauncherStatusPanel />
+                  <div
+          className="
+            mt-6
+          "
+        >
+          <LibraryHealthCenter
+            games={
+              games
+            }
+            onSelectGame={
+              onSelectGame
+            }
+          />
+        </div>
+
+<LauncherStatusPanel />
         </div>
 
 
