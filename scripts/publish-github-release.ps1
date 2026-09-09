@@ -19,7 +19,7 @@ $ReleaseDir =
 $Installer =
     Join-Path(
         $ReleaseDir
-    ) "GameManager_${Version}_x64-setup.exe"
+    ) "GameAtlas_${Version}_x64-setup.exe"
 
 $Signature =
     "$Installer.sig"

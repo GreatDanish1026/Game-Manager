@@ -420,7 +420,7 @@ export default function FluffyCard({
                   text-white/35
                 "
               >
-                Game Manager did not find this title
+                GameAtlas did not find this title
                 in its known Fluffy Mod Manager
                 compatibility list.
               </div>

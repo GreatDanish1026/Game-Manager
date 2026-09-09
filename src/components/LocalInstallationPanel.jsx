@@ -620,7 +620,7 @@ export default function LocalInstallationPanel({
               Cpu
             }
             title="Primary Executable"
-            description="Game Manager scores local executables to identify the most likely primary game binary."
+            description="GameAtlas scores local executables to identify the most likely primary game binary."
           >
             {data.executable
               ?.found ? (

@@ -49,6 +49,10 @@ import KnownIssuesPanel from "./KnownIssuesPanel";
 import LibraryDashboard from "./LibraryDashboard";
 
 import {
+  error as logError,
+} from "../services/logging";
+
+import {
   openGamePath,
 } from "../services/pathActions";
 
@@ -245,7 +249,7 @@ function WsgfInfo({
         features.wsgfLink
       );
     } catch (error) {
-      console.error(
+      logError(
         "[WSGF] Failed to open:",
         error
       );
@@ -371,7 +375,7 @@ function PcgwMatch({
         game.pcgwPageUrl
       );
     } catch (error) {
-      console.error(
+      logError(
         "[PCGW] Failed to open page:",
         error
       );
@@ -602,6 +606,7 @@ export default function GameDetails({
   libraryAnalysis,
   onCheckForUpdates,
   updateCheckStatus,
+  onSelectGame,
 }) {
   const [
     pathError,
@@ -688,6 +693,9 @@ export default function GameDetails({
         updateCheckStatus={
           updateCheckStatus
         }
+        onSelectGame={
+          onSelectGame
+        }
       />
     );
   }
@@ -712,7 +720,7 @@ export default function GameDetails({
         game
       );
     } catch (error) {
-      console.error(
+      logError(
         "[Launch] Failed:",
         error
       );
@@ -743,7 +751,7 @@ export default function GameDetails({
         game.installPath
       );
     } catch (error) {
-      console.error(
+      logError(
         "[Paths] Failed to open:",
         error
       );
@@ -1009,7 +1017,7 @@ export default function GameDetails({
                     referrerPolicy="no-referrer"
                     onError={
                       () => {
-                        console.error(
+                        logError(
                           "[PCGW] Cover image failed to load:",
                           coverArtUrl
                         );
@@ -1188,7 +1196,7 @@ export default function GameDetails({
         <CollapsibleSection
           id="installation-health"
           title="Installation Health"
-          description="A setup-readiness checklist based on what Game Manager can verify."
+          description="Actionable setup-readiness checks with direct fixes where GameAtlas can safely provide them."
           icon={HeartPulse}
           defaultOpen={true}
           summary="Readiness score & checks"

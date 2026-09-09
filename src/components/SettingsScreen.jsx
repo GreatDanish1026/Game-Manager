@@ -1,6 +1,7 @@
 import {
   Archive,
   BadgeInfo,
+  Bookmark,
   Database,
   ExternalLink,
   Gauge,
@@ -10,6 +11,10 @@ import {
   RotateCcw,
   Settings2,
   Sparkles,
+  Stethoscope,
+  Trash2,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 
 import {
@@ -28,14 +33,28 @@ import {
 } from "@tauri-apps/plugin-opener";
 
 import {
+  error as logError,
+} from "../services/logging";
+
+import {
   clearAnalysisCache,
+  clearExternalServiceStatusCache,
+  clearInstallationHealthCache,
   clearLibraryFilterCache,
   clearSafeCaches,
+  clearSavedViews,
   getCacheSummary,
+  getSavedViewCount,
   getSettings,
   resetSettings,
   updateSettings,
 } from "../services/settings";
+
+import {
+  getBackupStorageSummary,
+} from "../services/saveBackups";
+
+import DiagnosticsPanel from "./DiagnosticsPanel";
 
 
 const REPOSITORY_URL =
@@ -115,6 +134,16 @@ const SECTIONS = [
   },
   {
     id:
+      "diagnostics",
+
+    label:
+      "Diagnostics",
+
+    icon:
+      Stethoscope,
+  },
+  {
+    id:
       "about",
 
     label:
@@ -129,22 +158,41 @@ const SECTIONS = [
 function formatBytes(
   bytes
 ) {
-  if (!bytes) {
-    return "0 KB";
+  const value =
+    Number(bytes) || 0;
+
+  if (value < 1024) {
+    return `${value} B`;
   }
 
-  if (bytes < 1024) {
-    return `${bytes} B`;
+  const units = [
+    "KB",
+    "MB",
+    "GB",
+    "TB",
+  ];
+
+  let next =
+    value / 1024;
+
+  let index =
+    0;
+
+  while (
+    next >= 1024
+    && index <
+      units.length - 1
+  ) {
+    next /=
+      1024;
+
+    index +=
+      1;
   }
 
-  return `${
-    (
-      bytes /
-      1024
-    ).toFixed(
-      1
-    )
-  } KB`;
+  return `${next.toFixed(
+    1
+  )} ${units[index]}`;
 }
 
 
@@ -374,6 +422,8 @@ function SectionCard({
 export default function SettingsScreen({
   onCheckForUpdates,
   updateCheckStatus,
+  games = [],
+  networkOnline = true,
 }) {
   const [
     activeSection,
@@ -402,11 +452,23 @@ export default function SettingsScreen({
     );
 
   const [
+    backupSummary,
+    setBackupSummary,
+  ] =
+    useState(null);
+
+  const [
+    backupSummaryLoading,
+    setBackupSummaryLoading,
+  ] =
+    useState(false);
+
+  const [
     appName,
     setAppName,
   ] =
     useState(
-      "Game Manager"
+      "GameAtlas"
     );
 
   const [
@@ -426,6 +488,22 @@ export default function SettingsScreen({
     setCacheMessage,
   ] =
     useState(null);
+
+
+  const [
+    settingsMessage,
+    setSettingsMessage,
+  ] =
+    useState(null);
+
+  const [
+    savedViewCount,
+    setSavedViewCount,
+  ] =
+    useState(
+      () =>
+        getSavedViewCount()
+    );
 
 
   useEffect(
@@ -449,7 +527,7 @@ export default function SettingsScreen({
             ) {
               setAppName(
                 results[0].value
-                || "Game Manager"
+                || "GameAtlas"
               );
             }
 
@@ -483,6 +561,69 @@ export default function SettingsScreen({
   );
 
 
+  useEffect(
+    () => {
+      if (
+        activeSection ===
+        "backups"
+      ) {
+        refreshBackupSummary();
+      }
+    },
+    [
+      activeSection,
+      settings.backupRetentionCount,
+      settings.backupBeforeLaunch,
+    ]
+  );
+
+
+  async function refreshBackupSummary() {
+    setBackupSummaryLoading(
+      true
+    );
+
+    try {
+      const result =
+        await getBackupStorageSummary();
+
+      setBackupSummary(
+        result
+      );
+    } catch (error) {
+      logError(
+        "[Settings] Backup storage summary failed:",
+        error
+      );
+
+      setBackupSummary(
+        null
+      );
+    } finally {
+      setBackupSummaryLoading(
+        false
+      );
+    }
+  }
+
+
+  function showSettingsMessage(
+    message
+  ) {
+    setSettingsMessage(
+      message
+    );
+
+    window.setTimeout(
+      () =>
+        setSettingsMessage(
+          null
+        ),
+      2400
+    );
+  }
+
+
   function changeSetting(
     key,
     value
@@ -495,6 +636,10 @@ export default function SettingsScreen({
 
     setSettings(
       next
+    );
+
+    showSettingsMessage(
+      "Setting saved."
     );
   }
 
@@ -521,11 +666,52 @@ export default function SettingsScreen({
 
 
   function resetAllSettings() {
+    const confirmed =
+      window.confirm(
+        "Restore all GameAtlas settings to their defaults? Favorites, tags, hidden games, Saved Views, backups, and analysis data will not be deleted."
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
     const next =
       resetSettings();
 
     setSettings(
       next
+    );
+
+    showSettingsMessage(
+      "Settings restored to defaults."
+    );
+  }
+
+
+  function removeSavedViews() {
+    if (
+      savedViewCount <= 0
+    ) {
+      return;
+    }
+
+    const confirmed =
+      window.confirm(
+        `Delete all ${savedViewCount} Saved View${savedViewCount === 1 ? "" : "s"}? This cannot be undone.`
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    clearSavedViews();
+
+    setSavedViewCount(
+      0
+    );
+
+    showSettingsMessage(
+      "Saved Views deleted."
     );
   }
 
@@ -614,16 +800,17 @@ export default function SettingsScreen({
                     text-white/30
                   "
                 >
-                  Game Manager preferences
+                  GameAtlas preferences
                 </div>
               </div>
 
               <div
                 className="
                   grid
-                  grid-cols-2
+                  grid-cols-1
                   gap-1
-                  sm:grid-cols-4
+                  sm:grid-cols-2
+                  lg:grid-cols-4
                   xl:grid-cols-1
                 "
               >
@@ -749,6 +936,25 @@ export default function SettingsScreen({
             </div>
 
 
+            {settingsMessage ? (
+              <div
+                className="
+                  mb-4
+                  rounded-xl
+                  border
+                  border-emerald-500/15
+                  bg-emerald-500/[0.04]
+                  px-4
+                  py-3
+                  text-xs
+                  text-emerald-200/65
+                "
+              >
+                {settingsMessage}
+              </div>
+            ) : null}
+
+
             {activeSection ===
             "general" ? (
               <SectionCard
@@ -758,7 +964,7 @@ export default function SettingsScreen({
               >
                 <SettingRow
                   title="Startup destination"
-                  description="Choose which screen Game Manager opens to after the library scan begins."
+                  description="Choose which screen GameAtlas opens to after the library scan begins."
                 >
                   <Select
                     value={
@@ -788,7 +994,7 @@ export default function SettingsScreen({
 
                 <SettingRow
                   title="Reset settings"
-                  description="Restore Game Manager settings to their v1.1 defaults. Favorites, tags, hidden games, backups, and analysis data are not removed."
+                  description="Restore GameAtlas settings to their current defaults. Favorites, tags, hidden games, Saved Views, backups, and analysis data are not removed."
                 >
                   <button
                     type="button"
@@ -823,7 +1029,7 @@ export default function SettingsScreen({
               >
                 <SettingRow
                   title="Show hidden games on startup"
-                  description="Open the sidebar in the Hidden Games view when Game Manager starts."
+                  description="Open the sidebar in the Hidden Games view when GameAtlas starts."
                 >
                   <Toggle
                     checked={
@@ -842,7 +1048,7 @@ export default function SettingsScreen({
 
                 <SettingRow
                   title="Library scanning"
-                  description="Installed Steam, Epic, GOG, and Ubisoft games are scanned when Game Manager starts. A manual Rescan button remains available in the sidebar."
+                  description="Installed Steam, Epic, GOG, and Ubisoft games are scanned when GameAtlas starts. A manual Rescan button remains available in the sidebar."
                 >
                   <span
                     className="
@@ -857,6 +1063,49 @@ export default function SettingsScreen({
                   >
                     Enabled
                   </span>
+                </SettingRow>
+
+                <SettingRow
+                  title="Saved Views"
+                  description={
+                    savedViewCount > 0
+                      ? `${savedViewCount} Saved View${savedViewCount === 1 ? "" : "s"} stored. Views can be created and updated from Library Filters.`
+                      : "No Saved Views are currently stored. Create them from Library Filters."
+                  }
+                >
+                  <button
+                    type="button"
+                    onClick={
+                      removeSavedViews
+                    }
+                    disabled={
+                      savedViewCount <= 0
+                    }
+                    className="
+                      inline-flex
+                      items-center
+                      gap-2
+                      rounded-lg
+                      border
+                      border-red-500/15
+                      bg-red-500/[0.035]
+                      px-3
+                      py-2
+                      text-xs
+                      text-red-200/55
+                      transition
+                      hover:bg-red-500/[0.08]
+                      hover:text-red-200/80
+                      disabled:cursor-not-allowed
+                      disabled:opacity-25
+                    "
+                  >
+                    <Trash2
+                      className="h-3.5 w-3.5"
+                    />
+
+                    Delete Saved Views
+                  </button>
                 </SettingRow>
               </SectionCard>
             ) : null}
@@ -946,6 +1195,44 @@ export default function SettingsScreen({
                     </option>
                   </Select>
                 </SettingRow>
+
+                {settings.analysisConcurrency > 2 ? (
+                  <div
+                    className="
+                      mt-4
+                      rounded-xl
+                      border
+                      border-amber-500/15
+                      bg-amber-500/[0.04]
+                      px-4
+                      py-3
+                      text-xs
+                      leading-relaxed
+                      text-amber-200/65
+                    "
+                  >
+                    Concurrency {settings.analysisConcurrency} is more aggressive than the recommended value of 2 and may increase rate-limit or timeout errors.
+                  </div>
+                ) : null}
+
+                <SettingRow
+                  title="Adaptive throttling"
+                  description="If repeated transient service failures occur during background analysis, GameAtlas automatically reduces effective concurrency to 1 for the remainder of that run. Your saved setting is not changed."
+                >
+                  <span
+                    className="
+                      rounded-full
+                      bg-emerald-500/10
+                      px-3
+                      py-1.5
+                      text-xs
+                      font-medium
+                      text-emerald-300/70
+                    "
+                  >
+                    Enabled
+                  </span>
+                </SettingRow>
               </SectionCard>
             ) : null}
 
@@ -954,41 +1241,152 @@ export default function SettingsScreen({
             "backups" ? (
               <SectionCard
                 title="Backups"
-                description="Save-backup behavior and future retention controls."
+                description="Configure save protection, automatic retention, and pre-launch backups."
                 icon={Archive}
               >
                 <SettingRow
-                  title="Current backup behavior"
-                  description="Game Manager creates timestamped per-game backups and automatically creates a safety backup before restoring an older backup."
+                  title="Backup retention"
+                  description="Limit the number of backups kept per game. Retention is applied after a new manual, pre-launch, or restore-safety backup is created."
                 >
-                  <span
-                    className="
-                      text-xs
-                      font-medium
-                      text-white/55
-                    "
+                  <Select
+                    value={
+                      String(
+                        settings
+                          .backupRetentionCount
+                      )
+                    }
+                    onChange={
+                      (value) =>
+                        changeSetting(
+                          "backupRetentionCount",
+                          Number(value)
+                        )
+                    }
                   >
-                    Keep all backups
-                  </span>
+                    <option value="0">
+                      Keep all backups
+                    </option>
+
+                    <option value="3">
+                      Keep latest 3
+                    </option>
+
+                    <option value="5">
+                      Keep latest 5
+                    </option>
+
+                    <option value="10">
+                      Keep latest 10
+                    </option>
+
+                    <option value="20">
+                      Keep latest 20
+                    </option>
+                  </Select>
                 </SettingRow>
 
                 <SettingRow
-                  title="Retention & backup-before-launch"
-                  description="These controls are intentionally not exposed until the backup engine implements them, so the Settings screen never presents a switch that does nothing."
+                  title="Backup before launch"
+                  description="When enabled, GameAtlas creates a save backup before launching a game whenever a save location is known. If that backup fails, the game is not launched so the protection setting is never silently bypassed."
+                >
+                  <Toggle
+                    checked={
+                      settings
+                        .backupBeforeLaunch
+                    }
+                    onChange={
+                      (value) =>
+                        changeSetting(
+                          "backupBeforeLaunch",
+                          value
+                        )
+                    }
+                  />
+                </SettingRow>
+
+                <SettingRow
+                  title="Restore safety backups"
+                  description="GameAtlas always creates a safety backup before restoring an older save. This protection remains enabled regardless of the pre-launch setting."
                 >
                   <span
                     className="
                       rounded-full
-                      bg-white/[0.04]
+                      bg-emerald-500/[0.07]
                       px-3
                       py-1.5
                       text-xs
-                      text-white/35
+                      font-semibold
+                      text-emerald-200/65
                     "
                   >
-                    Planned for v1.1
+                    Always Enabled
                   </span>
                 </SettingRow>
+
+                <SettingRow
+                  title="Backup storage"
+                  description={
+                    backupSummary
+                      ? `${backupSummary.backupCount} backups across ${backupSummary.gameDirectoryCount} game folders · ${formatBytes(backupSummary.totalSizeBytes)} total.`
+                      : "View total backup count and storage used across GameAtlas."
+                  }
+                >
+                  <button
+                    type="button"
+                    onClick={
+                      refreshBackupSummary
+                    }
+                    disabled={
+                      backupSummaryLoading
+                    }
+                    className="
+                      inline-flex
+                      items-center
+                      gap-2
+                      rounded-lg
+                      border
+                      border-white/[0.08]
+                      bg-white/[0.025]
+                      px-3
+                      py-2
+                      text-xs
+                      text-white/55
+                      hover:bg-white/[0.06]
+                      disabled:opacity-30
+                    "
+                  >
+                    <RefreshCcw
+                      className={`
+                        h-3.5
+                        w-3.5
+                        ${
+                          backupSummaryLoading
+                            ? "animate-spin"
+                            : ""
+                        }
+                      `}
+                    />
+
+                    Refresh Storage
+                  </button>
+                </SettingRow>
+
+                {backupSummary
+                  ?.backupRoot ? (
+                  <div
+                    className="
+                      py-3
+                      text-[10px]
+                      leading-relaxed
+                      text-white/25
+                    "
+                  >
+                    Storage location: {
+                      backupSummary
+                        .backupRoot
+                    }
+                  </div>
+                ) : null}
               </SectionCard>
             ) : null}
 
@@ -997,12 +1395,53 @@ export default function SettingsScreen({
             "updates" ? (
               <SectionCard
                 title="Updates"
-                description="Control signed Game Manager update checks."
+                description="Control signed GameAtlas update checks."
                 icon={RefreshCcw}
               >
                 <SettingRow
+                  title="Update service availability"
+                  description={
+                    networkOnline
+                      ? "Internet connectivity is available for signed GitHub release checks."
+                      : "GameAtlas is offline. Automatic and manual update checks resume when connectivity returns."
+                  }
+                >
+                  <span
+                    className={`
+                      inline-flex
+                      items-center
+                      gap-2
+                      rounded-full
+                      px-3
+                      py-1.5
+                      text-xs
+                      font-medium
+                      ${
+                        networkOnline
+                          ? "bg-emerald-500/10 text-emerald-300/70"
+                          : "bg-amber-500/10 text-amber-300/75"
+                      }
+                    `}
+                  >
+                    {networkOnline ? (
+                      <Wifi
+                        className="h-3.5 w-3.5"
+                      />
+                    ) : (
+                      <WifiOff
+                        className="h-3.5 w-3.5"
+                      />
+                    )}
+
+                    {networkOnline
+                      ? "Online"
+                      : "Offline"}
+                  </span>
+                </SettingRow>
+
+                <SettingRow
                   title="Check automatically at startup"
-                  description="Silently check GitHub Releases when Game Manager opens. Offline failures remain silent."
+                  description="Silently check GitHub Releases when GameAtlas opens. Offline failures remain silent."
                 >
                   <Toggle
                     checked={
@@ -1021,7 +1460,7 @@ export default function SettingsScreen({
 
                 <SettingRow
                   title="Manual update check"
-                  description="Check for a newer signed Game Manager release right now."
+                  description="Check for a newer signed GameAtlas release right now."
                 >
                   <button
                     type="button"
@@ -1030,6 +1469,8 @@ export default function SettingsScreen({
                     }
                     disabled={
                       !onCheckForUpdates
+                      ||
+                      !networkOnline
                       ||
                       updateCheckStatus
                         ?.state ===
@@ -1094,7 +1535,7 @@ export default function SettingsScreen({
             "appearance" ? (
               <SectionCard
                 title="Appearance"
-                description="Adjust Game Manager's interface density."
+                description="Adjust GameAtlas's interface density."
                 icon={Sparkles}
               >
                 <SettingRow
@@ -1116,23 +1557,6 @@ export default function SettingsScreen({
                   />
                 </SettingRow>
 
-                <SettingRow
-                  title="Theme"
-                  description="Game Manager currently uses its production dark interface. Additional themes can be added later without changing stored settings."
-                >
-                  <span
-                    className="
-                      rounded-full
-                      bg-cyan-500/10
-                      px-3
-                      py-1.5
-                      text-xs
-                      text-cyan-200/70
-                    "
-                  >
-                    Dark
-                  </span>
-                </SettingRow>
               </SectionCard>
             ) : null}
 
@@ -1144,6 +1568,36 @@ export default function SettingsScreen({
                 description="Refresh analysis data without deleting personal library information."
                 icon={Database}
               >
+                <div
+                  className="
+                    mb-1
+                    flex
+                    items-start
+                    gap-2
+                    rounded-xl
+                    border
+                    border-cyan-500/10
+                    bg-cyan-500/[0.025]
+                    px-3
+                    py-2.5
+                    text-[11px]
+                    leading-relaxed
+                    text-white/32
+                  "
+                >
+                  <Bookmark
+                    className="
+                      mt-0.5
+                      h-3.5
+                      w-3.5
+                      shrink-0
+                      text-cyan-300/55
+                    "
+                  />
+
+                  Saved Views are treated as personal library preferences and are never removed by safe-cache actions. They can be deleted explicitly from Settings → Library.
+                </div>
+
                 <SettingRow
                   title="Analysis cache"
                   description={`${cacheSummary.analysisEntries} analyzed game entries · ${formatBytes(cacheSummary.analysisBytes)}. Clearing this causes Analyze Library to refresh those games again.`}
@@ -1207,8 +1661,79 @@ export default function SettingsScreen({
                 </SettingRow>
 
                 <SettingRow
+                  title="External service status"
+                  description={`${cacheSummary.serviceStatusEntries ?? 0} cached service records · ${formatBytes(cacheSummary.serviceStatusBytes ?? 0)}. Clearing this resets PCGamingWiki, RenoDX, Luma, Vortex, and GitHub status to unknown until they are checked again.`}
+                >
+                  <button
+                    type="button"
+                    onClick={
+                      () => {
+                        clearExternalServiceStatusCache();
+
+                        refreshCacheSummary(
+                          "External service status cleared."
+                        );
+                      }
+                    }
+                    className="
+                      rounded-lg
+                      border
+                      border-white/[0.08]
+                      bg-white/[0.025]
+                      px-3
+                      py-2
+                      text-xs
+                      text-white/55
+                      hover:bg-white/[0.06]
+                    "
+                  >
+                    Clear Service Status
+                  </button>
+                </SettingRow>
+
+                <SettingRow
+                  title="Installation Health assessments"
+                  description={`${cacheSummary.installationHealthEntries ?? 0} stored health assessments · ${formatBytes(cacheSummary.installationHealthBytes ?? 0)}. Clearing these returns dashboard health categories to Not Assessed until games are checked again.`}
+                >
+                  <button
+                    type="button"
+                    onClick={
+                      () => {
+                        const confirmed =
+                          window.confirm(
+                            "Clear stored Installation Health assessments? This does not delete games, backups, or save data."
+                          );
+
+                        if (!confirmed) {
+                          return;
+                        }
+
+                        clearInstallationHealthCache();
+
+                        refreshCacheSummary(
+                          "Installation Health assessments cleared."
+                        );
+                      }
+                    }
+                    className="
+                      rounded-lg
+                      border
+                      border-white/[0.08]
+                      bg-white/[0.025]
+                      px-3
+                      py-2
+                      text-xs
+                      text-white/55
+                      hover:bg-white/[0.06]
+                    "
+                  >
+                    Clear Health Assessments
+                  </button>
+                </SettingRow>
+
+                <SettingRow
                   title="Clear safe caches"
-                  description="Clears analysis timestamps, library insights, and filter preferences. It does not delete favorites, tags, hidden games, save backups, or updater information."
+                  description="Clears analysis data, filter preferences, external-service status, and Installation Health assessments. It does not delete favorites, tags, hidden games, Saved Views, save backups, settings, or updater information."
                 >
                   <button
                     type="button"
@@ -1254,6 +1779,34 @@ export default function SettingsScreen({
 
 
             {activeSection ===
+            "diagnostics" ? (
+              <SectionCard
+                title="Diagnostics"
+                description="Collect privacy-conscious support information for troubleshooting GameAtlas."
+                icon={Stethoscope}
+              >
+                <div
+                  className="
+                    pt-5
+                  "
+                >
+                  <DiagnosticsPanel
+                    games={
+                      games
+                    }
+                    networkOnline={
+                      networkOnline
+                    }
+                    updateCheckStatus={
+                      updateCheckStatus
+                    }
+                  />
+                </div>
+              </SectionCard>
+            ) : null}
+
+
+            {activeSection ===
             "about" ? (
               <SectionCard
                 title="About"
@@ -1278,7 +1831,7 @@ export default function SettingsScreen({
 
                 <SettingRow
                   title="Repository"
-                  description="Open the Game Manager GitHub repository."
+                  description="Open the GameAtlas GitHub repository."
                 >
                   <button
                     type="button"

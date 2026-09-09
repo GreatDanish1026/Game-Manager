@@ -48,6 +48,19 @@ import {
 } from "./services/serviceStatus";
 
 import {
+  isNetworkOnline,
+  subscribeNetworkStatus,
+} from "./services/networkStatus";
+
+import {
+  devLog,
+  devWarn,
+  error as logError,
+  perf,
+  warn as logWarn,
+} from "./services/logging";
+
+import {
   getAnalysisState,
   recordGameAnalysis,
 } from "./services/analysisState";
@@ -81,7 +94,7 @@ function loadAnalysisTimestamps() {
         ? parsed
         : {};
   } catch (error) {
-    console.error(
+    logError(
       "[Library Analysis] Failed to load timestamps:",
       error
     );
@@ -102,7 +115,7 @@ function saveAnalysisTimestamps(
       )
     );
   } catch (error) {
-    console.error(
+    logError(
       "[Library Analysis] Failed to save timestamps:",
       error
     );
@@ -164,9 +177,10 @@ async function timedLookup(
       performance.now()
       - started;
 
-    console.info(
-      `[Performance] ${label}: ${elapsed.toFixed(0)} ms`
-    );
+    perf(
+          "${label}",
+          elapsed.toFixed(0)
+        );
   }
 }
 
@@ -196,7 +210,7 @@ function loadHiddenGameIds() {
         )
       : [];
   } catch (error) {
-    console.error(
+    logError(
       "[Hidden Games] Failed to load:",
       error
     );
@@ -217,7 +231,7 @@ function saveHiddenGameIds(
       )
     );
   } catch (error) {
-    console.error(
+    logError(
       "[Hidden Games] Failed to save:",
       error
     );
@@ -1388,6 +1402,15 @@ function markLookupFailure(
 
 export default function App() {
   const [
+    networkOnline,
+    setNetworkOnline,
+  ] =
+    useState(
+      () =>
+        isNetworkOnline()
+    );
+
+  const [
     games,
     setGames,
   ] =
@@ -1501,6 +1524,18 @@ export default function App() {
 
       errors:
         [],
+
+      retryCount:
+        0,
+
+      effectiveConcurrency:
+        0,
+
+      adaptiveReduced:
+        false,
+
+      notice:
+        null,
     });
 
   const analysisCancelRef =
@@ -1531,6 +1566,208 @@ export default function App() {
           ? updatedGame
           : current
     );
+  }
+
+
+  function isTransientAnalysisError(
+    error
+  ) {
+    const message =
+      String(
+        error ?? ""
+      )
+        .trim()
+        .toLowerCase();
+
+    if (!message) {
+      return false;
+    }
+
+    return (
+      /\b429\b/.test(
+        message
+      ) ||
+      /\b408\b/.test(
+        message
+      ) ||
+      /\b5\d\d\b/.test(
+        message
+      ) ||
+      /rate.?limit/.test(
+        message
+      ) ||
+      /too many requests/.test(
+        message
+      ) ||
+      /timeout|timed out/.test(
+        message
+      ) ||
+      /temporar/.test(
+        message
+      ) ||
+      /service unavailable/.test(
+        message
+      ) ||
+      /bad gateway/.test(
+        message
+      ) ||
+      /gateway timeout/.test(
+        message
+      ) ||
+      /network/.test(
+        message
+      ) ||
+      /fetch failed/.test(
+        message
+      ) ||
+      /connection (?:reset|refused|closed|aborted)/.test(
+        message
+      ) ||
+      /econnreset|econnrefused|etimedout/.test(
+        message
+      )
+    );
+  }
+
+
+  function retryDelayMs(
+    retryNumber
+  ) {
+    const baseDelay =
+      700 *
+      (
+        2 **
+        Math.max(
+          0,
+          retryNumber - 1
+        )
+      );
+
+    const jitter =
+      Math.floor(
+        Math.random() *
+        450
+      );
+
+    return Math.min(
+      5000,
+      baseDelay + jitter
+    );
+  }
+
+
+  async function waitForAnalysisDelay(
+    milliseconds
+  ) {
+    let remaining =
+      milliseconds;
+
+    while (
+      remaining > 0
+    ) {
+      if (
+        analysisCancelRef.current
+      ) {
+        throw new Error(
+          "Analysis cancelled."
+        );
+      }
+
+      const slice =
+        Math.min(
+          100,
+          remaining
+        );
+
+      await new Promise(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            slice
+          )
+      );
+
+      remaining -=
+        slice;
+    }
+  }
+
+
+  async function retryBackgroundLookup(
+    label,
+    lookup,
+    {
+      maxAttempts = 3,
+    } = {}
+  ) {
+    let lastError =
+      null;
+
+    for (
+      let attempt = 1;
+      attempt <= maxAttempts;
+      attempt += 1
+    ) {
+      if (
+        analysisCancelRef.current
+      ) {
+        throw new Error(
+          "Analysis cancelled."
+        );
+      }
+
+      try {
+        return await timedLookup(
+          attempt === 1
+            ? label
+            : `${label} retry ${attempt - 1}`,
+          lookup
+        );
+      } catch (error) {
+        lastError =
+          error;
+
+        const transient =
+          isTransientAnalysisError(
+            error
+          );
+
+        if (
+          !transient ||
+          attempt >= maxAttempts
+        ) {
+          throw error;
+        }
+
+        const delay =
+          retryDelayMs(
+            attempt
+          );
+
+        setLibraryAnalysis(
+          (current) => ({
+            ...current,
+
+            retryCount:
+              (
+                current.retryCount ??
+                0
+              ) + 1,
+          })
+        );
+
+        devWarn(
+          `[Library Analysis] ${label} transient failure. Retry ${attempt}/${maxAttempts - 1} in ${delay} ms:`,
+          error
+        );
+
+        await waitForAnalysisDelay(
+          delay
+        );
+      }
+    }
+
+    throw lastError;
   }
 
 
@@ -1582,7 +1819,7 @@ export default function App() {
           ? Promise.resolve(
               null
             )
-          : timedLookup(
+          : retryBackgroundLookup(
               `PCGamingWiki [${game.name}]`,
               () =>
                 getPcGamingWikiData(
@@ -1595,7 +1832,7 @@ export default function App() {
           ? Promise.resolve(
               null
             )
-          : timedLookup(
+          : retryBackgroundLookup(
               `RenoDX / Luma [${game.name}]`,
               () =>
                 getRenoDxModStatus(
@@ -1608,7 +1845,7 @@ export default function App() {
           ? Promise.resolve(
               null
             )
-          : timedLookup(
+          : retryBackgroundLookup(
               `Vortex [${game.name}]`,
               () =>
                 getVortexSupport(
@@ -1770,7 +2007,7 @@ export default function App() {
         updatedGame
       );
     } catch (error) {
-      console.error(
+      logError(
         "[Library Analysis] Failed to store insight:",
         error
       );
@@ -1781,19 +2018,34 @@ export default function App() {
         updatedGame
       );
     } catch (error) {
-      console.error(
+      logError(
         "[Library Analysis] Failed to store analysis state:",
         error
       );
     }
 
-    console.info(
-      `[Performance] Background analysis [${game.name}]: ${(performance.now() - analysisStarted).toFixed(0)} ms`
-    );
+    perf(
+          "Background analysis [${game.name}]",
+          (performance.now() - analysisStarted).toFixed(0)
+        );
+
+    const transientFailure =
+      failed &&
+      [
+        updatedGame.pcgwError,
+        updatedGame.renodxError,
+        updatedGame.vortexError,
+      ].some(
+        (error) =>
+          isTransientAnalysisError(
+            error
+          )
+      );
 
     return {
       updatedGame,
       failed,
+      transientFailure,
     };
   }
 
@@ -1801,6 +2053,39 @@ export default function App() {
   async function startLibraryAnalysis(
     mode = "remaining"
   ) {
+    if (
+      !isNetworkOnline()
+    ) {
+      setLibraryAnalysis(
+        (current) => ({
+          ...current,
+
+          state:
+            "complete",
+
+          total:
+            0,
+
+          completed:
+            0,
+
+          succeeded:
+            0,
+
+          failed:
+            0,
+
+          activeGames:
+            [],
+
+          notice:
+            "Offline mode: remote library analysis is paused until connectivity returns.",
+        })
+      );
+
+      return;
+    }
+
     if (
       libraryAnalysis.state ===
       "running" ||
@@ -1869,6 +2154,18 @@ export default function App() {
 
         errors:
           [],
+
+        retryCount:
+          0,
+
+        effectiveConcurrency:
+          0,
+
+        adaptiveReduced:
+          false,
+
+        notice:
+          null,
       });
 
       return;
@@ -1879,6 +2176,22 @@ export default function App() {
 
     const runId =
       ++analysisRunIdRef.current;
+
+    const initialConcurrency =
+      Math.max(
+        1,
+        Math.min(
+          analysisSettings
+            .analysisConcurrency,
+          queue.length
+        )
+      );
+
+    let effectiveConcurrency =
+      initialConcurrency;
+
+    let consecutiveTransientFailures =
+      0;
 
     setLibraryAnalysis({
       state:
@@ -1903,15 +2216,36 @@ export default function App() {
 
       errors:
         [],
+
+      retryCount:
+        0,
+
+      effectiveConcurrency:
+        initialConcurrency,
+
+      adaptiveReduced:
+        false,
+
+      notice:
+        null,
     });
 
     let nextIndex =
       0;
 
-    async function worker() {
+    async function worker(
+      workerId
+    ) {
       while (
         !analysisCancelRef.current
       ) {
+        if (
+          workerId >=
+          effectiveConcurrency
+        ) {
+          break;
+        }
+
         const index =
           nextIndex++;
 
@@ -1966,6 +2300,43 @@ export default function App() {
           failed =
             result.failed;
 
+          if (
+            result.transientFailure
+          ) {
+            consecutiveTransientFailures +=
+              1;
+          } else {
+            consecutiveTransientFailures =
+              0;
+          }
+
+          if (
+            consecutiveTransientFailures >= 2 &&
+            effectiveConcurrency > 1
+          ) {
+            effectiveConcurrency =
+              1;
+
+            setLibraryAnalysis(
+              (current) => ({
+                ...current,
+
+                effectiveConcurrency:
+                  1,
+
+                adaptiveReduced:
+                  true,
+
+                notice:
+                  "Repeated transient service failures detected. Background analysis reduced to concurrency 1 for this run.",
+              })
+            );
+
+            logWarn(
+              "[Library Analysis] Repeated transient failures detected; reducing concurrency to 1 for the remainder of this run."
+            );
+          }
+
           if (!failed) {
             timestamps[
               game.id
@@ -1977,7 +2348,9 @@ export default function App() {
             );
           } else {
             errorMessage =
-              "One or more data sources failed.";
+              result.transientFailure
+                ? "One or more services still failed after automatic retries."
+                : "One or more data sources failed.";
           }
         } catch (error) {
           failed =
@@ -1986,7 +2359,7 @@ export default function App() {
           errorMessage =
             String(error);
 
-          console.error(
+          logError(
             `[Library Analysis] ${game.name} failed:`,
             error
           );
@@ -2078,14 +2451,15 @@ export default function App() {
       Array.from(
         {
           length:
-            Math.min(
-              analysisSettings
-                .analysisConcurrency,
-              queue.length
-            ),
+            initialConcurrency,
         },
-        () =>
-          worker()
+        (
+          _,
+          workerId
+        ) =>
+          worker(
+            workerId
+          )
       );
 
     await Promise.all(
@@ -2176,8 +2550,8 @@ export default function App() {
         null
       );
     } catch (error) {
-      console.error(
-        "[Game Manager] Scan failed:",
+      logError(
+        "[GameAtlas] Scan failed:",
         error
       );
 
@@ -2210,9 +2584,61 @@ export default function App() {
   );
 
 
+  useEffect(
+    () =>
+      subscribeNetworkStatus(
+        (online) => {
+          setNetworkOnline(
+            online
+          );
+
+          if (!online) {
+            [
+              SERVICE_IDS.pcgw,
+              SERVICE_IDS.renodx,
+              SERVICE_IDS.luma,
+              SERVICE_IDS.vortex,
+              SERVICE_IDS.github,
+            ].forEach(
+              (serviceId) =>
+                setServiceStatus(
+                  serviceId,
+                  "offline",
+                  "Device appears to be offline. Cached and local data remain available."
+                )
+            );
+          }
+        }
+      ),
+    []
+  );
+
+
   async function runUpdateCheck({
     manual = false,
   } = {}) {
+    if (
+      !isNetworkOnline()
+    ) {
+      if (manual) {
+        setUpdateCheckStatus({
+          state:
+            "offline",
+
+          message:
+            "Offline — update checks require an internet connection.",
+        });
+      }
+
+      setServiceStatus(
+        SERVICE_IDS.github,
+        "offline",
+        "Device appears to be offline."
+      );
+
+      return;
+    }
+
     markServiceChecking(
       SERVICE_IDS.github
     );
@@ -2256,12 +2682,12 @@ export default function App() {
 
           message:
             update
-              ? `Game Manager ${update.version} is available.`
+              ? `GameAtlas ${update.version} is available.`
               : "You are running the latest available version.",
         });
       }
     } catch (error) {
-      console.error(
+      logError(
         "[Updater] Check failed:",
         error
       );
@@ -2433,11 +2859,49 @@ export default function App() {
 
     if (
       game.pcgwLoaded &&
+      !game.pcgwError &&
       game.renodxLoaded &&
-      game.vortexLoaded
+      !game.renodxError &&
+      game.vortexLoaded &&
+      !game.vortexError
     ) {
-      console.info(
-        `[Performance] Selected game cache hit: ${(performance.now() - analysisStarted).toFixed(0)} ms`
+      perf(
+          "Selected game cache hit",
+          (performance.now() - analysisStarted).toFixed(0)
+        );
+
+      return;
+    }
+
+
+    if (
+      !isNetworkOnline()
+    ) {
+      const offlineGame = {
+        ...game,
+
+        pcgwLoading:
+          false,
+
+        renodxLoading:
+          false,
+
+        vortexLoading:
+          false,
+      };
+
+      setSelectedGame(
+        offlineGame
+      );
+
+      setGames(
+        (current) =>
+          current.map(
+            (item) =>
+              item.id === game.id
+                ? offlineGame
+                : item
+          )
       );
 
       return;
@@ -2674,7 +3138,7 @@ export default function App() {
           SERVICE_IDS.vortex
         );
 
-        console.log(
+        devLog(
           "[Vortex Frontend] Rust returned:",
           vortexResult.value
         );
@@ -2691,7 +3155,7 @@ export default function App() {
           vortexResult.reason
         );
 
-        console.error(
+        logError(
           "[Vortex] Lookup failed:",
           vortexResult.reason
         );
@@ -2715,16 +3179,17 @@ export default function App() {
     }
 
 
-    console.info(
-      `[Performance] Selected game analysis: ${(performance.now() - analysisStarted).toFixed(0)} ms`
-    );
+    perf(
+          "Selected game analysis",
+          (performance.now() - analysisStarted).toFixed(0)
+        );
 
     try {
       storeGameInsight(
         updatedGame
       );
     } catch (error) {
-      console.error(
+      logError(
         "[Library Analysis] Failed to store selected-game insight:",
         error
       );
@@ -2735,7 +3200,7 @@ export default function App() {
         updatedGame
       );
     } catch (error) {
-      console.error(
+      logError(
         "[Library Analysis] Failed to store selected-game analysis state:",
         error
       );
@@ -2969,6 +3434,10 @@ export default function App() {
             updateCheckStatus={
               updateCheckStatus
             }
+
+            onSelectGame={
+              selectGame
+            }
           />
         ) : (
           <GameDetails
@@ -3002,6 +3471,23 @@ export default function App() {
             }
             updateCheckStatus={
               updateCheckStatus
+            }
+
+            onSelectGame={
+              selectGame
+            }
+
+            networkOnline={
+              networkOnline
+            }
+
+            onRetryRemoteData={
+              selectedGame
+                ? () =>
+                    selectGame(
+                      selectedGame
+                    )
+                : null
             }
           />
         )}

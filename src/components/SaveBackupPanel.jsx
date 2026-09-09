@@ -5,6 +5,7 @@ import {
   RefreshCcw,
   RotateCcw,
   Save,
+  Trash2,
 } from "lucide-react";
 
 import {
@@ -14,7 +15,12 @@ import {
 } from "react";
 
 import {
+  error as logError,
+} from "../services/logging";
+
+import {
   createSaveBackup,
+  deleteSaveBackup,
   getSaveBackupStatus,
   restoreSaveBackup,
 } from "../services/saveBackups";
@@ -39,6 +45,7 @@ function formatSize(
     "KB",
     "MB",
     "GB",
+    "TB",
   ];
 
   let value =
@@ -82,16 +89,100 @@ function formatDate(
 }
 
 
+function backupType(
+  fileName
+) {
+  if (
+    fileName?.startsWith(
+      "pre_restore_"
+    )
+  ) {
+    return {
+      label:
+        "Restore Safety",
+
+      className:
+        "border-amber-500/20 bg-amber-500/[0.06] text-amber-300/75",
+    };
+  }
+
+  if (
+    fileName?.startsWith(
+      "pre_launch_"
+    )
+  ) {
+    return {
+      label:
+        "Pre-Launch",
+
+      className:
+        "border-violet-500/20 bg-violet-500/[0.06] text-violet-300/75",
+    };
+  }
+
+  return {
+    label:
+      "Manual",
+
+    className:
+      "border-cyan-500/15 bg-cyan-500/[0.05] text-cyan-200/65",
+  };
+}
+
+
+function Stat({
+  label,
+  value,
+}) {
+  return (
+    <div
+      className="
+        rounded-lg
+        border
+        border-white/[0.06]
+        bg-white/[0.018]
+        px-3
+        py-2.5
+      "
+    >
+      <div
+        className="
+          text-base
+          font-bold
+          text-white/70
+        "
+      >
+        {value}
+      </div>
+
+      <div
+        className="
+          mt-0.5
+          text-[9px]
+          font-semibold
+          uppercase
+          tracking-wide
+          text-white/25
+        "
+      >
+        {label}
+      </div>
+    </div>
+  );
+}
+
+
 function BackupRow({
   backup,
   restoring,
+  deleting,
   onRestore,
+  onDelete,
 }) {
-  const isSafety =
-    backup.fileName
-      ?.startsWith(
-        "pre_restore_"
-      );
+  const type =
+    backupType(
+      backup.fileName
+    );
 
   return (
     <div
@@ -112,6 +203,7 @@ function BackupRow({
       <div
         className="
           min-w-0
+          flex-1
         "
       >
         <div
@@ -124,99 +216,168 @@ function BackupRow({
         >
           <div
             className="
-              truncate
               text-sm
               font-medium
               text-white/75
             "
           >
             {formatDate(
-              backup.modifiedUnix
+              backup.createdUnix
+              ?? backup.modifiedUnix
             )}
           </div>
 
-          {isSafety ? (
-            <div
-              className="
-                rounded-full
-                border
-                border-amber-500/20
-                bg-amber-500/[0.06]
-                px-2
-                py-0.5
-                text-[10px]
-                font-semibold
-                uppercase
-                tracking-wide
-                text-amber-300/75
-              "
-            >
-              Safety Backup
-            </div>
-          ) : null}
+          <span
+            className={`
+              rounded-full
+              border
+              px-2
+              py-0.5
+              text-[9px]
+              font-semibold
+              uppercase
+              tracking-wide
+              ${type.className}
+            `}
+          >
+            {type.label}
+          </span>
         </div>
 
         <div
           className="
             mt-1
+            flex
+            flex-wrap
+            gap-x-2
+            gap-y-1
             text-xs
             text-white/35
           "
         >
-          {formatSize(
-            backup.sizeBytes
-          )}
-          {" • "}
-          {backup.fileName}
+          <span>
+            {formatSize(
+              backup.sizeBytes
+            )}
+          </span>
+
+          <span
+            className="
+              text-white/15
+            "
+          >
+            •
+          </span>
+
+          <span
+            className="
+              truncate
+            "
+            title={
+              backup.fileName
+            }
+          >
+            {backup.fileName}
+          </span>
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={
-          onRestore
-        }
-        disabled={
-          restoring
-        }
+      <div
         className="
-          inline-flex
+          flex
           shrink-0
-          items-center
-          justify-center
           gap-2
-          rounded-lg
-          border
-          border-white/10
-          bg-white/[0.035]
-          px-3
-          py-2
-          text-xs
-          font-medium
-          text-white/60
-          transition
-          hover:bg-white/[0.07]
-          hover:text-white/80
-          disabled:cursor-not-allowed
-          disabled:opacity-35
         "
       >
-        {restoring ? (
-          <Loader2
-            className="
-              h-3.5
-              w-3.5
-              animate-spin
-            "
-          />
-        ) : (
-          <RotateCcw
-            className="h-3.5 w-3.5"
-          />
-        )}
+        <button
+          type="button"
+          onClick={
+            onRestore
+          }
+          disabled={
+            restoring
+            || deleting
+          }
+          className="
+            inline-flex
+            items-center
+            justify-center
+            gap-2
+            rounded-lg
+            border
+            border-white/10
+            bg-white/[0.035]
+            px-3
+            py-2
+            text-xs
+            font-medium
+            text-white/60
+            transition
+            hover:bg-white/[0.07]
+            hover:text-white/80
+            disabled:cursor-not-allowed
+            disabled:opacity-35
+          "
+        >
+          {restoring ? (
+            <Loader2
+              className="
+                h-3.5
+                w-3.5
+                animate-spin
+              "
+            />
+          ) : (
+            <RotateCcw
+              className="h-3.5 w-3.5"
+            />
+          )}
 
-        Restore
-      </button>
+          Restore
+        </button>
+
+        <button
+          type="button"
+          onClick={
+            onDelete
+          }
+          disabled={
+            restoring
+            || deleting
+          }
+          className="
+            inline-flex
+            h-9
+            w-9
+            items-center
+            justify-center
+            rounded-lg
+            border
+            border-red-500/15
+            bg-red-500/[0.035]
+            text-red-200/45
+            transition
+            hover:bg-red-500/[0.08]
+            hover:text-red-200/75
+            disabled:opacity-30
+          "
+          title="Delete this backup"
+        >
+          {deleting ? (
+            <Loader2
+              className="
+                h-3.5
+                w-3.5
+                animate-spin
+              "
+            />
+          ) : (
+            <Trash2
+              className="h-3.5 w-3.5"
+            />
+          )}
+        </button>
+      </div>
     </div>
   );
 }
@@ -250,6 +411,12 @@ export default function SaveBackupPanel({
   const [
     restoring,
     setRestoring,
+  ] =
+    useState(null);
+
+  const [
+    deleting,
+    setDeleting,
   ] =
     useState(null);
 
@@ -299,15 +466,15 @@ export default function SaveBackupPanel({
       setStatus(
         result
       );
-    } catch (error) {
-      console.error(
+    } catch (refreshError) {
+      logError(
         "[Save Backups] Status failed:",
-        error
+        refreshError
       );
 
       setError(
         String(
-          error
+          refreshError
         )
       );
     } finally {
@@ -369,15 +536,15 @@ export default function SaveBackupPanel({
       setMessage(
         "Save backup created successfully."
       );
-    } catch (error) {
-      console.error(
+    } catch (createError) {
+      logError(
         "[Save Backups] Create failed:",
-        error
+        createError
       );
 
       setError(
         String(
-          error
+          createError
         )
       );
     } finally {
@@ -394,8 +561,9 @@ export default function SaveBackupPanel({
     const confirmed =
       window.confirm(
         `Restore this save backup?\n\n${formatDate(
-          backup.modifiedUnix
-        )}\n\nGame Manager will automatically create a safety backup of your current save before restoring.`
+          backup.createdUnix
+          ?? backup.modifiedUnix
+        )}\n\nGameAtlas will automatically create a safety backup of your current save before restoring.`
       );
 
     if (!confirmed) {
@@ -428,19 +596,81 @@ export default function SaveBackupPanel({
       setMessage(
         "Save backup restored successfully. A safety backup of the previous save was created automatically."
       );
-    } catch (error) {
-      console.error(
+    } catch (restoreError) {
+      logError(
         "[Save Backups] Restore failed:",
-        error
+        restoreError
       );
 
       setError(
         String(
-          error
+          restoreError
         )
       );
     } finally {
       setRestoring(
+        null
+      );
+    }
+  }
+
+
+  async function handleDelete(
+    backup
+  ) {
+    const confirmed =
+      window.confirm(
+        `Delete this backup permanently?\n\n${formatDate(
+          backup.createdUnix
+          ?? backup.modifiedUnix
+        )}\n${formatSize(
+          backup.sizeBytes
+        )}\n\nThis cannot be undone.`
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeleting(
+      backup.fileName
+    );
+
+    setError(
+      null
+    );
+
+    setMessage(
+      null
+    );
+
+    try {
+      const result =
+        await deleteSaveBackup(
+          game,
+          backup.fileName
+        );
+
+      setStatus(
+        result
+      );
+
+      setMessage(
+        "Backup deleted."
+      );
+    } catch (deleteError) {
+      logError(
+        "[Save Backups] Delete failed:",
+        deleteError
+      );
+
+      setError(
+        String(
+          deleteError
+        )
+      );
+    } finally {
+      setDeleting(
         null
       );
     }
@@ -459,10 +689,10 @@ export default function SaveBackupPanel({
       await openGamePath(
         status.backupDirectory
       );
-    } catch (error) {
+    } catch (openError) {
       setError(
         String(
-          error
+          openError
         )
       );
     }
@@ -560,15 +790,17 @@ export default function SaveBackupPanel({
             "
           >
             Backups are stored outside the game folder
-            in Game Manager's local backup directory.
+            in GameAtlas's local backup directory.
           </div>
         </div>
 
         <div
           className="
-            flex
-            flex-wrap
+            grid
+            grid-cols-1
             gap-2
+            sm:flex
+            sm:flex-wrap
           "
         >
           <button
@@ -582,8 +814,11 @@ export default function SaveBackupPanel({
             }
             className="
               inline-flex
+              w-full
               items-center
+              justify-center
               gap-2
+              sm:w-auto
               rounded-lg
               border
               border-white/10
@@ -616,8 +851,11 @@ export default function SaveBackupPanel({
             }
             className="
               inline-flex
+              w-full
               items-center
+              justify-center
               gap-2
+              sm:w-auto
               rounded-lg
               border
               border-white/10
@@ -655,11 +893,15 @@ export default function SaveBackupPanel({
             disabled={
               creating
               || restoring
+              || deleting
             }
             className="
               inline-flex
+              w-full
               items-center
+              justify-center
               gap-2
+              sm:w-auto
               rounded-lg
               border
               border-cyan-500/25
@@ -693,6 +935,52 @@ export default function SaveBackupPanel({
           </button>
         </div>
       </div>
+
+
+      {status ? (
+        <div
+          className="
+            grid
+            grid-cols-2
+            gap-2
+            border-b
+            border-white/[0.06]
+            px-4
+            py-3
+          "
+        >
+          <Stat
+            label="Backup Count"
+            value={
+              status.backupCount
+              ?? backups.length
+            }
+          />
+
+          <Stat
+            label="Storage Used"
+            value={
+              formatSize(
+                status.totalSizeBytes
+                ?? backups.reduce(
+                  (
+                    total,
+                    backup
+                  ) =>
+                    total
+                    + (
+                      Number(
+                        backup.sizeBytes
+                      )
+                      || 0
+                    ),
+                  0
+                )
+              )
+            }
+          />
+        </div>
+      ) : null}
 
 
       {error ? (
@@ -769,7 +1057,7 @@ export default function SaveBackupPanel({
               text-white/50
             "
           >
-            No backups yet
+            No save backups yet
           </div>
 
           <div
@@ -799,9 +1087,19 @@ export default function SaveBackupPanel({
                   restoring
                     === backup.fileName
                 }
+                deleting={
+                  deleting
+                    === backup.fileName
+                }
                 onRestore={
                   () =>
                     handleRestore(
+                      backup
+                    )
+                }
+                onDelete={
+                  () =>
+                    handleDelete(
                       backup
                     )
                 }

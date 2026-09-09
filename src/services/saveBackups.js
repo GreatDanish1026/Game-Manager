@@ -2,6 +2,10 @@ import {
   invoke,
 } from "@tauri-apps/api/core";
 
+import {
+  getSettings,
+} from "./settings";
+
 
 function commonArgs(
   game
@@ -25,6 +29,13 @@ function commonArgs(
 }
 
 
+function retentionCount() {
+  return getSettings()
+    .backupRetentionCount
+    ?? 0;
+}
+
+
 export async function getSaveBackupStatus(
   game
 ) {
@@ -37,14 +48,53 @@ export async function getSaveBackupStatus(
 }
 
 
+export async function getBackupStorageSummary() {
+  return invoke(
+    "get_backup_storage_summary"
+  );
+}
+
+
 export async function createSaveBackup(
-  game
+  game,
+  {
+    backupType =
+      "manual",
+  } = {}
 ) {
   return invoke(
     "create_save_backup",
-    commonArgs(
-      game
-    )
+    {
+      ...commonArgs(
+        game
+      ),
+
+      retentionCount:
+        retentionCount(),
+
+      backupType:
+        backupType ===
+          "pre_launch"
+          ? "pre_launch"
+          : "backup",
+    }
+  );
+}
+
+
+export async function deleteSaveBackup(
+  game,
+  backupFileName
+) {
+  return invoke(
+    "delete_save_backup",
+    {
+      ...commonArgs(
+        game
+      ),
+
+      backupFileName,
+    }
   );
 }
 
@@ -61,6 +111,9 @@ export async function restoreSaveBackup(
       ),
 
       backupFileName,
+
+      retentionCount:
+        retentionCount(),
     }
   );
 }

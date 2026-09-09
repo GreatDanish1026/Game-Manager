@@ -259,7 +259,7 @@ export default function UpdateNotification({
           >
             {installed ? (
               <>
-                Game Manager{" "}
+                GameAtlas{" "}
                 <span
                   className="
                     font-semibold
@@ -268,11 +268,11 @@ export default function UpdateNotification({
                 >
                   {update.version}
                 </span>
-                {" "}was installed. Close and reopen Game Manager to use the new version.
+                {" "}was installed. Close and reopen GameAtlas to use the new version.
               </>
             ) : (
               <>
-                Game Manager{" "}
+                GameAtlas{" "}
                 <span
                   className="
                     font-semibold

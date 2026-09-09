@@ -19,6 +19,12 @@ export const DEFAULT_SETTINGS = {
 
   compactGameRows:
     false,
+
+  backupRetentionCount:
+    0,
+
+  backupBeforeLaunch:
+    false,
 };
 
 
@@ -75,6 +81,24 @@ function sanitizeSettings(
     compactGameRows:
       Boolean(
         source.compactGameRows
+      ),
+
+    backupRetentionCount:
+      [0, 3, 5, 10, 20]
+        .includes(
+          Number(
+            source.backupRetentionCount
+          )
+        )
+        ? Number(
+            source.backupRetentionCount
+          )
+        : DEFAULT_SETTINGS
+            .backupRetentionCount,
+
+    backupBeforeLaunch:
+      Boolean(
+        source.backupBeforeLaunch
       ),
   };
 }
@@ -191,9 +215,71 @@ export function clearLibraryFilterCache() {
 }
 
 
+export function clearExternalServiceStatusCache() {
+  localStorage.removeItem(
+    "game-manager-service-status-v1"
+  );
+
+  window.dispatchEvent(
+    new CustomEvent(
+      "game-manager-service-status-changed"
+    )
+  );
+}
+
+
+export function clearInstallationHealthCache() {
+  localStorage.removeItem(
+    "game-manager-installation-health-v1"
+  );
+
+  window.dispatchEvent(
+    new CustomEvent(
+      "game-manager-installation-health-changed"
+    )
+  );
+}
+
+
+export function clearSavedViews() {
+  localStorage.removeItem(
+    "game-manager-saved-views-v1"
+  );
+
+  window.dispatchEvent(
+    new CustomEvent(
+      "game-manager-saved-views-changed"
+    )
+  );
+}
+
+
 export function clearSafeCaches() {
   clearAnalysisCache();
   clearLibraryFilterCache();
+  clearExternalServiceStatusCache();
+  clearInstallationHealthCache();
+}
+
+
+export function getSavedViewCount() {
+  try {
+    const parsed =
+      JSON.parse(
+        localStorage.getItem(
+          "game-manager-saved-views-v1"
+        )
+        ?? "[]"
+      );
+
+    return Array.isArray(
+      parsed
+    )
+      ? parsed.length
+      : 0;
+  } catch {
+    return 0;
+  }
 }
 
 
@@ -212,57 +298,56 @@ export function getCacheSummary() {
         : 0;
     };
 
-  const timestampsRaw =
-    localStorage.getItem(
+  const objectCount =
+    (key) => {
+      try {
+        const parsed =
+          JSON.parse(
+            localStorage.getItem(
+              key
+            )
+            ?? "{}"
+          );
+
+        return parsed
+          && typeof parsed
+            === "object"
+          && !Array.isArray(
+            parsed
+          )
+          ? Object.keys(
+              parsed
+            ).length
+          : 0;
+      } catch {
+        return 0;
+      }
+    };
+
+  const timestampCount =
+    objectCount(
       "game-manager-analysis-timestamps-v1"
     );
 
-  const insightsRaw =
-    localStorage.getItem(
+  const insightCount =
+    objectCount(
       "game-manager-library-insights"
     );
 
-  const stateRaw =
-    localStorage.getItem(
+  const stateCount =
+    objectCount(
       "game-manager-analysis-state-v1"
     );
 
-  let timestampCount = 0;
-  let insightCount = 0;
-  let stateCount = 0;
+  const serviceStatusCount =
+    objectCount(
+      "game-manager-service-status-v1"
+    );
 
-  try {
-    timestampCount =
-      Object.keys(
-        JSON.parse(
-          timestampsRaw ?? "{}"
-        )
-      ).length;
-  } catch {
-    timestampCount = 0;
-  }
-
-  try {
-    insightCount =
-      Object.keys(
-        JSON.parse(
-          insightsRaw ?? "{}"
-        )
-      ).length;
-  } catch {
-    insightCount = 0;
-  }
-
-  try {
-    stateCount =
-      Object.keys(
-        JSON.parse(
-          stateRaw ?? "{}"
-        )
-      ).length;
-  } catch {
-    stateCount = 0;
-  }
+  const installationHealthCount =
+    objectCount(
+      "game-manager-installation-health-v1"
+    );
 
   return {
     analysisEntries:
@@ -286,6 +371,30 @@ export function getCacheSummary() {
     filterBytes:
       bytesFor(
         "game-manager-library-filters"
+      ),
+
+    serviceStatusEntries:
+      serviceStatusCount,
+
+    serviceStatusBytes:
+      bytesFor(
+        "game-manager-service-status-v1"
+      ),
+
+    installationHealthEntries:
+      installationHealthCount,
+
+    installationHealthBytes:
+      bytesFor(
+        "game-manager-installation-health-v1"
+      ),
+
+    savedViews:
+      getSavedViewCount(),
+
+    savedViewsBytes:
+      bytesFor(
+        "game-manager-saved-views-v1"
       ),
   };
 }

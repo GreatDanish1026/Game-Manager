@@ -1,328 +1,218 @@
 param(
-    [string]$Version = "1.0.0",
-    [string]$Notes = "",
-    [string]$Repository = "GreatDanish1026/Game-Manager"
+    [string]$ProjectRoot = ".",
+    [string]$Version = "1.2.0",
+    [string]$Repository = "GreatDanish1026/Game-Manager",
+    [string]$OutputDirectory = ".\release-v1.2.0"
 )
 
 $ErrorActionPreference = "Stop"
 
-if (
-    [string]::IsNullOrWhiteSpace(
-        $Notes
-    )
-) {
-    $Notes = "Game Manager v$Version"
+function Pass([string]$Message) {
+    Write-Host "[PASS] $Message" -ForegroundColor Green
 }
 
-$Root =
-    Resolve-Path(
-        Join-Path $PSScriptRoot ".."
-    )
-
-$NsisDir =
-    Join-Path `
-        $Root `
-        "src-tauri\target\release\bundle\nsis"
-
-$OutputDir =
-    Join-Path `
-        $Root `
-        "release-assets"
-
-Write-Host ""
-Write-Host "Game Manager Release Asset Preparation" -ForegroundColor Cyan
-Write-Host "Version: $Version"
-Write-Host "Repository: $Repository"
-Write-Host ""
-
-# ------------------------------------------------------------
-# Validate release configuration first, when validator exists
-# ------------------------------------------------------------
-$Validator =
-    Join-Path `
-        $PSScriptRoot `
-        "validate-v1-release.ps1"
-
-if (
-    Test-Path(
-        $Validator
-    )
-) {
-    & powershell `
-        -ExecutionPolicy Bypass `
-        -File $Validator `
-        -ExpectedVersion $Version
-
-    if (
-        $LASTEXITCODE -ne 0
-    ) {
-        throw "Release validation failed. Fix the reported configuration before preparing assets."
-    }
+function Fail([string]$Message) {
+    Write-Host "[FAIL] $Message" -ForegroundColor Red
+    throw $Message
 }
 
-# ------------------------------------------------------------
-# Locate the signed NSIS installer
-# ------------------------------------------------------------
-if (
-    -not (
-        Test-Path(
-            $NsisDir
+function Info([string]$Message) {
+    Write-Host "[INFO] $Message" -ForegroundColor Cyan
+}
+
+$ResolvedRoot = Resolve-Path -LiteralPath $ProjectRoot
+$Root = [System.IO.Path]::GetFullPath([string]$ResolvedRoot.Path)
+
+$OutputPath =
+    if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
+        [System.IO.Path]::GetFullPath($OutputDirectory)
+    } else {
+        [System.IO.Path]::GetFullPath(
+            (Join-Path $Root $OutputDirectory)
         )
-    )
-) {
-    throw "NSIS output directory does not exist: $NsisDir"
+    }
+
+$BundleRoot = Join-Path $Root "src-tauri\target\release\bundle"
+$NsisRoot = Join-Path $BundleRoot "nsis"
+
+if (-not (Test-Path -LiteralPath $NsisRoot)) {
+    Fail "NSIS bundle directory not found: $NsisRoot. Run npm run tauri:build first."
 }
 
-$Installers =
-    @(
-        Get-ChildItem `
-            -Path $NsisDir `
-            -File `
-            -Filter "*setup.exe" |
-        Sort-Object `
-            -Property LastWriteTime `
-            -Descending
-    )
+$ExpectedInstallerName = "GameAtlas_${Version}_x64-setup.exe"
+$ExpectedSignatureName = "${ExpectedInstallerName}.sig"
 
-if (
-    $Installers.Count -eq 0
-) {
-    throw "No NSIS *setup.exe installer was found in $NsisDir. Run a signed npm run tauri:build first."
+$InstallerCandidates = @(
+    Get-ChildItem -LiteralPath $NsisRoot -File -Filter "*.exe" -ErrorAction SilentlyContinue
+)
+
+if ($InstallerCandidates.Count -eq 0) {
+    Fail "No NSIS installer .exe found under $NsisRoot."
 }
 
 $Installer =
-    $Installers[0]
+    $InstallerCandidates |
+    Where-Object {
+        $_.Name -eq $ExpectedInstallerName
+    } |
+    Select-Object -First 1
 
-$SignaturePath =
-    "$($Installer.FullName).sig"
+if (-not $Installer) {
+    if ($InstallerCandidates.Count -eq 1) {
+        $Installer = $InstallerCandidates[0]
+        Info "Using generated installer '$($Installer.Name)' and normalizing release asset name to '$ExpectedInstallerName'."
+    } else {
+        Write-Host "Found installer candidates:" -ForegroundColor Yellow
+        $InstallerCandidates | ForEach-Object {
+            Write-Host "  $($_.FullName)" -ForegroundColor Yellow
+        }
 
-if (
-    -not (
-        Test-Path(
-            $SignaturePath
-        )
-    )
-) {
-    throw @"
-The updater signature is missing:
-
-$SignaturePath
-
-Build again with TAURI_SIGNING_PRIVATE_KEY configured and bundle.createUpdaterArtifacts=true.
-"@
+        Fail "Could not uniquely select the v$Version NSIS installer."
+    }
 }
 
-Write-Host "Using installer:"
-Write-Host "  $($Installer.FullName)"
-Write-Host "Using signature:"
-Write-Host "  $SignaturePath"
-Write-Host ""
+$SignatureCandidates = @(
+    Get-ChildItem -LiteralPath $NsisRoot -File -Filter "*.sig" -ErrorAction SilentlyContinue
+)
 
-# ------------------------------------------------------------
-# Prepare stable GitHub asset names
-# ------------------------------------------------------------
-New-Item `
-    -ItemType Directory `
-    -Path $OutputDir `
-    -Force |
-    Out-Null
-
-$SafeVersion =
-    $Version -replace '[^0-9A-Za-z\.\-\+]', '-'
-
-$AssetName =
-    "GameManager_${SafeVersion}_x64-setup.exe"
-
-$SigName =
-    "$AssetName.sig"
-
-$AssetPath =
-    Join-Path `
-        $OutputDir `
-        $AssetName
-
-$SigOutputPath =
-    Join-Path `
-        $OutputDir `
-        $SigName
-
-Copy-Item `
-    -LiteralPath $Installer.FullName `
-    -Destination $AssetPath `
-    -Force
-
-Copy-Item `
-    -LiteralPath $SignaturePath `
-    -Destination $SigOutputPath `
-    -Force
-
-# ------------------------------------------------------------
-# Read the signature CONTENT
-# ------------------------------------------------------------
 $Signature =
-    (
-        Get-Content `
-            -LiteralPath $SignaturePath `
-            -Raw
+    $SignatureCandidates |
+    Where-Object {
+        $_.Name -eq $ExpectedSignatureName
+    } |
+    Select-Object -First 1
+
+if (-not $Signature) {
+    $LikelySig = "$($Installer.FullName).sig"
+
+    if (Test-Path -LiteralPath $LikelySig) {
+        $Signature = Get-Item -LiteralPath $LikelySig
+    }
+}
+
+if (-not $Signature) {
+    if ($SignatureCandidates.Count -eq 1) {
+        $Signature = $SignatureCandidates[0]
+        Info "Using generated signature '$($Signature.Name)' and normalizing release asset name to '$ExpectedSignatureName'."
+    } else {
+        Fail "Updater signature .sig was not found. Confirm createUpdaterArtifacts=true and the updater signing environment is configured."
+    }
+}
+
+New-Item -ItemType Directory -Force -Path $OutputPath | Out-Null
+
+$ReleaseInstaller = Join-Path $OutputPath $ExpectedInstallerName
+$ReleaseSignature = Join-Path $OutputPath $ExpectedSignatureName
+$LatestJsonPath = Join-Path $OutputPath "latest.json"
+
+Copy-Item -LiteralPath $Installer.FullName -Destination $ReleaseInstaller -Force
+Copy-Item -LiteralPath $Signature.FullName -Destination $ReleaseSignature -Force
+
+Pass "Installer prepared: $ExpectedInstallerName"
+Pass "Signature prepared: $ExpectedSignatureName"
+
+$SignatureText =
+    [System.IO.File]::ReadAllText(
+        $ReleaseSignature,
+        [System.Text.Encoding]::UTF8
     ).Trim()
 
-if (
-    [string]::IsNullOrWhiteSpace(
-        $Signature
-    )
-) {
-    throw "The updater signature file is empty."
+if ([string]::IsNullOrWhiteSpace($SignatureText)) {
+    Fail "Signature file is empty."
 }
 
-# ------------------------------------------------------------
-# Generate Tauri v2 static latest.json
-# ------------------------------------------------------------
-$EncodedAssetName =
-    [System.Uri]::EscapeDataString(
-        $AssetName
-    )
+$InstallerUrl =
+    "https://github.com/$Repository/releases/download/v$Version/$ExpectedInstallerName"
 
-$DownloadUrl =
-    "https://github.com/$Repository/releases/download/v$Version/$EncodedAssetName"
+$Notes =
+    "GameAtlas v$Version"
 
-$PlatformEntry =
-    [ordered]@{
-        signature =
-            $Signature
-
-        url =
-            $DownloadUrl
+$LatestObject = [ordered]@{
+    version = $Version
+    notes = $Notes
+    pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    platforms = [ordered]@{
+        "windows-x86_64" = [ordered]@{
+            signature = $SignatureText
+            url = $InstallerUrl
+        }
     }
-
-$Platforms =
-    [ordered]@{
-        "windows-x86_64" =
-            $PlatformEntry
-    }
-
-$Latest =
-    [ordered]@{
-        version =
-            $Version
-
-        notes =
-            $Notes
-
-        pub_date =
-            (
-                Get-Date
-            ).ToUniversalTime().ToString(
-                "yyyy-MM-ddTHH:mm:ssZ"
-            )
-
-        platforms =
-            $Platforms
-    }
-
-$LatestPath =
-    Join-Path `
-        $OutputDir `
-        "latest.json"
+}
 
 $LatestJson =
-    $Latest |
-    ConvertTo-Json `
-        -Depth 10
+    $LatestObject |
+    ConvertTo-Json -Depth 10
 
-# Windows PowerShell 5.1 writes a BOM with Set-Content -Encoding UTF8.
-# Use .NET explicitly to produce UTF-8 WITHOUT a BOM.
+# Windows PowerShell 5.1 Set-Content -Encoding UTF8 adds a BOM.
+# WriteAllText + UTF8Encoding(false) guarantees UTF-8 without BOM.
 $Utf8NoBom =
-    New-Object `
-        System.Text.UTF8Encoding `
-        -ArgumentList $false
+    New-Object System.Text.UTF8Encoding -ArgumentList $false
 
 [System.IO.File]::WriteAllText(
-    $LatestPath,
+    $LatestJsonPath,
     $LatestJson,
     $Utf8NoBom
 )
 
-# ------------------------------------------------------------
-# Validate the generated JSON immediately
-# ------------------------------------------------------------
+Pass "latest.json generated as UTF-8 without BOM"
+
+# Validate the JSON immediately.
+$Parsed =
+    Get-Content -LiteralPath $LatestJsonPath -Raw |
+    ConvertFrom-Json
+
+if ([string]$Parsed.version -ne $Version) {
+    Fail "latest.json version validation failed."
+}
+
+$Platform =
+    $Parsed.platforms."windows-x86_64"
+
+if ([string]::IsNullOrWhiteSpace([string]$Platform.signature)) {
+    Fail "latest.json signature is empty."
+}
+
+if ([string]$Platform.url -ne $InstallerUrl) {
+    Fail "latest.json installer URL does not match the expected release URL."
+}
+
 $Bytes =
     [System.IO.File]::ReadAllBytes(
-        $LatestPath
+        $LatestJsonPath
     )
 
 $HasBom =
-    (
-        $Bytes.Length -ge 3
-    ) -and (
-        $Bytes[0] -eq 0xEF
-    ) -and (
-        $Bytes[1] -eq 0xBB
-    ) -and (
-        $Bytes[2] -eq 0xBF
+    $Bytes.Length -ge 3 -and
+    $Bytes[0] -eq 0xEF -and
+    $Bytes[1] -eq 0xBB -and
+    $Bytes[2] -eq 0xBF
+
+if ($HasBom) {
+    Fail "latest.json unexpectedly contains a UTF-8 BOM."
+}
+
+Pass "latest.json content validation passed"
+
+$InstallerInfo =
+    [System.Diagnostics.FileVersionInfo]::GetVersionInfo(
+        $ReleaseInstaller
     )
 
-if (
-    $HasBom
-) {
-    throw "Generated latest.json contains a UTF-8 BOM."
+Write-Host ""
+Write-Host "Prepared release assets:" -ForegroundColor White
+Write-Host "  $ReleaseInstaller" -ForegroundColor DarkGray
+Write-Host "  $ReleaseSignature" -ForegroundColor DarkGray
+Write-Host "  $LatestJsonPath" -ForegroundColor DarkGray
+Write-Host ""
+
+Write-Host "Installer file metadata:" -ForegroundColor White
+Write-Host "  ProductName: $($InstallerInfo.ProductName)" -ForegroundColor DarkGray
+Write-Host "  FileVersion: $($InstallerInfo.FileVersion)" -ForegroundColor DarkGray
+Write-Host "  ProductVersion: $($InstallerInfo.ProductVersion)" -ForegroundColor DarkGray
+
+if ($InstallerInfo.ProductName -and $InstallerInfo.ProductName -notmatch "GameAtlas") {
+    Write-Host "[WARN] Installer metadata ProductName does not contain GameAtlas. Review branding before release." -ForegroundColor Yellow
 }
 
-$ParsedText =
-    [System.IO.File]::ReadAllText(
-        $LatestPath
-    )
-
-$Parsed =
-    $ParsedText |
-    ConvertFrom-Json
-
-if (
-    $Parsed.version -ne $Version
-) {
-    throw "Generated latest.json version does not match $Version."
-}
-
-$ParsedPlatform =
-    $Parsed.platforms.'windows-x86_64'
-
-if (
-    $null -eq $ParsedPlatform
-) {
-    throw "Generated latest.json is missing platforms.windows-x86_64."
-}
-
-if (
-    [string]::IsNullOrWhiteSpace(
-        [string]$ParsedPlatform.signature
-    )
-) {
-    throw "Generated latest.json contains an empty signature."
-}
-
-if (
-    [string]$ParsedPlatform.url -ne $DownloadUrl
-) {
-    throw "Generated latest.json contains an unexpected updater URL."
-}
-
-# ------------------------------------------------------------
-# Final output
-# ------------------------------------------------------------
 Write-Host ""
-Write-Host "[PASS] Release assets prepared." -ForegroundColor Green
-Write-Host "[PASS] latest.json is UTF-8 without BOM." -ForegroundColor Green
-Write-Host "[PASS] latest.json parsed and validated." -ForegroundColor Green
-Write-Host ""
-Write-Host "Upload these THREE files to GitHub release v${Version}:" -ForegroundColor Yellow
-Write-Host "  $AssetPath"
-Write-Host "  $SigOutputPath"
-Write-Host "  $LatestPath"
-Write-Host ""
-Write-Host "Updater endpoint:"
-Write-Host "  https://github.com/$Repository/releases/latest/download/latest.json"
-Write-Host ""
-Write-Host "Updater package URL stored in latest.json:"
-Write-Host "  $DownloadUrl"
-Write-Host ""
-Write-Host "IMPORTANT:"
-Write-Host "The GitHub release tag must be exactly v$Version unless you edit the generated package URL."
+Write-Host "Next: upload all three prepared files to GitHub release tag v$Version." -ForegroundColor Cyan

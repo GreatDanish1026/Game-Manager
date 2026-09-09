@@ -1,4 +1,5 @@
 import {
+  Bookmark,
   ChevronDown,
   ChevronUp,
   EyeOff,
@@ -10,8 +11,10 @@ import {
   Search,
   Settings2,
   SlidersHorizontal,
+  Save,
   Star,
   Tag,
+  Trash2,
   X,
 } from "lucide-react";
 
@@ -38,11 +41,302 @@ import {
 } from "../services/libraryInsights";
 
 
+const CAPABILITY_FILTERS = [
+  { id: "hdr", label: "HDR", group: "Graphics" },
+  { id: "ray-tracing", label: "Ray Tracing", group: "Graphics" },
+  { id: "upscaling", label: "Upscaling", group: "Graphics" },
+  { id: "dlss", label: "DLSS", group: "Graphics" },
+  { id: "frame-generation", label: "Frame Gen", group: "Graphics" },
+  { id: "dlss-frame-generation", label: "DLSS FG", group: "Graphics" },
+  { id: "ultrawide", label: "Ultrawide", group: "Graphics" },
+  { id: "4k", label: "4K", group: "Graphics" },
+  { id: "120fps", label: "120+ FPS", group: "Graphics" },
+  { id: "renodx", label: "RenoDX", group: "Mods" },
+  { id: "luma", label: "Luma", group: "Mods" },
+  { id: "vortex", label: "Vortex", group: "Mods" },
+  { id: "fluffy", label: "Fluffy", group: "Mods" },
+];
+
+const CAPABILITY_IDS =
+  new Set(
+    CAPABILITY_FILTERS.map(
+      (filter) =>
+        filter.id
+    )
+  );
+
+
+function normalizeCapabilityList(
+  value
+) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      value.filter(
+        (item) =>
+          typeof item === "string"
+          && CAPABILITY_IDS.has(
+            item
+          )
+      )
+    )
+  );
+}
+
+
+function capabilityState(
+  capabilityId,
+  includedCapabilities,
+  excludedCapabilities
+) {
+  if (
+    includedCapabilities.includes(
+      capabilityId
+    )
+  ) {
+    return "include";
+  }
+
+  if (
+    excludedCapabilities.includes(
+      capabilityId
+    )
+  ) {
+    return "exclude";
+  }
+
+  return "off";
+}
+
+
+function CapabilityChip({
+  capability,
+  state,
+  onCycle,
+}) {
+  return (
+    <button
+      type="button"
+      onClick={
+        () =>
+          onCycle(
+            capability.id
+          )
+      }
+      className={`
+        inline-flex
+        min-h-7
+        items-center
+        justify-center
+        gap-1
+        rounded-lg
+        border
+        px-2
+        py-1
+        text-[10px]
+        font-semibold
+        transition
+        ${
+          state === "include"
+            ? "border-cyan-400/30 bg-cyan-400/[0.10] text-cyan-200"
+            : state === "exclude"
+              ? "border-red-400/25 bg-red-400/[0.08] text-red-200/85"
+              : "border-white/[0.07] bg-white/[0.02] text-white/35 hover:border-white/[0.12] hover:text-white/60"
+        }
+      `}
+      title={
+        state === "include"
+          ? `${capability.label}: required`
+          : state === "exclude"
+            ? `${capability.label}: excluded`
+            : `${capability.label}: not filtered`
+      }
+    >
+      <span
+        className={`
+          text-[9px]
+          ${
+            state === "include"
+              ? "text-cyan-300"
+              : state === "exclude"
+                ? "text-red-300"
+                : "text-white/20"
+          }
+        `}
+      >
+        {state === "include"
+          ? "+"
+          : state === "exclude"
+            ? "−"
+            : "·"}
+      </span>
+
+      {capability.label}
+    </button>
+  );
+}
+
+
 const FILTER_STORAGE_KEY =
   "game-manager-library-filters";
 
 
+const SAVED_VIEWS_STORAGE_KEY =
+  "game-manager-saved-views-v1";
+
+
+function loadSavedViews() {
+  try {
+    const parsed =
+      JSON.parse(
+        localStorage.getItem(
+          SAVED_VIEWS_STORAGE_KEY
+        )
+        ?? "[]"
+      );
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter(
+        (view) =>
+          view
+          && typeof view.id === "string"
+          && typeof view.name === "string"
+      )
+      .map(
+        (view) => ({
+          id:
+            view.id,
+
+          name:
+            view.name,
+
+          createdAt:
+            view.createdAt
+            ?? null,
+
+          updatedAt:
+            view.updatedAt
+            ?? null,
+
+          filters: {
+            favoritesOnly:
+              Boolean(
+                view.filters
+                  ?.favoritesOnly
+              ),
+
+            selectedTag:
+              typeof view.filters
+                ?.selectedTag === "string"
+                ? view.filters.selectedTag
+                : "",
+
+            includedCapabilities:
+              normalizeCapabilityList(
+                view.filters
+                  ?.includedCapabilities
+              ),
+
+            excludedCapabilities:
+              normalizeCapabilityList(
+                view.filters
+                  ?.excludedCapabilities
+              ),
+
+            capabilityMatchMode:
+              view.filters
+                ?.capabilityMatchMode === "any"
+                ? "any"
+                : "all",
+
+            sortMode:
+              [
+                "name",
+                "favorites",
+                "store",
+              ].includes(
+                view.filters
+                  ?.sortMode
+              )
+                ? view.filters.sortMode
+                : "name",
+          },
+        })
+      );
+  } catch {
+    return [];
+  }
+}
+
+
+function saveSavedViews(
+  views
+) {
+  try {
+    localStorage.setItem(
+      SAVED_VIEWS_STORAGE_KEY,
+      JSON.stringify(
+        views
+      )
+    );
+
+    window.dispatchEvent(
+      new CustomEvent(
+        "game-manager-saved-views-changed"
+      )
+    );
+  } catch (error) {
+    console.error(
+      "[Saved Views] Failed to save:",
+      error
+    );
+  }
+}
+
+
+function makeSavedViewId() {
+  if (
+    typeof crypto !== "undefined"
+    && typeof crypto.randomUUID
+      === "function"
+  ) {
+    return crypto.randomUUID();
+  }
+
+  return `view-${Date.now()}-${Math.random()
+    .toString(16)
+    .slice(2)}`;
+}
+
+
 function loadLibraryPreferences() {
+  const defaults = {
+    favoritesOnly:
+      false,
+
+    selectedTag:
+      "",
+
+    includedCapabilities:
+      [],
+
+    excludedCapabilities:
+      [],
+
+    capabilityMatchMode:
+      "all",
+
+    sortMode:
+      "name",
+  };
+
   try {
     const stored =
       localStorage.getItem(
@@ -50,25 +344,34 @@ function loadLibraryPreferences() {
       );
 
     if (!stored) {
-      return {
-        favoritesOnly:
-          false,
-
-        selectedTag:
-          "",
-
-        selectedInsight:
-          "",
-
-        sortMode:
-          "name",
-      };
+      return defaults;
     }
 
     const parsed =
       JSON.parse(
         stored
       );
+
+    /*
+     * v1.1 -> v1.2 migration:
+     * Preserve the old single capability filter.
+     */
+    let includedCapabilities =
+      normalizeCapabilityList(
+        parsed?.includedCapabilities
+      );
+
+    if (
+      includedCapabilities.length === 0
+      && typeof parsed?.selectedInsight === "string"
+      && CAPABILITY_IDS.has(
+        parsed.selectedInsight
+      )
+    ) {
+      includedCapabilities = [
+        parsed.selectedInsight,
+      ];
+    }
 
     return {
       favoritesOnly:
@@ -82,11 +385,23 @@ function loadLibraryPreferences() {
           ? parsed.selectedTag
           : "",
 
-      selectedInsight:
-        typeof parsed?.selectedInsight
-          === "string"
-          ? parsed.selectedInsight
-          : "",
+      includedCapabilities,
+
+      excludedCapabilities:
+        normalizeCapabilityList(
+          parsed?.excludedCapabilities
+        ).filter(
+          (capabilityId) =>
+            !includedCapabilities.includes(
+              capabilityId
+            )
+        ),
+
+      capabilityMatchMode:
+        parsed?.capabilityMatchMode
+          === "any"
+          ? "any"
+          : "all",
 
       sortMode:
         [
@@ -100,19 +415,7 @@ function loadLibraryPreferences() {
           : "name",
     };
   } catch {
-    return {
-      favoritesOnly:
-        false,
-
-      selectedTag:
-        "",
-
-      selectedInsight:
-        "",
-
-      sortMode:
-        "name",
-    };
+    return defaults;
   }
 }
 
@@ -155,9 +458,13 @@ function GameRow({
       className={`
         group
         relative
-        rounded-xl
         border
         transition
+        ${
+          compact
+            ? "rounded-lg"
+            : "rounded-xl"
+        }
         ${
           selected
             ? "border-cyan-500/30 bg-cyan-500/[0.08]"
@@ -176,128 +483,188 @@ function GameRow({
         className={`
           block
           w-full
-          px-3
-          pr-10
           text-left
           ${
             compact
-              ? "py-2"
-              : "py-3"
+              ? "min-h-[38px] px-2.5 py-1.5 pr-8"
+              : "px-3 py-3 pr-10"
           }
         `}
       >
-        <div
-          className="
-            flex
-            items-start
-            gap-2
-          "
-        >
+        {compact ? (
           <div
             className="
+              flex
               min-w-0
-              flex-1
+              items-center
+              gap-2
+            "
+          >
+            {metadata.favorite ? (
+              <Star
+                className="
+                  h-3
+                  w-3
+                  shrink-0
+                  fill-amber-300
+                  text-amber-300
+                "
+              />
+            ) : null}
+
+            <div
+              className="
+                min-w-0
+                flex-1
+                truncate
+                text-[12px]
+                font-semibold
+                leading-5
+                text-white/75
+              "
+              title={
+                game.name
+              }
+            >
+              {game.name}
+            </div>
+
+            <span
+              className="
+                shrink-0
+                rounded-md
+                border
+                border-white/[0.07]
+                bg-white/[0.02]
+                px-1.5
+                py-0.5
+                text-[8px]
+                font-semibold
+                uppercase
+                tracking-wide
+                text-white/28
+              "
+              title={
+                game.store
+              }
+            >
+              {game.store}
+            </span>
+          </div>
+        ) : (
+          <div
+            className="
+              flex
+              items-start
+              gap-2
             "
           >
             <div
               className="
-                flex
-                items-center
-                gap-2
+                min-w-0
+                flex-1
               "
             >
-              {metadata.favorite ? (
-                <Star
+              <div
+                className="
+                  flex
+                  items-center
+                  gap-2
+                "
+              >
+                {metadata.favorite ? (
+                  <Star
+                    className="
+                      h-3.5
+                      w-3.5
+                      shrink-0
+                      fill-amber-300
+                      text-amber-300
+                    "
+                  />
+                ) : null}
+
+                <div
                   className="
-                    h-3.5
-                    w-3.5
-                    shrink-0
-                    fill-amber-300
-                    text-amber-300
+                    truncate
+                    text-sm
+                    font-semibold
+                    text-white/80
                   "
-                />
-              ) : null}
+                  title={
+                    game.name
+                  }
+                >
+                  {game.name}
+                </div>
+              </div>
 
               <div
                 className="
-                  truncate
-                  text-sm
-                  font-semibold
-                  text-white/80
+                  mt-1.5
+                  flex
+                  flex-wrap
+                  items-center
+                  gap-1.5
                 "
-                title={
-                  game.name
-                }
               >
-                {game.name}
+                <StoreBadge
+                  store={
+                    game.store
+                  }
+                />
+
+                {metadata.tags
+                  .slice(
+                    0,
+                    2
+                  )
+                  .map(
+                    (tag) => (
+                      <span
+                        key={
+                          tag.toLocaleLowerCase()
+                        }
+                        className="
+                          max-w-[90px]
+                          truncate
+                          rounded-full
+                          border
+                          border-white/[0.08]
+                          bg-white/[0.025]
+                          px-1.5
+                          py-0.5
+                          text-[9px]
+                          font-medium
+                          text-white/35
+                        "
+                        title={
+                          tag
+                        }
+                      >
+                        {tag}
+                      </span>
+                    )
+                  )}
+
+                {metadata.tags.length
+                  > 2 ? (
+                  <span
+                    className="
+                      text-[9px]
+                      text-white/25
+                    "
+                  >
+                    +{
+                      metadata.tags.length
+                      - 2
+                    }
+                  </span>
+                ) : null}
               </div>
             </div>
-
-            <div
-              className="
-                mt-1.5
-                flex
-                flex-wrap
-                items-center
-                gap-1.5
-              "
-            >
-              <StoreBadge
-                store={
-                  game.store
-                }
-              />
-
-              {metadata.tags
-                .slice(
-                  0,
-                  2
-                )
-                .map(
-                  (tag) => (
-                    <span
-                      key={
-                        tag.toLocaleLowerCase()
-                      }
-                      className="
-                        max-w-[90px]
-                        truncate
-                        rounded-full
-                        border
-                        border-white/[0.08]
-                        bg-white/[0.025]
-                        px-1.5
-                        py-0.5
-                        text-[9px]
-                        font-medium
-                        text-white/35
-                      "
-                      title={
-                        tag
-                      }
-                    >
-                      {tag}
-                    </span>
-                  )
-                )}
-
-              {metadata.tags.length
-                > 2 ? (
-                <span
-                  className="
-                    text-[9px]
-                    text-white/25
-                  "
-                >
-                  +{
-                    metadata.tags.length
-                    - 2
-                  }
-                </span>
-              ) : null}
-            </div>
           </div>
-        </div>
+        )}
       </button>
 
       <button
@@ -317,23 +684,23 @@ function GameRow({
             }
           }
         }
-        className="
+        className={`
           absolute
-          right-2
-          top-2.5
           flex
-          h-7
-          w-7
           items-center
           justify-center
-          rounded-lg
           text-white/20
           opacity-0
           transition
           hover:bg-white/[0.07]
           hover:text-white/65
           group-hover:opacity-100
-        "
+          ${
+            compact
+              ? "right-1 top-1 h-7 w-7 rounded-md"
+              : "right-2 top-2.5 h-7 w-7 rounded-lg"
+          }
+        `}
         title={
           hiddenView
             ? "Restore game"
@@ -342,11 +709,19 @@ function GameRow({
       >
         {hiddenView ? (
           <RotateCcw
-            className="h-3.5 w-3.5"
+            className={
+              compact
+                ? "h-3 w-3"
+                : "h-3.5 w-3.5"
+            }
           />
         ) : (
           <EyeOff
-            className="h-3.5 w-3.5"
+            className={
+              compact
+                ? "h-3 w-3"
+                : "h-3.5 w-3.5"
+            }
           />
         )}
       </button>
@@ -402,12 +777,30 @@ export default function Sidebar({
     );
 
   const [
-    selectedInsight,
-    setSelectedInsight,
+    includedCapabilities,
+    setIncludedCapabilities,
   ] =
     useState(
-      initial.selectedInsight
-      ?? ""
+      initial.includedCapabilities
+      ?? []
+    );
+
+  const [
+    excludedCapabilities,
+    setExcludedCapabilities,
+  ] =
+    useState(
+      initial.excludedCapabilities
+      ?? []
+    );
+
+  const [
+    capabilityMatchMode,
+    setCapabilityMatchMode,
+  ] =
+    useState(
+      initial.capabilityMatchMode
+      ?? "all"
     );
 
   const [
@@ -429,6 +822,34 @@ export default function Sidebar({
     setFiltersExpanded,
   ] =
     useState(false);
+
+
+  const [
+    savedViews,
+    setSavedViews,
+  ] =
+    useState(
+      () =>
+        loadSavedViews()
+    );
+
+  const [
+    savedViewName,
+    setSavedViewName,
+  ] =
+    useState("");
+
+  const [
+    activeSavedViewId,
+    setActiveSavedViewId,
+  ] =
+    useState(null);
+
+  const [
+    savedViewMessage,
+    setSavedViewMessage,
+  ] =
+    useState(null);
 
   const [
     compactGameRows,
@@ -498,6 +919,55 @@ export default function Sidebar({
 
   useEffect(
     () => {
+      const refreshSavedViews =
+        () => {
+          const next =
+            loadSavedViews();
+
+          setSavedViews(
+            next
+          );
+
+          setActiveSavedViewId(
+            (current) =>
+              current
+              && next.some(
+                (view) =>
+                  view.id === current
+              )
+                ? current
+                : null
+          );
+        };
+
+      window.addEventListener(
+        "game-manager-saved-views-changed",
+        refreshSavedViews
+      );
+
+      window.addEventListener(
+        "storage",
+        refreshSavedViews
+      );
+
+      return () => {
+        window.removeEventListener(
+          "game-manager-saved-views-changed",
+          refreshSavedViews
+        );
+
+        window.removeEventListener(
+          "storage",
+          refreshSavedViews
+        );
+      };
+    },
+    []
+  );
+
+
+  useEffect(
+    () => {
       const refresh =
         () =>
           setMetadataRevision(
@@ -547,7 +1017,9 @@ export default function Sidebar({
         {
           favoritesOnly,
           selectedTag,
-          selectedInsight,
+          includedCapabilities,
+          excludedCapabilities,
+          capabilityMatchMode,
           sortMode,
         }
       );
@@ -555,7 +1027,9 @@ export default function Sidebar({
     [
       favoritesOnly,
       selectedTag,
-      selectedInsight,
+      includedCapabilities,
+      excludedCapabilities,
+      capabilityMatchMode,
       sortMode,
     ]
   );
@@ -641,14 +1115,65 @@ export default function Sidebar({
                   return false;
                 }
 
+                const hasCapabilityFilters =
+                  includedCapabilities.length > 0
+                  || excludedCapabilities.length > 0;
+
                 if (
-                  selectedInsight
-                  && !insightMatchesFilter(
-                    getGameInsight(game),
-                    selectedInsight
-                  )
+                  hasCapabilityFilters
                 ) {
-                  return false;
+                  const insight =
+                    getGameInsight(
+                      game
+                    );
+
+                  /*
+                   * Capability filters intentionally operate on analyzed
+                   * games only. This prevents an unanalyzed game from
+                   * incorrectly matching a negative filter such as "No HDR".
+                   */
+                  if (!insight) {
+                    return false;
+                  }
+
+                  if (
+                    includedCapabilities.length > 0
+                  ) {
+                    const includeMatches =
+                      includedCapabilities.map(
+                        (capabilityId) =>
+                          insightMatchesFilter(
+                            insight,
+                            capabilityId
+                          )
+                      );
+
+                    const includePassed =
+                      capabilityMatchMode === "any"
+                        ? includeMatches.some(
+                            Boolean
+                          )
+                        : includeMatches.every(
+                            Boolean
+                          );
+
+                    if (!includePassed) {
+                      return false;
+                    }
+                  }
+
+                  const excludedMatch =
+                    excludedCapabilities.some(
+                      (capabilityId) =>
+                        insightMatchesFilter(
+                          insight,
+                          capabilityId
+                        )
+                    );
+
+                  if (excludedMatch) {
+                    return false;
+                  }
                 }
 
                 if (!normalizedQuery) {
@@ -762,26 +1287,374 @@ export default function Sidebar({
         query,
         favoritesOnly,
         selectedTag,
-        selectedInsight,
+        includedCapabilities,
+        excludedCapabilities,
+        capabilityMatchMode,
         sortMode,
         metadataRevision,
       ]
     );
 
 
+  const hasCapabilityFilters =
+    includedCapabilities.length > 0
+    || excludedCapabilities.length > 0;
+
   const hasActiveFilters =
     favoritesOnly
     || Boolean(
       selectedTag
     )
-    || Boolean(
-      selectedInsight
-    )
+    || hasCapabilityFilters
     || sortMode
       !== "name";
 
 
+  function cycleCapability(
+    capabilityId
+  ) {
+    const currentState =
+      capabilityState(
+        capabilityId,
+        includedCapabilities,
+        excludedCapabilities
+      );
+
+    if (
+      currentState === "off"
+    ) {
+      setIncludedCapabilities(
+        (current) => [
+          ...current,
+          capabilityId,
+        ]
+      );
+
+      return;
+    }
+
+    if (
+      currentState === "include"
+    ) {
+      setIncludedCapabilities(
+        (current) =>
+          current.filter(
+            (item) =>
+              item !== capabilityId
+          )
+      );
+
+      setExcludedCapabilities(
+        (current) => [
+          ...current.filter(
+            (item) =>
+              item !== capabilityId
+          ),
+          capabilityId,
+        ]
+      );
+
+      return;
+    }
+
+    setExcludedCapabilities(
+      (current) =>
+        current.filter(
+          (item) =>
+            item !== capabilityId
+        )
+    );
+  }
+
+
+  function currentFilterSnapshot() {
+    return {
+      favoritesOnly,
+
+      selectedTag,
+
+      includedCapabilities:
+        [
+          ...includedCapabilities,
+        ],
+
+      excludedCapabilities:
+        [
+          ...excludedCapabilities,
+        ],
+
+      capabilityMatchMode,
+
+      sortMode,
+    };
+  }
+
+
+  function applySavedView(
+    view
+  ) {
+    const filters =
+      view?.filters
+      ?? {};
+
+    setFavoritesOnly(
+      Boolean(
+        filters.favoritesOnly
+      )
+    );
+
+    setSelectedTag(
+      typeof filters.selectedTag
+        === "string"
+        ? filters.selectedTag
+        : ""
+    );
+
+    setIncludedCapabilities(
+      normalizeCapabilityList(
+        filters.includedCapabilities
+      )
+    );
+
+    setExcludedCapabilities(
+      normalizeCapabilityList(
+        filters.excludedCapabilities
+      )
+    );
+
+    setCapabilityMatchMode(
+      filters.capabilityMatchMode
+        === "any"
+        ? "any"
+        : "all"
+    );
+
+    setSortMode(
+      [
+        "name",
+        "favorites",
+        "store",
+      ].includes(
+        filters.sortMode
+      )
+        ? filters.sortMode
+        : "name"
+    );
+
+    setActiveSavedViewId(
+      view.id
+    );
+
+    setSavedViewMessage(
+      `Applied "${view.name}".`
+    );
+  }
+
+
+  function createSavedView() {
+    const name =
+      savedViewName
+        .trim();
+
+    if (!name) {
+      setSavedViewMessage(
+        "Enter a name before saving this view."
+      );
+
+      return;
+    }
+
+    const existing =
+      savedViews.find(
+        (view) =>
+          view.name
+            .toLocaleLowerCase()
+          === name
+            .toLocaleLowerCase()
+      );
+
+    if (existing) {
+      const updated =
+        savedViews.map(
+          (view) =>
+            view.id === existing.id
+              ? {
+                  ...view,
+
+                  name,
+
+                  filters:
+                    currentFilterSnapshot(),
+
+                  updatedAt:
+                    new Date()
+                      .toISOString(),
+                }
+              : view
+        );
+
+      setSavedViews(
+        updated
+      );
+
+      saveSavedViews(
+        updated
+      );
+
+      setActiveSavedViewId(
+        existing.id
+      );
+
+      setSavedViewMessage(
+        `Updated "${name}".`
+      );
+
+      setSavedViewName(
+        ""
+      );
+
+      return;
+    }
+
+    const now =
+      new Date()
+        .toISOString();
+
+    const nextView = {
+      id:
+        makeSavedViewId(),
+
+      name,
+
+      createdAt:
+        now,
+
+      updatedAt:
+        now,
+
+      filters:
+        currentFilterSnapshot(),
+    };
+
+    const updated = [
+      ...savedViews,
+      nextView,
+    ];
+
+    setSavedViews(
+      updated
+    );
+
+    saveSavedViews(
+      updated
+    );
+
+    setActiveSavedViewId(
+      nextView.id
+    );
+
+    setSavedViewMessage(
+      `Saved "${name}".`
+    );
+
+    setSavedViewName(
+      ""
+    );
+  }
+
+
+  function updateActiveSavedView() {
+    if (!activeSavedViewId) {
+      return;
+    }
+
+    const activeView =
+      savedViews.find(
+        (view) =>
+          view.id ===
+          activeSavedViewId
+      );
+
+    if (!activeView) {
+      return;
+    }
+
+    const updated =
+      savedViews.map(
+        (view) =>
+          view.id === activeSavedViewId
+            ? {
+                ...view,
+
+                filters:
+                  currentFilterSnapshot(),
+
+                updatedAt:
+                  new Date()
+                    .toISOString(),
+              }
+            : view
+      );
+
+    setSavedViews(
+      updated
+    );
+
+    saveSavedViews(
+      updated
+    );
+
+    setSavedViewMessage(
+      `Updated "${activeView.name}".`
+    );
+  }
+
+
+  function deleteSavedView(
+    viewId
+  ) {
+    const view =
+      savedViews.find(
+        (item) =>
+          item.id === viewId
+      );
+
+    const updated =
+      savedViews.filter(
+        (item) =>
+          item.id !== viewId
+      );
+
+    setSavedViews(
+      updated
+    );
+
+    saveSavedViews(
+      updated
+    );
+
+    if (
+      activeSavedViewId ===
+      viewId
+    ) {
+      setActiveSavedViewId(
+        null
+      );
+    }
+
+    setSavedViewMessage(
+      view
+        ? `Deleted "${view.name}".`
+        : "Saved view deleted."
+    );
+  }
+
+
   function resetFilters() {
+    setActiveSavedViewId(
+      null
+    );
+
     setFavoritesOnly(
       false
     );
@@ -790,8 +1663,16 @@ export default function Sidebar({
       ""
     );
 
-    setSelectedInsight(
-      ""
+    setIncludedCapabilities(
+      []
+    );
+
+    setExcludedCapabilities(
+      []
+    );
+
+    setCapabilityMatchMode(
+      "all"
     );
 
     setSortMode(
@@ -815,6 +1696,10 @@ export default function Sidebar({
     >
       <div
         className="
+          min-h-0
+          max-h-[68vh]
+          shrink-0
+          overflow-y-auto
           border-b
           border-white/[0.07]
           p-4
@@ -837,7 +1722,7 @@ export default function Sidebar({
                 text-white
               "
             >
-              Game Manager
+              GameAtlas
             </div>
 
             <div
@@ -1000,7 +1885,7 @@ export default function Sidebar({
                 : "border-white/[0.07] bg-white/[0.02] text-white/45 hover:border-white/[0.11] hover:bg-white/[0.045] hover:text-white/75"
             }
           `}
-          title="Open Game Manager settings"
+          title="Open GameAtlas settings"
         >
           <div
             className={`
@@ -1533,18 +2418,18 @@ export default function Sidebar({
               </label>
             </div>
 
-            <label
+            <div
               className="
-                mt-2
-                block
+                mt-3
+                border-t
+                border-white/[0.06]
+                pt-2.5
               "
             >
               <div
                 className="
-                  mb-1
                   flex
                   items-center
-                  justify-between
                   gap-2
                   text-[9px]
                   font-semibold
@@ -1553,119 +2438,470 @@ export default function Sidebar({
                   text-white/25
                 "
               >
-                <span>
-                  Capability
-                </span>
-
-                <span
+                <Bookmark
                   className="
-                    normal-case
-                    font-normal
-                    tracking-normal
-                    text-white/18
+                    h-3
+                    w-3
                   "
-                >
-                  {analyzedCount} analyzed
-                </span>
+                />
+
+                Saved Views
               </div>
 
-              <select
-                value={
-                  selectedInsight
-                }
-                onChange={
-                  (event) =>
-                    setSelectedInsight(
-                      event.target.value
-                    )
-                }
+              <div
                 className="
-                  w-full
-                  rounded-lg
-                  border
-                  border-white/[0.08]
-                  bg-[#111823]
-                  px-2
-                  py-1.5
-                  text-[11px]
-                  text-white/60
-                  outline-none
+                  mt-2
+                  flex
+                  gap-2
                 "
               >
-                <option value="">
-                  All capabilities
-                </option>
+                <input
+                  type="text"
+                  value={
+                    savedViewName
+                  }
+                  onChange={
+                    (event) =>
+                      setSavedViewName(
+                        event.target.value
+                      )
+                  }
+                  onKeyDown={
+                    (event) => {
+                      if (
+                        event.key ===
+                        "Enter"
+                      ) {
+                        createSavedView();
+                      }
+                    }
+                  }
+                  placeholder="Name this view…"
+                  className="
+                    min-w-0
+                    flex-1
+                    rounded-lg
+                    border
+                    border-white/[0.08]
+                    bg-[#111823]
+                    px-2.5
+                    py-1.5
+                    text-[11px]
+                    text-white/65
+                    outline-none
+                    placeholder:text-white/20
+                    focus:border-cyan-500/25
+                  "
+                />
 
-                <optgroup label="Graphics">
-                  <option value="hdr">
-                    HDR
-                  </option>
+                <button
+                  type="button"
+                  onClick={
+                    createSavedView
+                  }
+                  className="
+                    inline-flex
+                    shrink-0
+                    items-center
+                    gap-1
+                    rounded-lg
+                    border
+                    border-cyan-500/20
+                    bg-cyan-500/[0.06]
+                    px-2.5
+                    py-1.5
+                    text-[10px]
+                    font-semibold
+                    text-cyan-200/70
+                    transition
+                    hover:bg-cyan-500/[0.10]
+                    hover:text-cyan-100
+                  "
+                >
+                  <Save
+                    className="
+                      h-3
+                      w-3
+                    "
+                  />
 
-                  <option value="ray-tracing">
-                    Ray Tracing
-                  </option>
+                  Save
+                </button>
+              </div>
 
-                  <option value="upscaling">
-                    Upscaling
-                  </option>
-
-                  <option value="dlss">
-                    DLSS
-                  </option>
-
-                  <option value="frame-generation">
-                    Frame Generation
-                  </option>
-
-                  <option value="dlss-frame-generation">
-                    DLSS Frame Generation
-                  </option>
-
-                  <option value="ultrawide">
-                    Ultrawide
-                  </option>
-
-                  <option value="4k">
-                    4K
-                  </option>
-
-                  <option value="120fps">
-                    120+ FPS
-                  </option>
-                </optgroup>
-
-                <optgroup label="Mods & Enhancements">
-                  <option value="renodx">
-                    RenoDX
-                  </option>
-
-                  <option value="luma">
-                    Luma
-                  </option>
-
-                  <option value="vortex">
-                    Vortex Supported
-                  </option>
-
-                  <option value="fluffy">
-                    Fluffy Supported
-                  </option>
-                </optgroup>
-              </select>
-
-              {selectedInsight ? (
+              {savedViews.length > 0 ? (
                 <div
                   className="
-                    mt-1
+                    mt-2
+                    space-y-1.5
+                  "
+                >
+                  {savedViews.map(
+                    (view) => (
+                      <div
+                        key={
+                          view.id
+                        }
+                        className={`
+                          flex
+                          items-center
+                          gap-1.5
+                          rounded-lg
+                          border
+                          px-2
+                          py-1.5
+                          ${
+                            activeSavedViewId ===
+                            view.id
+                              ? "border-cyan-500/20 bg-cyan-500/[0.05]"
+                              : "border-white/[0.06] bg-white/[0.015]"
+                          }
+                        `}
+                      >
+                        <button
+                          type="button"
+                          onClick={
+                            () =>
+                              applySavedView(
+                                view
+                              )
+                          }
+                          className="
+                            min-w-0
+                            flex-1
+                            truncate
+                            text-left
+                            text-[10px]
+                            font-semibold
+                            text-white/45
+                            transition
+                            hover:text-white/70
+                          "
+                          title={
+                            `Apply ${view.name}`
+                          }
+                        >
+                          {view.name}
+                        </button>
+
+                        {activeSavedViewId ===
+                          view.id ? (
+                          <button
+                            type="button"
+                            onClick={
+                              updateActiveSavedView
+                            }
+                            className="
+                              inline-flex
+                              h-6
+                              w-6
+                              shrink-0
+                              items-center
+                              justify-center
+                              rounded-md
+                              text-cyan-200/45
+                              transition
+                              hover:bg-cyan-500/[0.08]
+                              hover:text-cyan-100/75
+                            "
+                            title="Update this saved view with the current filters"
+                          >
+                            <Save
+                              className="
+                                h-3
+                                w-3
+                              "
+                            />
+                          </button>
+                        ) : null}
+
+                        <button
+                          type="button"
+                          onClick={
+                            () =>
+                              deleteSavedView(
+                                view.id
+                              )
+                          }
+                          className="
+                            inline-flex
+                            h-6
+                            w-6
+                            shrink-0
+                            items-center
+                            justify-center
+                            rounded-md
+                            text-white/20
+                            transition
+                            hover:bg-red-500/[0.08]
+                            hover:text-red-200/65
+                          "
+                          title={
+                            `Delete ${view.name}`
+                          }
+                        >
+                          <Trash2
+                            className="
+                              h-3
+                              w-3
+                            "
+                          />
+                        </button>
+                      </div>
+                    )
+                  )}
+                </div>
+              ) : (
+                <div
+                  className="
+                    mt-2
                     text-[9px]
                     leading-relaxed
                     text-white/18
                   "
                 >
-                  Capability filters match analyzed games only.
+                  Save the current Favorites, Tag, Sort, and capability-filter combination for one-click reuse.
+                </div>
+              )}
+
+              {savedViewMessage ? (
+                <div
+                  className="
+                    mt-2
+                    text-[9px]
+                    leading-relaxed
+                    text-cyan-200/45
+                  "
+                >
+                  {savedViewMessage}
                 </div>
               ) : null}
-            </label>
+            </div>
+
+
+            <div
+              className="
+                mt-3
+                border-t
+                border-white/[0.06]
+                pt-2.5
+              "
+            >
+              <div
+                className="
+                  flex
+                  items-center
+                  justify-between
+                  gap-2
+                "
+              >
+                <div>
+                  <div
+                    className="
+                      text-[9px]
+                      font-semibold
+                      uppercase
+                      tracking-wide
+                      text-white/25
+                    "
+                  >
+                    Capabilities
+                  </div>
+
+                  <div
+                    className="
+                      mt-0.5
+                      text-[9px]
+                      text-white/18
+                    "
+                  >
+                    {analyzedCount} analyzed
+                  </div>
+                </div>
+
+                <div
+                  className="
+                    inline-flex
+                    rounded-lg
+                    border
+                    border-white/[0.07]
+                    bg-black/10
+                    p-0.5
+                  "
+                  title="How required capability filters are combined"
+                >
+                  <button
+                    type="button"
+                    onClick={
+                      () =>
+                        setCapabilityMatchMode(
+                          "all"
+                        )
+                    }
+                    className={`
+                      rounded-md
+                      px-2
+                      py-1
+                      text-[9px]
+                      font-semibold
+                      transition
+                      ${
+                        capabilityMatchMode === "all"
+                          ? "bg-cyan-500/10 text-cyan-200"
+                          : "text-white/25 hover:text-white/50"
+                      }
+                    `}
+                  >
+                    ALL
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={
+                      () =>
+                        setCapabilityMatchMode(
+                          "any"
+                        )
+                    }
+                    className={`
+                      rounded-md
+                      px-2
+                      py-1
+                      text-[9px]
+                      font-semibold
+                      transition
+                      ${
+                        capabilityMatchMode === "any"
+                          ? "bg-cyan-500/10 text-cyan-200"
+                          : "text-white/25 hover:text-white/50"
+                      }
+                    `}
+                  >
+                    ANY
+                  </button>
+                </div>
+              </div>
+
+              <div
+                className="
+                  mt-2
+                  text-[9px]
+                  leading-relaxed
+                  text-white/22
+                "
+              >
+                Click once to require (+), twice to exclude (−), and a third time to clear.
+              </div>
+
+              {[
+                "Graphics",
+                "Mods",
+              ].map(
+                (group) => (
+                  <div
+                    key={
+                      group
+                    }
+                    className="
+                      mt-2.5
+                    "
+                  >
+                    <div
+                      className="
+                        mb-1.5
+                        text-[9px]
+                        font-semibold
+                        uppercase
+                        tracking-wide
+                        text-white/20
+                      "
+                    >
+                      {group === "Mods"
+                        ? "Mods & Enhancements"
+                        : group}
+                    </div>
+
+                    <div
+                      className="
+                        flex
+                        flex-wrap
+                        gap-1.5
+                      "
+                    >
+                      {CAPABILITY_FILTERS
+                        .filter(
+                          (capability) =>
+                            capability.group ===
+                            group
+                        )
+                        .map(
+                          (capability) => (
+                            <CapabilityChip
+                              key={
+                                capability.id
+                              }
+                              capability={
+                                capability
+                              }
+                              state={
+                                capabilityState(
+                                  capability.id,
+                                  includedCapabilities,
+                                  excludedCapabilities
+                                )
+                              }
+                              onCycle={
+                                cycleCapability
+                              }
+                            />
+                          )
+                        )}
+                    </div>
+                  </div>
+                )
+              )}
+
+              {hasCapabilityFilters ? (
+                <div
+                  className="
+                    mt-2.5
+                    rounded-lg
+                    border
+                    border-white/[0.06]
+                    bg-black/10
+                    px-2.5
+                    py-2
+                    text-[9px]
+                    leading-relaxed
+                    text-white/30
+                  "
+                >
+                  <span
+                    className="
+                      font-semibold
+                      text-cyan-200/70
+                    "
+                  >
+                    {includedCapabilities.length} required
+                  </span>
+
+                  {" · "}
+
+                  <span
+                    className="
+                      font-semibold
+                      text-red-200/65
+                    "
+                  >
+                    {excludedCapabilities.length} excluded
+                  </span>
+
+                  {" · "}
+
+                  Analyzed games only.
+                </div>
+              ) : null}
+            </div>
           </div>
             ) : null}
           </>
@@ -1787,7 +3023,7 @@ export default function Sidebar({
                   text-white/40
                 "
               >
-                No games match
+                No games found
               </div>
 
               <div
@@ -1798,15 +3034,17 @@ export default function Sidebar({
                   text-white/25
                 "
               >
-                Try clearing the search
-                or library filters.
+                Try changing the search
+                or clearing Library Filters.
               </div>
             </div>
           ) : (
             <div
-              className="
-                space-y-1
-              "
+              className={
+                compactGameRows
+                  ? "space-y-0.5"
+                  : "space-y-1"
+              }
             >
               {filteredGames.map(
                 (game) => (

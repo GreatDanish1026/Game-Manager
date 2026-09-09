@@ -507,7 +507,7 @@ export default function VortexCard({
                   text-white/35
                 "
               >
-                Game Manager did not find
+                GameAtlas did not find
                 this title in the Vortex game
                 extension manifest.
               </div>

@@ -21,7 +21,7 @@ $LatestPath =
     ) "latest.json"
 
 $ExpectedAssetName =
-    "GameManager_${Version}_x64-setup.exe"
+    "GameAtlas_${Version}_x64-setup.exe"
 
 $ExpectedInstaller =
     Join-Path(
@@ -64,7 +64,7 @@ function Is-SemVer(
 }
 
 Write-Host ""
-Write-Host "Game Manager Local Updater Metadata Verification" -ForegroundColor Cyan
+Write-Host "GameAtlas Local Updater Metadata Verification" -ForegroundColor Cyan
 Write-Host "Version: $Version"
 Write-Host ""
 

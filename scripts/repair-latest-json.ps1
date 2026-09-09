@@ -39,7 +39,7 @@ $Tag =
     "v$Version"
 
 $AssetName =
-    "GameManager_${Version}_x64-setup.exe"
+    "GameAtlas_${Version}_x64-setup.exe"
 
 $SigName =
     "$AssetName.sig"

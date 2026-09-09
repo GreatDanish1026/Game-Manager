@@ -29,7 +29,7 @@ export default class AppErrorBoundary
     info
   ) {
     console.error(
-      "[Game Manager] UI error:",
+      "[GameAtlas] UI error:",
       error,
       info
     );
@@ -128,7 +128,7 @@ export default class AppErrorBoundary
                   text-white/28
                 "
               >
-                Game Manager kept the rest of the interface running instead of showing a blank screen.
+                GameAtlas kept the rest of the interface running instead of showing a blank screen.
               </div>
 
               <button

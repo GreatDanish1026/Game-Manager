@@ -587,7 +587,7 @@ export default function HardwareCapabilityPanel({
               text-white/28
             "
           >
-            Conservative checks based on detected GPU families. Game Manager does not estimate FPS.
+            Conservative checks based on detected GPU families. GameAtlas does not estimate FPS.
           </div>
         </div>
 

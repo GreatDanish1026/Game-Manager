@@ -138,7 +138,7 @@ export default function LibraryAnalysisPanel({
         right-5
         z-40
         w-[390px]
-        max-w-[calc(100vw-2.5rem)]
+        max-w-[calc(100vw-1rem)]
         rounded-xl
         border
         border-white/10
@@ -365,6 +365,44 @@ export default function LibraryAnalysisPanel({
               {analysis.skipped} recently analyzed
             </span>
           </div>
+
+          <div
+            className="
+              mt-1.5
+              flex
+              items-center
+              justify-between
+              gap-3
+              text-[10px]
+              text-white/35
+            "
+          >
+            <span>
+              Concurrency {analysis.effectiveConcurrency ?? 0}
+            </span>
+
+            <span>
+              {analysis.retryCount ?? 0} automatic retries
+            </span>
+          </div>
+
+          {analysis.notice ? (
+            <div
+              className="
+                mt-2
+                rounded-lg
+                border
+                border-amber-500/15
+                bg-amber-500/[0.05]
+                px-3
+                py-2
+                text-[11px]
+                text-amber-200/70
+              "
+            >
+              {analysis.notice}
+            </div>
+          ) : null}
         </>
       ) : null}
 

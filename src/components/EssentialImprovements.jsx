@@ -43,7 +43,7 @@ function cleanPcgwHtml(
   /*
    * After sanitization we can remove PCGW-specific
    * presentation elements that don't make sense
-   * inside Game Manager.
+   * inside GameAtlas.
    */
   const parser =
     new DOMParser();
@@ -86,7 +86,7 @@ function cleanPcgwHtml(
 
   /*
    * MediaWiki usually includes the section's H2.
-   * Game Manager already supplies its own
+   * GameAtlas already supplies its own
    * "Essential Improvements" heading, so remove
    * the duplicate.
    */

@@ -1,6 +1,6 @@
-# Game Manager
+# GameAtlas
 
-Game Manager is a Windows desktop application for managing and inspecting installed PC games across multiple launchers.
+GameAtlas is a Windows desktop application for managing and inspecting installed PC games across multiple launchers.
 
 It combines a unified game library with PCGamingWiki integration, local installation inspection, graphics technology detection, mod compatibility information, save backup and restore, hardware awareness, and signed automatic updates.
 
@@ -8,7 +8,7 @@ It combines a unified game library with PCGamingWiki integration, local installa
 
 ### Multi-Store Library
 
-Game Manager detects installed games from:
+GameAtlas detects installed games from:
 
 - Steam
 - Epic Games
@@ -43,11 +43,11 @@ The Library Overview dashboard summarizes your installed game library, including
 - Vortex support
 - Fluffy Mod Manager support
 
-Capability statistics are based on games that Game Manager has already analyzed, avoiding unnecessary bulk requests to external services.
+Capability statistics are based on games that GameAtlas has already analyzed, avoiding unnecessary bulk requests to external services.
 
 ### PCGamingWiki Integration
 
-Game Manager retrieves PCGamingWiki information for selected games, including:
+GameAtlas retrieves PCGamingWiki information for selected games, including:
 
 - developer
 - publisher
@@ -71,7 +71,7 @@ External links open through the native Tauri opener.
 
 ### Local Installation Inspector
 
-Game Manager can inspect the actual files in a game's installation directory.
+GameAtlas can inspect the actual files in a game's installation directory.
 
 The inspector can detect:
 
@@ -90,7 +90,7 @@ Scans are cached during the current session, with a manual Rescan option availab
 
 ### Installation Health
 
-Each game includes an Installation Health summary based on the information Game Manager has been able to detect.
+Each game includes an Installation Health summary based on the information GameAtlas has been able to detect.
 
 Checks can include:
 
@@ -115,7 +115,7 @@ The score represents setup completeness, not whether the game itself is broken o
 
 ### Hardware Awareness
 
-Game Manager can detect basic Windows system information such as:
+GameAtlas can detect basic Windows system information such as:
 
 - CPU
 - installed memory
@@ -130,24 +130,24 @@ It also provides conservative hardware capability checks for features such as:
 - NVIDIA DLSS Frame Generation
 - Intel XeSS
 
-Game Manager does not attempt to predict FPS or benchmark performance.
+GameAtlas does not attempt to predict FPS or benchmark performance.
 
 ### RenoDX and Luma Framework
 
-Game Manager checks selected games for HDR enhancement support through:
+GameAtlas checks selected games for HDR enhancement support through:
 
 - RenoDX
 - Luma Framework
 
-Where available, Game Manager can display compatibility status, source information, and relevant links.
+Where available, GameAtlas can display compatibility status, source information, and relevant links.
 
 ### ReShade HDR Installer
 
-Game Manager can detect and launch ReShade HDR Installer when installed.
+GameAtlas can detect and launch ReShade HDR Installer when installed.
 
 ### Vortex Support
 
-Game Manager checks the official Vortex extension manifest to determine whether a selected game is supported.
+GameAtlas checks the official Vortex extension manifest to determine whether a selected game is supported.
 
 Support can be reported as:
 
@@ -157,11 +157,11 @@ Support can be reported as:
 
 ### Fluffy Mod Manager
 
-Game Manager includes conservative compatibility detection for Fluffy Mod Manager and can also identify local installation evidence.
+GameAtlas includes conservative compatibility detection for Fluffy Mod Manager and can also identify local installation evidence.
 
 ### Save Backup and Restore
 
-Game Manager can create and restore ZIP backups of supported save locations.
+GameAtlas can create and restore ZIP backups of supported save locations.
 
 Features include:
 
@@ -173,7 +173,7 @@ Features include:
 
 ### Launch Games
 
-Supported games can be launched directly from Game Manager through their associated launcher.
+Supported games can be launched directly from GameAtlas through their associated launcher.
 
 Supported launchers include:
 
@@ -208,7 +208,7 @@ The game library can be filtered using technical and mod-related capabilities, i
 
 ## Automatic Updates
 
-Game Manager includes signed Tauri updater support.
+GameAtlas includes signed Tauri updater support.
 
 The application can:
 
@@ -227,7 +227,7 @@ Manual update checks are available from the Library Overview.
 
 ## Technology Stack
 
-Game Manager is built with:
+GameAtlas is built with:
 
 - Rust
 - Tauri 2
@@ -237,7 +237,7 @@ Game Manager is built with:
 
 ## Supported Platform
 
-Game Manager currently targets Windows.
+GameAtlas currently targets Windows.
 
 Linux/Proton support may be explored in the future, but Windows is the primary supported platform for the current release.
 
@@ -247,11 +247,11 @@ Download the latest Windows installer from the GitHub Releases page:
 
 https://github.com/GreatDanish1026/Game-Manager/releases/latest
 
-Run the installer and launch Game Manager from Windows.
+Run the installer and launch GameAtlas from Windows.
 
 ## Updating
 
-Game Manager can check for updates from inside the application.
+GameAtlas can check for updates from inside the application.
 
 You can also manually download the latest installer from:
 
@@ -359,13 +359,13 @@ The `latest.json` file is used by the in-app updater.
 
 ## Current Release
 
-**Game Manager v1.0.0**
+**GameAtlas v1.0.0**
 
 v1.0.0 is the first production-ready release and includes the full game library, PCGamingWiki, installation inspection, hardware awareness, mod compatibility, backup, dashboard, updater, and production-hardening feature set.
 
 ## Data and External Services
 
-Game Manager may retrieve information from external sources including:
+GameAtlas may retrieve information from external sources including:
 
 - PCGamingWiki
 - RenoDX
@@ -377,7 +377,7 @@ External-service failures are handled independently so the local game library re
 
 ## Disclaimer
 
-Game Manager is an independent project and is not affiliated with Valve, Epic Games, GOG, Ubisoft, PCGamingWiki, NVIDIA, AMD, Intel, Nexus Mods, RenoDX, Luma Framework, or any game publisher or platform referenced by the application.
+GameAtlas is an independent project and is not affiliated with Valve, Epic Games, GOG, Ubisoft, PCGamingWiki, NVIDIA, AMD, Intel, Nexus Mods, RenoDX, Luma Framework, or any game publisher or platform referenced by the application.
 
 All trademarks belong to their respective owners.
 

@@ -67,7 +67,7 @@ function Get-RemoteBytes(
 }
 
 Write-Host ""
-Write-Host "Game Manager Remote Updater Metadata Validation" -ForegroundColor Cyan
+Write-Host "GameAtlas Remote Updater Metadata Validation" -ForegroundColor Cyan
 Write-Host "Repository: $Repository"
 Write-Host "Endpoint: $Endpoint"
 Write-Host ""

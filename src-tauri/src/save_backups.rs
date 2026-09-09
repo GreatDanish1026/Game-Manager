@@ -14,6 +14,8 @@ use std::{
 
 use serde::Serialize;
 
+use crate::logging;
+
 use crate::local_paths::resolve_game_path;
 
 
@@ -23,6 +25,7 @@ pub struct SaveBackupEntry {
     pub file_name: String,
     pub path: String,
     pub size_bytes: u64,
+    pub created_unix: u64,
     pub modified_unix: u64,
 }
 
@@ -33,7 +36,18 @@ pub struct SaveBackupStatus {
     pub save_path: String,
     pub backup_directory: String,
     pub backup_count: usize,
+    pub total_size_bytes: u64,
     pub backups: Vec<SaveBackupEntry>,
+}
+
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupStorageSummary {
+    pub backup_root: String,
+    pub game_directory_count: usize,
+    pub backup_count: usize,
+    pub total_size_bytes: u64,
 }
 
 
@@ -207,6 +221,53 @@ fn path_string(
 }
 
 
+fn valid_backup_file_name(
+    backup_file_name: &str,
+) -> Result<&str, String> {
+    let requested_name =
+        Path::new(
+            backup_file_name
+        )
+        .file_name()
+        .and_then(
+            |value| {
+                value.to_str()
+            }
+        )
+        .ok_or_else(
+            || {
+                "Invalid backup file name."
+                    .to_string()
+            }
+        )?;
+
+    if requested_name
+        != backup_file_name
+    {
+        return Err(
+            "Invalid backup file name."
+                .to_string()
+        );
+    }
+
+    if !requested_name
+        .to_ascii_lowercase()
+        .ends_with(
+            ".zip"
+        )
+    {
+        return Err(
+            "Invalid backup file type."
+                .to_string()
+        );
+    }
+
+    Ok(
+        requested_name
+    )
+}
+
+
 fn list_backups(
     directory: &Path,
 ) -> Result<Vec<SaveBackupEntry>, String> {
@@ -259,15 +320,12 @@ fn list_backups(
                 )
                 .map(
                     |value| {
-                        value
-                            .eq_ignore_ascii_case(
-                                "zip"
-                            )
+                        value.eq_ignore_ascii_case(
+                            "zip"
+                        )
                     }
                 )
-                .unwrap_or(
-                    false
-                );
+                .unwrap_or(false);
 
         if !is_zip {
             continue;
@@ -305,6 +363,28 @@ fn list_backups(
                 )
                 .unwrap_or(0);
 
+        let created_unix =
+            metadata
+                .created()
+                .ok()
+                .and_then(
+                    |time| {
+                        time
+                            .duration_since(
+                                UNIX_EPOCH
+                            )
+                            .ok()
+                    }
+                )
+                .map(
+                    |duration| {
+                        duration.as_secs()
+                    }
+                )
+                .unwrap_or(
+                    modified_unix
+                );
+
         entries.push(
             SaveBackupEntry {
                 file_name:
@@ -321,6 +401,8 @@ fn list_backups(
                 size_bytes:
                     metadata.len(),
 
+                created_unix,
+
                 modified_unix,
             }
         );
@@ -329,16 +411,99 @@ fn list_backups(
     entries.sort_by(
         |left, right| {
             right
-                .modified_unix
+                .created_unix
                 .cmp(
                     &left
-                        .modified_unix
+                        .created_unix
+                )
+                .then_with(
+                    || {
+                        right
+                            .modified_unix
+                            .cmp(
+                                &left
+                                    .modified_unix
+                            )
+                    }
                 )
         }
     );
 
     Ok(
         entries
+    )
+}
+
+
+fn total_backup_size(
+    backups: &[SaveBackupEntry],
+) -> u64 {
+    backups
+        .iter()
+        .map(
+            |backup| {
+                backup.size_bytes
+            }
+        )
+        .sum()
+}
+
+
+fn apply_retention(
+    directory: &Path,
+    retention_count: Option<usize>,
+) -> Result<usize, String> {
+    let keep =
+        match retention_count {
+            Some(value)
+                if value > 0 =>
+            {
+                value
+            }
+
+            _ =>
+                return Ok(0),
+        };
+
+    let backups =
+        list_backups(
+            directory
+        )?;
+
+    if backups.len()
+        <= keep
+    {
+        return Ok(0);
+    }
+
+    let mut removed =
+        0usize;
+
+    for backup in
+        backups
+            .iter()
+            .skip(
+                keep
+            )
+    {
+        fs::remove_file(
+            &backup.path
+        )
+        .map_err(
+            |error| {
+                format!(
+                    "Failed to remove old backup {}: {}",
+                    backup.file_name,
+                    error
+                )
+            }
+        )?;
+
+        removed += 1;
+    }
+
+    Ok(
+        removed
     )
 }
 
@@ -632,6 +797,7 @@ fn create_backup_internal(
     save_path: &str,
     install_path: Option<&str>,
     prefix: &str,
+    retention_count: Option<usize>,
 ) -> Result<PathBuf, String> {
     let resolved =
         resolve_game_path(
@@ -683,6 +849,21 @@ fn create_backup_internal(
         &destination,
     )?;
 
+    let removed =
+        apply_retention(
+            &directory,
+            retention_count,
+        )?;
+
+    if removed > 0 {
+        logging::dev_log(
+            &format!(
+                "[SAVE BACKUP] Retention removed {} old backup(s).",
+                removed
+            )
+        );
+    }
+
     Ok(
         destination
     )
@@ -715,6 +896,11 @@ pub fn get_save_backup_status(
             &backup_directory
         )?;
 
+    let total_size_bytes =
+        total_backup_size(
+            &backups
+        );
+
     Ok(
         SaveBackupStatus {
             save_path:
@@ -730,7 +916,110 @@ pub fn get_save_backup_status(
             backup_count:
                 backups.len(),
 
+            total_size_bytes,
+
             backups,
+        }
+    )
+}
+
+
+#[tauri::command]
+pub fn get_backup_storage_summary()
+    -> Result<BackupStorageSummary, String>
+{
+    let root =
+        backup_root()?;
+
+    if !root.exists() {
+        return Ok(
+            BackupStorageSummary {
+                backup_root:
+                    path_string(
+                        &root
+                    ),
+
+                game_directory_count:
+                    0,
+
+                backup_count:
+                    0,
+
+                total_size_bytes:
+                    0,
+            }
+        );
+    }
+
+    let mut game_directory_count =
+        0usize;
+
+    let mut backup_count =
+        0usize;
+
+    let mut total_size_bytes =
+        0u64;
+
+    for entry in
+        fs::read_dir(
+            &root
+        )
+        .map_err(
+            |error| {
+                format!(
+                    "Failed to read backup root: {}",
+                    error
+                )
+            }
+        )?
+    {
+        let entry =
+            entry
+                .map_err(
+                    |error| {
+                        format!(
+                            "Failed to read backup root entry: {}",
+                            error
+                        )
+                    }
+                )?;
+
+        let path =
+            entry.path();
+
+        if !path.is_dir() {
+            continue;
+        }
+
+        game_directory_count +=
+            1;
+
+        let backups =
+            list_backups(
+                &path
+            )?;
+
+        backup_count +=
+            backups.len();
+
+        total_size_bytes +=
+            total_backup_size(
+                &backups
+            );
+    }
+
+    Ok(
+        BackupStorageSummary {
+            backup_root:
+                path_string(
+                    &root
+                ),
+
+            game_directory_count,
+
+            backup_count,
+
+            total_size_bytes,
         }
     )
 }
@@ -742,7 +1031,23 @@ pub fn create_save_backup(
     game_id: Option<String>,
     save_path: String,
     install_path: Option<String>,
+    retention_count: Option<usize>,
+    backup_type: Option<String>,
 ) -> Result<SaveBackupStatus, String> {
+    let prefix =
+        match backup_type
+            .as_deref()
+        {
+            Some("pre_launch") =>
+                "pre_launch",
+
+            Some("pre_restore") =>
+                "pre_restore",
+
+            _ =>
+                "backup",
+        };
+
     let created =
         create_backup_internal(
             &game_name,
@@ -751,12 +1056,75 @@ pub fn create_save_backup(
             &save_path,
             install_path
                 .as_deref(),
-            "backup",
+            prefix,
+            retention_count,
         )?;
 
-    println!(
-        "[SAVE BACKUP] Created: {}",
-        created.display()
+    logging::dev_log(
+        &format!(
+            "[SAVE BACKUP] Created: {}",
+            created.display()
+        )
+    );
+
+    get_save_backup_status(
+        game_name,
+        game_id,
+        save_path,
+        install_path,
+    )
+}
+
+
+#[tauri::command]
+pub fn delete_save_backup(
+    game_name: String,
+    game_id: Option<String>,
+    save_path: String,
+    install_path: Option<String>,
+    backup_file_name: String,
+) -> Result<SaveBackupStatus, String> {
+    let directory =
+        game_backup_directory(
+            &game_name,
+            game_id
+                .as_deref(),
+        )?;
+
+    let requested_name =
+        valid_backup_file_name(
+            &backup_file_name
+        )?;
+
+    let archive =
+        directory.join(
+            requested_name
+        );
+
+    if !archive.exists() {
+        return Err(
+            "The selected backup no longer exists."
+                .to_string()
+        );
+    }
+
+    fs::remove_file(
+        &archive
+    )
+    .map_err(
+        |error| {
+            format!(
+                "Failed to delete backup: {}",
+                error
+            )
+        }
+    )?;
+
+    logging::dev_log(
+        &format!(
+            "[SAVE BACKUP] Deleted: {}",
+            archive.display()
+        )
     );
 
     get_save_backup_status(
@@ -775,6 +1143,7 @@ pub fn restore_save_backup(
     save_path: String,
     install_path: Option<String>,
     backup_file_name: String,
+    retention_count: Option<usize>,
 ) -> Result<SaveBackupStatus, String> {
     let resolved_save =
         resolve_game_path(
@@ -791,30 +1160,9 @@ pub fn restore_save_backup(
         )?;
 
     let requested_name =
-        Path::new(
+        valid_backup_file_name(
             &backup_file_name
-        )
-        .file_name()
-        .and_then(
-            |value| {
-                value.to_str()
-            }
-        )
-        .ok_or_else(
-            || {
-                "Invalid backup file name."
-                    .to_string()
-            }
         )?;
-
-    if requested_name
-        != backup_file_name
-    {
-        return Err(
-            "Invalid backup file name."
-                .to_string()
-        );
-    }
 
     let archive =
         backup_directory
@@ -829,10 +1177,6 @@ pub fn restore_save_backup(
         );
     }
 
-    /*
-     * Safety first: always create a backup of the current save
-     * before overwriting it, when the current save still exists.
-     */
     if resolved_save.exists() {
         let safety =
             create_backup_internal(
@@ -843,11 +1187,14 @@ pub fn restore_save_backup(
                 install_path
                     .as_deref(),
                 "pre_restore",
+                retention_count,
             )?;
 
-        println!(
-            "[SAVE BACKUP] Safety backup: {}",
-            safety.display()
+        logging::dev_log(
+            &format!(
+                "[SAVE BACKUP] Safety backup: {}",
+                safety.display()
+            )
         );
     }
 
@@ -945,9 +1292,11 @@ pub fn restore_save_backup(
             &temp
         );
 
-    println!(
-        "[SAVE BACKUP] Restored: {}",
-        archive.display()
+    logging::dev_log(
+        &format!(
+            "[SAVE BACKUP] Restored: {}",
+            archive.display()
+        )
     );
 
     get_save_backup_status(

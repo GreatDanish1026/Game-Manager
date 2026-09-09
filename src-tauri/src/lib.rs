@@ -1,3 +1,4 @@
+mod logging;
 mod installed_games;
 mod pcgamingwiki;
 mod renodx;
@@ -50,10 +51,13 @@ pub fn run() {
                 local_paths::open_game_path,
 
                 save_backups::get_save_backup_status,
+                save_backups::get_backup_storage_summary,
                 save_backups::create_save_backup,
+                save_backups::delete_save_backup,
                 save_backups::restore_save_backup,
 
                 game_launcher::launch_game,
+                game_launcher::get_launcher_status,
 
                 local_installation::inspect_local_installation,
 
