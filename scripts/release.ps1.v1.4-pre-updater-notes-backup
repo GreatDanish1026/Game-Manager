@@ -436,8 +436,7 @@ function Invoke-Prepare {
         [string]$Root,
         [string]$ResolvedVersion,
         [string]$OutputDirectory,
-        [bool]$BuildFirst,
-        [string]$NotesPath = ""
+        [bool]$BuildFirst
     )
 
     if ($BuildFirst) {
@@ -514,40 +513,12 @@ function Invoke-Prepare {
     $DownloadUrl =
         "https://github.com/$Repository/releases/download/v$ResolvedVersion/$ReleaseInstallerName"
 
-    $UpdaterNotes =
-        "GameAtlas v$ResolvedVersion"
-
-    if ($NotesPath) {
-        $ResolvedNotesPath =
-            [System.IO.Path]::GetFullPath(
-                [string](
-                    Resolve-Path `
-                        -LiteralPath $NotesPath
-                ).Path
-            )
-
-        if (-not (Test-Path -LiteralPath $ResolvedNotesPath)) {
-            Fail "Release notes file was not found: $NotesPath"
-        }
-
-        $UpdaterNotes =
-            [System.IO.File]::ReadAllText(
-                $ResolvedNotesPath
-            ).Trim()
-
-        if (-not $UpdaterNotes) {
-            Write-WarnMessage "Release notes file is empty. latest.json will use the fallback updater note."
-            $UpdaterNotes =
-                "GameAtlas v$ResolvedVersion"
-        }
-    }
-
     $Latest = [ordered]@{
         version =
             $ResolvedVersion
 
         notes =
-            $UpdaterNotes
+            "GameAtlas v$ResolvedVersion"
 
         pub_date =
             [DateTime]::UtcNow.ToString(
@@ -649,12 +620,6 @@ function Invoke-Validate {
 
     if ($LatestVersion -ne $ResolvedVersion) {
         Fail "latest.json version does not match v$ResolvedVersion."
-    }
-
-    if (
-        -not ([string]$Latest.notes).Trim()
-    ) {
-        Fail "latest.json notes field is empty."
     }
 
     $Platform =
@@ -842,7 +807,7 @@ GameAtlas release tool
 
 Usage:
   .\scripts\release.ps1 preflight
-  .\scripts\release.ps1 prepare  -Version 1.3.0 -ReleaseNotes .\RELEASE_NOTES.md
+  .\scripts\release.ps1 prepare  -Version 1.3.0
   .\scripts\release.ps1 validate -Version 1.3.0
   .\scripts\release.ps1 publish  -Version 1.3.0 -ReleaseNotes .\RELEASE_NOTES.md
   .\scripts\release.ps1 all      -Version 1.3.0 -ReleaseNotes .\RELEASE_NOTES.md
@@ -897,8 +862,7 @@ switch ($Action) {
             -Root $Root `
             -ResolvedVersion $ResolvedVersion `
             -OutputDirectory $OutputDirectory `
-            -BuildFirst (-not $SkipBuild) `
-            -NotesPath $ReleaseNotes
+            -BuildFirst (-not $SkipBuild)
     }
 
     "validate" {
@@ -928,8 +892,7 @@ switch ($Action) {
             -Root $Root `
             -ResolvedVersion $ResolvedVersion `
             -OutputDirectory $OutputDirectory `
-            -BuildFirst (-not $SkipBuild) `
-            -NotesPath $ReleaseNotes
+            -BuildFirst (-not $SkipBuild)
 
         Invoke-Validate `
             -ResolvedVersion $ResolvedVersion `

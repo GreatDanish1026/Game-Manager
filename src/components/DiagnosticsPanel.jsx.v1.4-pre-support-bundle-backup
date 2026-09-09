@@ -20,7 +20,6 @@ import {
 
 import {
   collectDiagnostics,
-  createDiagnosticsSupportBundle,
   diagnosticsToText,
   exportDiagnosticsText,
 } from "../services/diagnostics";
@@ -176,18 +175,6 @@ export default function DiagnosticsPanel({
     useState(null);
 
   const [
-    supportBundlePath,
-    setSupportBundlePath,
-  ] =
-    useState(null);
-
-  const [
-    creatingBundle,
-    setCreatingBundle,
-  ] =
-    useState(false);
-
-  const [
     error,
     setError,
   ] =
@@ -315,51 +302,6 @@ export default function DiagnosticsPanel({
   }
 
 
-  async function createSupportBundle() {
-    if (!diagnostics) {
-      return;
-    }
-
-    setCreatingBundle(
-      true
-    );
-
-    setError(
-      null
-    );
-
-    setSupportBundlePath(
-      null
-    );
-
-    try {
-      const path =
-        await createDiagnosticsSupportBundle(
-          diagnostics
-        );
-
-      setSupportBundlePath(
-        path
-      );
-    } catch (bundleError) {
-      logError(
-        "[Diagnostics] Support bundle failed:",
-        bundleError
-      );
-
-      setError(
-        `Could not create support bundle: ${String(
-          bundleError
-        )}`
-      );
-    } finally {
-      setCreatingBundle(
-        false
-      );
-    }
-  }
-
-
   if (
     loading
     && !diagnostics
@@ -478,7 +420,7 @@ export default function DiagnosticsPanel({
                 text-white/35
               "
             >
-              Collects application, system, launcher, service, analysis, and backup status. A sanitized ZIP support bundle can be generated without including personal game paths or signing secrets.
+              Collects application, system, launcher, service, analysis, and backup status without including personal game paths or signing secrets.
             </div>
           </div>
         </div>
@@ -592,59 +534,6 @@ export default function DiagnosticsPanel({
           <button
             type="button"
             onClick={
-              createSupportBundle
-            }
-            disabled={
-              !diagnostics
-              || creatingBundle
-            }
-            className="
-              inline-flex
-              w-full
-              items-center
-              justify-center
-              gap-2
-              sm:w-auto
-              rounded-lg
-              border
-              border-emerald-500/20
-              bg-emerald-500/[0.06]
-              px-3
-              py-2
-              text-xs
-              font-semibold
-              text-emerald-200/70
-              transition
-              hover:bg-emerald-500/[0.10]
-              hover:text-emerald-100
-              disabled:opacity-30
-            "
-          >
-            {creatingBundle ? (
-              <LoaderCircle
-                className="
-                  h-3.5
-                  w-3.5
-                  animate-spin
-                "
-              />
-            ) : (
-              <Download
-                className="
-                  h-3.5
-                  w-3.5
-                "
-              />
-            )}
-
-            {creatingBundle
-              ? "Creating Bundle…"
-              : "Support Bundle"}
-          </button>
-
-          <button
-            type="button"
-            onClick={
               exportDiagnostics
             }
             disabled={
@@ -719,25 +608,6 @@ export default function DiagnosticsPanel({
           "
         >
           Diagnostics exported to: {exportPath}
-        </div>
-      ) : null}
-
-
-      {supportBundlePath ? (
-        <div
-          className="
-            rounded-xl
-            border
-            border-emerald-500/15
-            bg-emerald-500/[0.04]
-            px-4
-            py-3
-            text-xs
-            leading-relaxed
-            text-emerald-200/65
-          "
-        >
-          Support bundle created at: {supportBundlePath}
         </div>
       ) : null}
 
@@ -1091,7 +961,7 @@ export default function DiagnosticsPanel({
                     text-white/38
                   "
                 >
-                  Exported diagnostics and support bundles omit game installation paths, save paths, backup filenames, tags, saved-view names, account identifiers, and updater signing material. Persistent application logs are included only when a GameAtlas log directory already exists.
+                  Exported diagnostics omit game installation paths, save paths, backup filenames, tags, saved-view names, account identifiers, and updater signing material.
                 </div>
               </div>
             </DiagnosticGroup>

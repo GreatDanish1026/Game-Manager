@@ -6,7 +6,85 @@ import {
   relaunch,
 } from "@tauri-apps/plugin-process";
 
-export async function checkForUpdates() {
+
+const SKIPPED_UPDATE_STORAGE_KEY =
+  "game-manager-updater-skipped-version-v1";
+
+
+export function getSkippedUpdateVersion() {
+  try {
+    return localStorage.getItem(
+      SKIPPED_UPDATE_STORAGE_KEY
+    );
+  } catch {
+    return null;
+  }
+}
+
+
+export function skipUpdateVersion(
+  version
+) {
+  const normalized =
+    String(
+      version
+      ?? ""
+    )
+      .trim();
+
+  if (!normalized) {
+    return;
+  }
+
+  try {
+    localStorage.setItem(
+      SKIPPED_UPDATE_STORAGE_KEY,
+      normalized
+    );
+
+    window.dispatchEvent(
+      new CustomEvent(
+        "game-manager-updater-skip-changed",
+        {
+          detail: {
+            version:
+              normalized,
+          },
+        }
+      )
+    );
+  } catch {
+    // A storage failure should not prevent the user from dismissing an update.
+  }
+}
+
+
+export function clearSkippedUpdateVersion() {
+  try {
+    localStorage.removeItem(
+      SKIPPED_UPDATE_STORAGE_KEY
+    );
+
+    window.dispatchEvent(
+      new CustomEvent(
+        "game-manager-updater-skip-changed",
+        {
+          detail: {
+            version:
+              null,
+          },
+        }
+      )
+    );
+  } catch {
+    // Ignore unavailable storage.
+  }
+}
+
+
+export async function checkForUpdates({
+  includeSkipped = false,
+} = {}) {
   console.log(
     "[Updater] Checking for updates..."
   );
@@ -19,8 +97,31 @@ export async function checkForUpdates() {
       "[Updater] Application is current"
     );
 
-    return null;
+    return {
+      available:
+        false,
+
+      update:
+        null,
+
+      skipped:
+        false,
+
+      skippedVersion:
+        getSkippedUpdateVersion(),
+    };
   }
+
+  const skippedVersion =
+    getSkippedUpdateVersion();
+
+  const skipped =
+    Boolean(
+      skippedVersion
+      && String(
+        update.version
+      ) === skippedVersion
+    );
 
   console.log(
     "[Updater] Update found:",
@@ -33,18 +134,51 @@ export async function checkForUpdates() {
 
       body:
         update.body,
+
+      skipped,
     }
   );
 
-  return update;
+  if (
+    skipped
+    && !includeSkipped
+  ) {
+    return {
+      available:
+        false,
+
+      update:
+        null,
+
+      skipped:
+        true,
+
+      skippedVersion,
+    };
+  }
+
+  return {
+    available:
+      true,
+
+    update,
+
+    skipped,
+
+    skippedVersion,
+  };
 }
+
 
 export async function installUpdate(
   update,
   onProgress
 ) {
-  let downloaded = 0;
-  let contentLength = 0;
+  let downloaded =
+    0;
+
+  let contentLength =
+    0;
 
   await update.downloadAndInstall(
     (event) => {
@@ -54,54 +188,50 @@ export async function installUpdate(
         case "Started":
           contentLength =
             event.data
-              .contentLength ??
-            0;
+              ?.contentLength
+            ?? 0;
 
-          if (onProgress) {
-            onProgress({
-              state:
-                "started",
+          onProgress?.({
+            state:
+              "started",
 
-              downloaded: 0,
+            downloaded:
+              0,
 
-              total:
-                contentLength,
-            });
-          }
+            total:
+              contentLength,
+          });
 
           break;
 
         case "Progress":
           downloaded +=
             event.data
-              .chunkLength;
+              ?.chunkLength
+            ?? 0;
 
-          if (onProgress) {
-            onProgress({
-              state:
-                "downloading",
+          onProgress?.({
+            state:
+              "downloading",
 
-              downloaded,
+            downloaded,
 
-              total:
-                contentLength,
-            });
-          }
+            total:
+              contentLength,
+          });
 
           break;
 
         case "Finished":
-          if (onProgress) {
-            onProgress({
-              state:
-                "finished",
+          onProgress?.({
+            state:
+              "installing",
 
-              downloaded,
+            downloaded,
 
-              total:
-                contentLength,
-            });
-          }
+            total:
+              contentLength,
+          });
 
           break;
 
@@ -115,5 +245,18 @@ export async function installUpdate(
     "[Updater] Update installed"
   );
 
+  onProgress?.({
+    state:
+      "installed",
+
+    downloaded,
+
+    total:
+      contentLength,
+  });
+}
+
+
+export async function restartForUpdate() {
   await relaunch();
 }

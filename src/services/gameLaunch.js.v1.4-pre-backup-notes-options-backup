@@ -3,24 +3,25 @@ import {
 } from "@tauri-apps/api/core";
 
 import {
+  getSettings,
+} from "./settings";
+
+import {
   createSaveBackup,
-  getGamePreLaunchBackupEnabled,
 } from "./saveBackups";
 
 
 export async function launchGame(
   game
 ) {
+  const settings =
+    getSettings();
+
   let preLaunchBackupCreated =
     false;
 
-  const preLaunchBackupEnabled =
-    getGamePreLaunchBackupEnabled(
-      game
-    );
-
   if (
-    preLaunchBackupEnabled
+    settings.backupBeforeLaunch
     && game.technical
       ?.saveLocation
   ) {

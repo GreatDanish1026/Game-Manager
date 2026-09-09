@@ -85,70 +85,19 @@ function savePerGameBackupSettings(
 }
 
 
-function getPerGameBackupOptions(
-  game
-) {
-  const key =
-    gameSettingsKey(
-      game
-    );
-
-  if (!key) {
-    return {};
-  }
-
-  return loadPerGameBackupSettings()[
-    key
-  ] ?? {};
-}
-
-
-function updatePerGameBackupOptions(
-  game,
-  patch
-) {
-  const key =
-    gameSettingsKey(
-      game
-    );
-
-  if (!key) {
-    throw new Error(
-      "Cannot save backup options for an unidentified game."
-    );
-  }
-
-  const current =
-    loadPerGameBackupSettings();
-
-  const previous =
-    current[key]
-    ?? {};
-
-  current[key] = {
-    ...previous,
-    ...patch,
-
-    updatedAt:
-      new Date()
-        .toISOString(),
-  };
-
-  savePerGameBackupSettings(
-    current
-  );
-
-  return current[key];
-}
-
-
 export function getGameBackupRetentionCount(
   game
 ) {
-  const stored =
-    getPerGameBackupOptions(
+  const key =
+    gameSettingsKey(
       game
-    )
+    );
+
+  const perGame =
+    loadPerGameBackupSettings();
+
+  const stored =
+    perGame[key]
       ?.retentionCount;
 
   if (
@@ -199,157 +148,29 @@ export function setGameBackupRetentionCount(
     );
   }
 
-  updatePerGameBackupOptions(
-    game,
-    {
-      retentionCount:
-        normalized,
-    }
+  const current =
+    loadPerGameBackupSettings();
+
+  const previous =
+    current[key]
+    ?? {};
+
+  current[key] = {
+    ...previous,
+
+    retentionCount:
+      normalized,
+
+    updatedAt:
+      new Date()
+        .toISOString(),
+  };
+
+  savePerGameBackupSettings(
+    current
   );
 
   return normalized;
-}
-
-
-export function getGamePreLaunchBackupEnabled(
-  game
-) {
-  const stored =
-    getPerGameBackupOptions(
-      game
-    )
-      ?.preLaunchBackupEnabled;
-
-  if (
-    typeof stored
-    === "boolean"
-  ) {
-    return stored;
-  }
-
-  return Boolean(
-    getSettings()
-      .backupBeforeLaunch
-  );
-}
-
-
-export function setGamePreLaunchBackupEnabled(
-  game,
-  enabled
-) {
-  updatePerGameBackupOptions(
-    game,
-    {
-      preLaunchBackupEnabled:
-        Boolean(
-          enabled
-        ),
-    }
-  );
-
-  return Boolean(
-    enabled
-  );
-}
-
-
-export function getBackupNotes(
-  game
-) {
-  const notes =
-    getPerGameBackupOptions(
-      game
-    )
-      ?.backupNotes;
-
-  return notes
-    && typeof notes
-      === "object"
-    && !Array.isArray(
-      notes
-    )
-      ? notes
-      : {};
-}
-
-
-export function getBackupNote(
-  game,
-  backupFileName
-) {
-  return String(
-    getBackupNotes(
-      game
-    )[
-      backupFileName
-    ]
-    ?? ""
-  );
-}
-
-
-export function setBackupNote(
-  game,
-  backupFileName,
-  note
-) {
-  const fileName =
-    String(
-      backupFileName
-      ?? ""
-    )
-      .trim();
-
-  if (!fileName) {
-    throw new Error(
-      "Cannot save a note without a backup file name."
-    );
-  }
-
-  const normalizedNote =
-    String(
-      note
-      ?? ""
-    )
-      .trim();
-
-  const notes = {
-    ...getBackupNotes(
-      game
-    ),
-  };
-
-  if (normalizedNote) {
-    notes[fileName] =
-      normalizedNote;
-  } else {
-    delete notes[
-      fileName
-    ];
-  }
-
-  updatePerGameBackupOptions(
-    game,
-    {
-      backupNotes:
-        notes,
-    }
-  );
-
-  return normalizedNote;
-}
-
-
-export function removeBackupNote(
-  game,
-  backupFileName
-) {
-  return setBackupNote(
-    game,
-    backupFileName,
-    ""
-  );
 }
 
 

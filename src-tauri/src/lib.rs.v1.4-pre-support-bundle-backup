@@ -1,7 +1,6 @@
 mod ea_games;
 mod xbox_games;
 mod logging;
-mod diagnostics;
 mod installed_games;
 mod pcgamingwiki;
 mod renodx;
@@ -41,8 +40,7 @@ pub fn run() {
                 
 
                 ea_games::get_ea_installed_games,
-                xbox_games::get_xbox_installed_games,
-                installed_games::get_installed_games,
+                xbox_games::get_xbox_installed_games,installed_games::get_installed_games,
 
                 pcgamingwiki::get_pcgw_game_data,
 
@@ -70,10 +68,7 @@ pub fn run() {
 
                 system_hardware::get_system_hardware,
 
-                pcgw_issues::get_pcgw_known_issues,
-
-                diagnostics::export_diagnostics_text,
-                diagnostics::create_diagnostics_support_bundle
+                pcgw_issues::get_pcgw_known_issues
             ]
         )
 

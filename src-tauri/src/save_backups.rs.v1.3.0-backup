@@ -465,27 +465,12 @@ fn apply_retention(
                 return Ok(0),
         };
 
-    /*
-     * Retention applies only to normal/manual backups.
-     * Restore-safety and pre-launch backups are intentionally protected
-     * from automatic pruning.
-     */
-    let manual_backups =
+    let backups =
         list_backups(
             directory
-        )?
-        .into_iter()
-        .filter(
-            |backup| {
-                backup.file_name
-                    .starts_with(
-                        "backup_"
-                    )
-            }
-        )
-        .collect::<Vec<_>>();
+        )?;
 
-    if manual_backups.len()
+    if backups.len()
         <= keep
     {
         return Ok(0);
@@ -495,7 +480,7 @@ fn apply_retention(
         0usize;
 
     for backup in
-        manual_backups
+        backups
             .iter()
             .skip(
                 keep
@@ -507,7 +492,7 @@ fn apply_retention(
         .map_err(
             |error| {
                 format!(
-                    "Failed to remove old manual backup {}: {}",
+                    "Failed to remove old backup {}: {}",
                     backup.file_name,
                     error
                 )

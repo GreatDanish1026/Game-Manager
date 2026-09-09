@@ -32,8 +32,7 @@ import {
 
 import {
   checkForUpdates,
-  skipUpdateVersion,
-} from "./services/updater";
+  } from "./services/updater";
 
 import {
   saveLibrarySnapshot,
@@ -3006,10 +3005,7 @@ export default function App() {
 
     try {
       const result =
-        await checkForUpdates({
-          includeSkipped:
-            manual,
-        });
+        await checkForUpdates();
 
       const update =
         result?.available
@@ -3036,12 +3032,8 @@ export default function App() {
 
           message:
             update
-              ? result?.skipped
-                ? `GameAtlas ${update.version} is available. You previously skipped this version.`
-                : `GameAtlas ${update.version} is available.`
-              : result?.skipped
-                ? `GameAtlas ${result.skippedVersion} is available but is currently skipped.`
-                : "You are running the latest available version.",
+              ? `GameAtlas ${update.version} is available.`
+              : "You are running the latest available version.",
         });
       }
     } catch (error) {
@@ -3088,33 +3080,6 @@ export default function App() {
     },
     []
   );
-  function skipAvailableUpdate() {
-    const version =
-      availableUpdate
-        ?.version;
-
-    if (version) {
-      skipUpdateVersion(
-        version
-      );
-    }
-
-    setAvailableUpdate(
-      null
-    );
-
-    setUpdateCheckStatus({
-      state:
-        "skipped",
-
-      message:
-        version
-          ? `GameAtlas ${version} will be skipped during automatic update checks. Manual checks can still show it.`
-          : "Update skipped.",
-    });
-  }
-
-
 function hideGame(
     game
   ) {
@@ -3892,9 +3857,6 @@ onAnalyzeRemaining={
               setAvailableUpdate(
                 null
               )
-          }
-          onSkip={
-            skipAvailableUpdate
           }
         />
       ) : null}

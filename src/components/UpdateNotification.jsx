@@ -1,8 +1,11 @@
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Download,
   Loader2,
+  RotateCcw,
   X,
 } from "lucide-react";
 
@@ -11,9 +14,19 @@ import {
   useState,
 } from "react";
 
-function formatBytes(value) {
+import {
+  installUpdate,
+  restartForUpdate,
+} from "../services/updater";
+
+
+function formatBytes(
+  value
+) {
   if (
-    !Number.isFinite(value)
+    !Number.isFinite(
+      value
+    )
     || value <= 0
   ) {
     return null;
@@ -26,37 +39,83 @@ function formatBytes(value) {
     "GB",
   ];
 
-  let amount = value;
-  let index = 0;
+  let amount =
+    value;
+
+  let index =
+    0;
 
   while (
     amount >= 1024
-    && index < units.length - 1
+    && index
+      < units.length - 1
   ) {
-    amount /= 1024;
-    index += 1;
+    amount /=
+      1024;
+
+    index +=
+      1;
   }
 
   return `${amount.toFixed(
-    index === 0 ? 0 : 1
+    index === 0
+      ? 0
+      : 1
   )} ${units[index]}`;
 }
+
+
+function formatReleaseDate(
+  value
+) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed =
+    new Date(
+      value
+    );
+
+  if (
+    Number.isNaN(
+      parsed.getTime()
+    )
+  ) {
+    return String(
+      value
+    );
+  }
+
+  return parsed
+    .toLocaleDateString(
+      undefined,
+      {
+        year:
+          "numeric",
+
+        month:
+          "short",
+
+        day:
+          "numeric",
+      }
+    );
+}
+
 
 export default function UpdateNotification({
   update,
   onDismiss,
+  onSkip,
 }) {
   const [
-    installing,
-    setInstalling,
+    phase,
+    setPhase,
   ] =
-    useState(false);
-
-  const [
-    installed,
-    setInstalled,
-  ] =
-    useState(false);
+    useState(
+      "ready"
+    );
 
   const [
     error,
@@ -76,6 +135,19 @@ export default function UpdateNotification({
   ] =
     useState(null);
 
+  const [
+    releaseNotesExpanded,
+    setReleaseNotesExpanded,
+  ] =
+    useState(true);
+
+  const busy =
+    phase === "downloading"
+    || phase === "installing";
+
+  const installed =
+    phase === "installed";
+
   const progress =
     useMemo(
       () => {
@@ -89,7 +161,10 @@ export default function UpdateNotification({
         return Math.min(
           100,
           Math.round(
-            (downloaded / total)
+            (
+              downloaded
+              / total
+            )
             * 100
           )
         );
@@ -100,74 +175,120 @@ export default function UpdateNotification({
       ]
     );
 
-  async function installUpdate() {
+  const releaseDate =
+    formatReleaseDate(
+      update?.date
+    );
+
+
+  async function startInstall() {
     if (
       !update
-      || installing
+      || busy
       || installed
     ) {
       return;
     }
 
-    setInstalling(true);
-    setError(null);
-    setDownloaded(0);
-    setTotal(null);
+    setError(
+      null
+    );
+
+    setDownloaded(
+      0
+    );
+
+    setTotal(
+      null
+    );
+
+    setPhase(
+      "downloading"
+    );
 
     try {
-      await update.downloadAndInstall(
+      await installUpdate(
+        update,
         (event) => {
           if (
-            event.event
-            === "Started"
+            Number.isFinite(
+              event.total
+            )
+            && event.total > 0
           ) {
-            const length =
-              event.data
-                ?.contentLength;
-
-            if (
-              Number.isFinite(length)
-            ) {
-              setTotal(length);
-            }
-
-            return;
+            setTotal(
+              event.total
+            );
           }
 
           if (
-            event.event
-            === "Progress"
+            Number.isFinite(
+              event.downloaded
+            )
           ) {
-            const chunk =
-              event.data
-                ?.chunkLength;
+            setDownloaded(
+              event.downloaded
+            );
+          }
 
-            if (
-              Number.isFinite(chunk)
-            ) {
-              setDownloaded(
-                (current) =>
-                  current + chunk
-              );
-            }
+          if (
+            event.state
+            === "installing"
+          ) {
+            setPhase(
+              "installing"
+            );
+          }
+
+          if (
+            event.state
+            === "installed"
+          ) {
+            setPhase(
+              "installed"
+            );
           }
         }
       );
 
-      setInstalled(true);
-    } catch (error) {
+      setPhase(
+        "installed"
+      );
+    } catch (installError) {
       console.error(
         "[Updater] Install failed:",
-        error
+        installError
       );
 
       setError(
-        String(error)
+        String(
+          installError
+        )
       );
-    } finally {
-      setInstalling(false);
+
+      setPhase(
+        "ready"
+      );
     }
   }
+
+
+  async function restartNow() {
+    setError(
+      null
+    );
+
+    try {
+      await restartForUpdate();
+    } catch (restartError) {
+      setError(
+        `Could not restart GameAtlas: ${String(
+          restartError
+        )}`
+      );
+    }
+  }
+
 
   return (
     <div
@@ -176,7 +297,7 @@ export default function UpdateNotification({
         bottom-5
         right-5
         z-50
-        w-[390px]
+        w-[430px]
         max-w-[calc(100vw-2.5rem)]
         overflow-hidden
         rounded-xl
@@ -224,6 +345,15 @@ export default function UpdateNotification({
                   text-red-300
                 "
               />
+            ) : busy ? (
+              <Loader2
+                className="
+                  h-4
+                  w-4
+                  animate-spin
+                  text-cyan-300
+                "
+              />
             ) : (
               <Download
                 className="
@@ -242,10 +372,14 @@ export default function UpdateNotification({
               "
             >
               {installed
-                ? "Update Installed"
+                ? "Update Ready to Restart"
                 : error
                   ? "Update Failed"
-                  : "Update Available"}
+                  : phase === "installing"
+                    ? "Installing Update"
+                    : phase === "downloading"
+                      ? "Downloading Update"
+                      : "Update Available"}
             </div>
           </div>
 
@@ -268,7 +402,7 @@ export default function UpdateNotification({
                 >
                   {update.version}
                 </span>
-                {" "}was installed. Close and reopen GameAtlas to use the new version.
+                {" "}is installed and ready. Restart GameAtlas to finish the update.
               </>
             ) : (
               <>
@@ -282,6 +416,9 @@ export default function UpdateNotification({
                   {update.version}
                 </span>
                 {" "}is available.
+                {releaseDate
+                  ? ` Released ${releaseDate}.`
+                  : ""}
               </>
             )}
           </div>
@@ -291,20 +428,77 @@ export default function UpdateNotification({
             <div
               className="
                 mt-3
-                max-h-28
-                overflow-y-auto
-                whitespace-pre-wrap
-                text-xs
-                leading-relaxed
-                text-white/40
+                overflow-hidden
+                rounded-lg
+                border
+                border-white/[0.07]
+                bg-black/15
               "
             >
-              {update.body}
+              <button
+                type="button"
+                onClick={
+                  () =>
+                    setReleaseNotesExpanded(
+                      (current) =>
+                        !current
+                    )
+                }
+                className="
+                  flex
+                  w-full
+                  items-center
+                  justify-between
+                  gap-3
+                  px-3
+                  py-2
+                  text-left
+                  text-[11px]
+                  font-semibold
+                  text-white/50
+                  hover:bg-white/[0.025]
+                "
+              >
+                <span>
+                  What’s new in {update.version}
+                </span>
+
+                {releaseNotesExpanded ? (
+                  <ChevronUp
+                    className="h-3.5 w-3.5"
+                  />
+                ) : (
+                  <ChevronDown
+                    className="h-3.5 w-3.5"
+                  />
+                )}
+              </button>
+
+              {releaseNotesExpanded ? (
+                <div
+                  className="
+                    max-h-44
+                    overflow-y-auto
+                    whitespace-pre-wrap
+                    border-t
+                    border-white/[0.06]
+                    px-3
+                    py-2.5
+                    text-xs
+                    leading-relaxed
+                    text-white/40
+                  "
+                >
+                  {update.body}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
-          {installing ? (
-            <div className="mt-4">
+          {busy ? (
+            <div
+              className="mt-4"
+            >
               <div
                 className="
                   flex
@@ -312,18 +506,26 @@ export default function UpdateNotification({
                   justify-between
                   gap-3
                   text-[11px]
-                  text-white/30
+                  text-white/35
                 "
               >
                 <span>
-                  Downloading and installing…
+                  {phase === "installing"
+                    ? "Download complete · installing…"
+                    : "Downloading update…"}
                 </span>
 
-                <span className="tabular-nums">
-                  {progress !== null
-                    ? `${progress}%`
-                    : formatBytes(downloaded)
-                      ?? "Working…"}
+                <span
+                  className="tabular-nums"
+                >
+                  {phase === "installing"
+                    ? "Installing"
+                    : progress !== null
+                      ? `${progress}%`
+                      : formatBytes(
+                          downloaded
+                        )
+                        ?? "Starting…"}
                 </span>
               </div>
 
@@ -337,20 +539,48 @@ export default function UpdateNotification({
                 "
               >
                 <div
-                  className="
+                  className={`
                     h-full
                     rounded-full
                     bg-cyan-400/70
                     transition-all
-                  "
+                    ${
+                      progress === null
+                        || phase === "installing"
+                        ? "animate-pulse"
+                        : ""
+                    }
+                  `}
                   style={{
                     width:
-                      progress !== null
-                        ? `${progress}%`
-                        : "24%",
+                      phase === "installing"
+                        ? "100%"
+                        : progress !== null
+                          ? `${progress}%`
+                          : "24%",
                   }}
                 />
               </div>
+
+              {phase === "downloading"
+                && total ? (
+                <div
+                  className="
+                    mt-1.5
+                    text-[10px]
+                    tabular-nums
+                    text-white/25
+                  "
+                >
+                  {formatBytes(
+                    downloaded
+                  )}
+                  {" / "}
+                  {formatBytes(
+                    total
+                  )}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -382,14 +612,40 @@ export default function UpdateNotification({
               gap-2
             "
           >
-            {!installed ? (
+            {installed ? (
               <button
                 type="button"
                 onClick={
-                  installUpdate
+                  restartNow
+                }
+                className="
+                  inline-flex
+                  items-center
+                  gap-2
+                  rounded-lg
+                  bg-emerald-500/15
+                  px-3
+                  py-2
+                  text-xs
+                  font-semibold
+                  text-emerald-200
+                  hover:bg-emerald-500/22
+                "
+              >
+                <RotateCcw
+                  className="h-3.5 w-3.5"
+                />
+
+                Restart GameAtlas
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={
+                  startInstall
                 }
                 disabled={
-                  installing
+                  busy
                 }
                 className="
                   inline-flex
@@ -406,7 +662,7 @@ export default function UpdateNotification({
                   disabled:opacity-45
                 "
               >
-                {installing ? (
+                {busy ? (
                   <Loader2
                     className="
                       h-3.5
@@ -422,39 +678,102 @@ export default function UpdateNotification({
 
                 {error
                   ? "Try Again"
-                  : installing
+                  : phase === "installing"
                     ? "Installing…"
-                    : "Install Update"}
+                    : phase === "downloading"
+                      ? "Downloading…"
+                      : "Install Update"}
               </button>
-            ) : null}
+            )}
 
-            <button
-              type="button"
-              onClick={
-                onDismiss
-              }
-              disabled={
-                installing
-              }
+            {!installed ? (
+              <>
+                <button
+                  type="button"
+                  onClick={
+                    onDismiss
+                  }
+                  disabled={
+                    busy
+                  }
+                  className="
+                    rounded-lg
+                    border
+                    border-white/[0.08]
+                    bg-white/[0.02]
+                    px-3
+                    py-2
+                    text-xs
+                    text-white/45
+                    hover:bg-white/[0.05]
+                    hover:text-white/70
+                    disabled:opacity-35
+                  "
+                >
+                  Remind Me Later
+                </button>
+
+                <button
+                  type="button"
+                  onClick={
+                    onSkip
+                  }
+                  disabled={
+                    busy
+                  }
+                  className="
+                    rounded-lg
+                    px-2
+                    py-2
+                    text-[11px]
+                    text-white/25
+                    hover:bg-white/[0.035]
+                    hover:text-white/50
+                    disabled:opacity-30
+                  "
+                >
+                  Skip {update.version}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={
+                  onDismiss
+                }
+                className="
+                  rounded-lg
+                  border
+                  border-white/[0.08]
+                  bg-white/[0.02]
+                  px-3
+                  py-2
+                  text-xs
+                  text-white/40
+                  hover:bg-white/[0.05]
+                  hover:text-white/65
+                "
+              >
+                Restart Later
+              </button>
+            )}
+          </div>
+
+          {!installed
+            && !busy ? (
+            <div
               className="
-                rounded-lg
-                border
-                border-white/[0.08]
-                bg-white/[0.02]
-                px-3
-                py-2
-                text-xs
-                text-white/40
-                hover:bg-white/[0.05]
-                hover:text-white/65
-                disabled:opacity-35
+                mt-2
+                text-[10px]
+                leading-relaxed
+                text-white/20
               "
             >
-              {installed
-                ? "Close"
-                : "Later"}
-            </button>
-          </div>
+              Remind Me Later dismisses this notice until GameAtlas is restarted.
+              Skipping suppresses this exact version during automatic checks;
+              manual update checks can still reveal it.
+            </div>
+          ) : null}
         </div>
 
         <button
@@ -463,7 +782,7 @@ export default function UpdateNotification({
             onDismiss
           }
           disabled={
-            installing
+            busy
           }
           aria-label="Dismiss update"
           className="

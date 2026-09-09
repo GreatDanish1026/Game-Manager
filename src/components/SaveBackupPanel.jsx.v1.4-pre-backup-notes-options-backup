@@ -2,7 +2,6 @@ import {
   Archive,
   FolderOpen,
   Loader2,
-  Pencil,
   RefreshCcw,
   RotateCcw,
   Save,
@@ -22,14 +21,10 @@ import {
 import {
   createSaveBackup,
   deleteSaveBackup,
-  getBackupNote,
   getGameBackupRetentionCount,
-  getGamePreLaunchBackupEnabled,
   getSaveBackupStatus,
   restoreSaveBackup,
-  setBackupNote,
   setGameBackupRetentionCount,
-  setGamePreLaunchBackupEnabled,
 } from "../services/saveBackups";
 
 import {
@@ -183,13 +178,6 @@ function BackupRow({
   backup,
   restoring,
   deleting,
-  note,
-  editingNote,
-  editNoteValue,
-  onEditNoteValueChange,
-  onBeginEditNote,
-  onCancelEditNote,
-  onSaveNote,
   onRestore,
   onDelete,
 }) {
@@ -294,134 +282,6 @@ function BackupRow({
             {backup.fileName}
           </span>
         </div>
-
-        {editingNote ? (
-          <div
-            className="
-              mt-2
-              flex
-              flex-col
-              gap-2
-            "
-          >
-            <textarea
-              value={
-                editNoteValue
-              }
-              onChange={
-                (event) =>
-                  onEditNoteValueChange(
-                    event.target.value
-                  )
-              }
-              rows={2}
-              maxLength={500}
-              autoFocus
-              placeholder="Add a note for this backup…"
-              className="
-                w-full
-                resize-y
-                rounded-lg
-                border
-                border-white/[0.09]
-                bg-black/20
-                px-2.5
-                py-2
-                text-xs
-                text-white/70
-                outline-none
-                placeholder:text-white/20
-                focus:border-cyan-500/30
-              "
-            />
-
-            <div
-              className="
-                flex
-                gap-2
-              "
-            >
-              <button
-                type="button"
-                onClick={
-                  onSaveNote
-                }
-                className="
-                  rounded-md
-                  bg-cyan-500/12
-                  px-2.5
-                  py-1.5
-                  text-[10px]
-                  font-semibold
-                  text-cyan-200
-                  hover:bg-cyan-500/20
-                "
-              >
-                Save Note
-              </button>
-
-              <button
-                type="button"
-                onClick={
-                  onCancelEditNote
-                }
-                className="
-                  rounded-md
-                  px-2.5
-                  py-1.5
-                  text-[10px]
-                  text-white/35
-                  hover:bg-white/[0.04]
-                  hover:text-white/60
-                "
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={
-              onBeginEditNote
-            }
-            className="
-              mt-2
-              flex
-              max-w-full
-              items-start
-              gap-1.5
-              text-left
-              text-xs
-              leading-relaxed
-              text-white/35
-              hover:text-white/55
-            "
-            title={
-              note
-                ? "Edit backup note"
-                : "Add backup note"
-            }
-          >
-            <Pencil
-              className="
-                mt-0.5
-                h-3
-                w-3
-                shrink-0
-              "
-            />
-
-            <span
-              className="
-                break-words
-              "
-            >
-              {note
-                || "Add note"}
-            </span>
-          </button>
-        )}
       </div>
 
       <div
@@ -592,36 +452,6 @@ export default function SaveBackupPanel({
     useState(false);
 
 
-  const [
-    newBackupNote,
-    setNewBackupNote,
-  ] =
-    useState("");
-
-  const [
-    preLaunchBackupEnabled,
-    setPreLaunchBackupEnabled,
-  ] =
-    useState(
-      () =>
-        getGamePreLaunchBackupEnabled(
-          game
-        )
-    );
-
-  const [
-    editingNoteFileName,
-    setEditingNoteFileName,
-  ] =
-    useState(null);
-
-  const [
-    editNoteValue,
-    setEditNoteValue,
-  ] =
-    useState("");
-
-
   const backups =
     useMemo(
       () =>
@@ -694,24 +524,6 @@ export default function SaveBackupPanel({
         )
       );
 
-      setPreLaunchBackupEnabled(
-        getGamePreLaunchBackupEnabled(
-          game
-        )
-      );
-
-      setNewBackupNote(
-        ""
-      );
-
-      setEditingNoteFileName(
-        null
-      );
-
-      setEditNoteValue(
-        ""
-      );
-
       if (savePath) {
         refresh();
       }
@@ -737,52 +549,13 @@ export default function SaveBackupPanel({
     );
 
     try {
-      const existingNames =
-        new Set(
-          backups.map(
-            (backup) =>
-              backup.fileName
-          )
-        );
-
       const result =
         await createSaveBackup(
           game
         );
 
-      const createdBackup =
-        (
-          result?.backups
-          ?? []
-        ).find(
-          (backup) =>
-            backup.fileName
-              ?.startsWith(
-                "backup_"
-              )
-            && !existingNames.has(
-              backup.fileName
-            )
-        );
-
-      if (
-        createdBackup
-        && newBackupNote
-          .trim()
-      ) {
-        setBackupNote(
-          game,
-          createdBackup.fileName,
-          newBackupNote
-        );
-      }
-
       setStatus(
         result
-      );
-
-      setNewBackupNote(
-        ""
       );
 
       setMessage(
@@ -907,25 +680,6 @@ export default function SaveBackupPanel({
         result
       );
 
-      setBackupNote(
-        game,
-        backup.fileName,
-        ""
-      );
-
-      if (
-        editingNoteFileName
-        === backup.fileName
-      ) {
-        setEditingNoteFileName(
-          null
-        );
-
-        setEditNoteValue(
-          ""
-        );
-      }
-
       setMessage(
         "Backup deleted."
       );
@@ -943,105 +697,6 @@ export default function SaveBackupPanel({
     } finally {
       setDeleting(
         null
-      );
-    }
-  }
-
-
-  function handlePreLaunchBackupChange(
-    event
-  ) {
-    const enabled =
-      event.target.checked;
-
-    try {
-      setGamePreLaunchBackupEnabled(
-        game,
-        enabled
-      );
-
-      setPreLaunchBackupEnabled(
-        enabled
-      );
-
-      setError(
-        null
-      );
-
-      setMessage(
-        enabled
-          ? "Pre-launch save backups enabled for this game."
-          : "Pre-launch save backups disabled for this game."
-      );
-    } catch (optionError) {
-      setError(
-        String(
-          optionError
-        )
-      );
-    }
-  }
-
-
-  function beginEditNote(
-    backup
-  ) {
-    setEditingNoteFileName(
-      backup.fileName
-    );
-
-    setEditNoteValue(
-      getBackupNote(
-        game,
-        backup.fileName
-      )
-    );
-  }
-
-
-  function cancelEditNote() {
-    setEditingNoteFileName(
-      null
-    );
-
-    setEditNoteValue(
-      ""
-    );
-  }
-
-
-  function saveEditedNote(
-    backup
-  ) {
-    try {
-      setBackupNote(
-        game,
-        backup.fileName,
-        editNoteValue
-      );
-
-      setEditingNoteFileName(
-        null
-      );
-
-      setEditNoteValue(
-        ""
-      );
-
-      setError(
-        null
-      );
-
-      setMessage(
-        editNoteValue.trim()
-          ? "Backup note saved."
-          : "Backup note removed."
-      );
-    } catch (noteError) {
-      setError(
-        String(
-          noteError
-        )
       );
     }
   }
@@ -1438,146 +1093,6 @@ export default function SaveBackupPanel({
 
       <div
         className="
-          grid
-          grid-cols-1
-          gap-3
-          border-b
-          border-white/[0.06]
-          px-4
-          py-3
-          lg:grid-cols-2
-        "
-      >
-        <label
-          className="
-            block
-          "
-        >
-          <div
-            className="
-              mb-1
-              text-[9px]
-              font-semibold
-              uppercase
-              tracking-wide
-              text-white/25
-            "
-          >
-            Note for Next Manual Backup
-          </div>
-
-          <input
-            type="text"
-            value={
-              newBackupNote
-            }
-            onChange={
-              (event) =>
-                setNewBackupNote(
-                  event.target.value
-                )
-            }
-            maxLength={500}
-            placeholder="Optional — e.g. Before installing graphics mod"
-            disabled={
-              creating
-              || restoring
-              || deleting
-              || cleaning
-            }
-            className="
-              w-full
-              rounded-lg
-              border
-              border-white/[0.08]
-              bg-black/20
-              px-3
-              py-2
-              text-xs
-              text-white/65
-              outline-none
-              placeholder:text-white/20
-              focus:border-cyan-500/30
-              disabled:opacity-35
-            "
-          />
-
-          <div
-            className="
-              mt-1.5
-              text-[10px]
-              leading-relaxed
-              text-white/25
-            "
-          >
-            The note is stored by GameAtlas and does not modify the ZIP archive.
-          </div>
-        </label>
-
-        <label
-          className="
-            flex
-            items-start
-            gap-3
-            rounded-lg
-            border
-            border-white/[0.06]
-            bg-white/[0.018]
-            p-3
-          "
-        >
-          <input
-            type="checkbox"
-            checked={
-              preLaunchBackupEnabled
-            }
-            onChange={
-              handlePreLaunchBackupChange
-            }
-            disabled={
-              creating
-              || restoring
-              || deleting
-              || cleaning
-            }
-            className="
-              mt-0.5
-              h-4
-              w-4
-              accent-cyan-500
-            "
-          />
-
-          <span>
-            <span
-              className="
-                block
-                text-xs
-                font-semibold
-                text-white/60
-              "
-            >
-              Pre-Launch Backup
-            </span>
-
-            <span
-              className="
-                mt-1
-                block
-                text-[10px]
-                leading-relaxed
-                text-white/25
-              "
-            >
-              Create a safety backup before launching this game. This per-game choice overrides the global backup-before-launch setting.
-            </span>
-          </span>
-        </label>
-      </div>
-
-
-      <div
-        className="
           flex
           flex-col
           gap-3
@@ -1874,37 +1389,6 @@ export default function SaveBackupPanel({
                 deleting={
                   deleting
                     === backup.fileName
-                }
-                note={
-                  getBackupNote(
-                    game,
-                    backup.fileName
-                  )
-                }
-                editingNote={
-                  editingNoteFileName
-                    === backup.fileName
-                }
-                editNoteValue={
-                  editNoteValue
-                }
-                onEditNoteValueChange={
-                  setEditNoteValue
-                }
-                onBeginEditNote={
-                  () =>
-                    beginEditNote(
-                      backup
-                    )
-                }
-                onCancelEditNote={
-                  cancelEditNote
-                }
-                onSaveNote={
-                  () =>
-                    saveEditedNote(
-                      backup
-                    )
                 }
                 onRestore={
                   () =>
