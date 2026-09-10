@@ -442,6 +442,260 @@ fn read_pe_architecture(
 }
 
 
+#[cfg(not(target_os = "windows"))]
+fn is_executable_elf(
+    path: &Path,
+) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata =
+        match fs::metadata(
+            path
+        ) {
+            Ok(metadata) =>
+                metadata,
+
+            Err(_) =>
+                return false,
+        };
+
+    if !metadata.is_file()
+        || metadata
+            .permissions()
+            .mode()
+            & 0o111
+            == 0
+    {
+        return false;
+    }
+
+    let mut file =
+        match fs::File::open(
+            path
+        ) {
+            Ok(file) =>
+                file,
+
+            Err(_) =>
+                return false,
+        };
+
+    let mut magic =
+        [0u8; 4];
+
+    if file
+        .read_exact(
+            &mut magic
+        )
+        .is_err()
+    {
+        return false;
+    }
+
+    magic
+        == [
+            0x7f,
+            b'E',
+            b'L',
+            b'F',
+        ]
+}
+
+
+#[cfg(target_os = "windows")]
+fn is_supported_executable(
+    path: &Path,
+) -> bool {
+    path
+        .extension()
+        .and_then(
+            |value| {
+                value.to_str()
+            }
+        )
+        .map(
+            |value| {
+                value
+                    .eq_ignore_ascii_case(
+                        "exe"
+                    )
+            }
+        )
+        .unwrap_or(
+            false
+        )
+}
+
+
+#[cfg(not(target_os = "windows"))]
+fn is_supported_executable(
+    path: &Path,
+) -> bool {
+    let is_windows_executable =
+        path
+            .extension()
+            .and_then(
+                |value| {
+                    value.to_str()
+                }
+            )
+            .map(
+                |value| {
+                    value
+                        .eq_ignore_ascii_case(
+                            "exe"
+                        )
+                }
+            )
+            .unwrap_or(
+                false
+            );
+
+    is_windows_executable
+        || is_executable_elf(
+            path
+        )
+}
+
+
+#[cfg(not(target_os = "windows"))]
+fn read_elf_architecture(
+    path: &Path,
+) -> Option<String> {
+    let mut file =
+        fs::File::open(
+            path
+        )
+        .ok()?;
+
+    /*
+     * We only need the ELF identification bytes plus e_machine.
+     * Reading 20 bytes keeps inspection cheap even across large
+     * installations.
+     */
+    let mut header =
+        [0u8; 20];
+
+    file.read_exact(
+        &mut header
+    )
+    .ok()?;
+
+    if header[0..4]
+        != [
+            0x7f,
+            b'E',
+            b'L',
+            b'F',
+        ]
+    {
+        return None;
+    }
+
+    let class =
+        match header[4] {
+            1 =>
+                "32-bit",
+
+            2 =>
+                "64-bit",
+
+            _ =>
+                "Unknown bitness",
+        };
+
+    let machine =
+        match header[5] {
+            /*
+             * ELF data encoding:
+             * 1 = little endian
+             * 2 = big endian
+             */
+            1 =>
+                u16::from_le_bytes([
+                    header[18],
+                    header[19],
+                ]),
+
+            2 =>
+                u16::from_be_bytes([
+                    header[18],
+                    header[19],
+                ]),
+
+            _ =>
+                return Some(
+                    format!(
+                        "{} (ELF, unknown architecture)",
+                        class
+                    )
+                ),
+        };
+
+    let architecture =
+        match machine {
+            3 =>
+                "x86",
+
+            40 =>
+                "ARM",
+
+            62 =>
+                "x86_64",
+
+            183 =>
+                "ARM64",
+
+            243 =>
+                "RISC-V",
+
+            _ =>
+                return Some(
+                    format!(
+                        "{} (ELF machine {})",
+                        class,
+                        machine
+                    )
+                ),
+        };
+
+    Some(
+        format!(
+            "{} ({}, ELF)",
+            class,
+            architecture
+        )
+    )
+}
+
+
+#[cfg(target_os = "windows")]
+fn read_executable_architecture(
+    path: &Path,
+) -> Option<String> {
+    read_pe_architecture(
+        path
+    )
+}
+
+
+#[cfg(not(target_os = "windows"))]
+fn read_executable_architecture(
+    path: &Path,
+) -> Option<String> {
+    read_pe_architecture(
+        path
+    )
+    .or_else(
+        || {
+            read_elf_architecture(
+                path
+            )
+        }
+    )
+}
+
+
 fn executable_score(
     game_name: &str,
     root: &Path,
@@ -458,14 +712,6 @@ fn executable_score(
             )
             .unwrap_or("")
             .to_ascii_lowercase();
-
-    if !file_name
-        .ends_with(
-            ".exe"
-        )
-    {
-        return i64::MIN;
-    }
 
     let stem =
         file
@@ -626,25 +872,9 @@ fn detect_executable(
             .iter()
             .filter(
                 |file| {
-                    file
-                        .path
-                        .extension()
-                        .and_then(
-                            |value| {
-                                value.to_str()
-                            }
-                        )
-                        .map(
-                            |value| {
-                                value
-                                    .eq_ignore_ascii_case(
-                                        "exe"
-                                    )
-                            }
-                        )
-                        .unwrap_or(
-                            false
-                        )
+                    is_supported_executable(
+                        &file.path
+                    )
                 }
             )
             .map(
@@ -735,7 +965,7 @@ fn detect_executable(
             ),
 
         architecture:
-            read_pe_architecture(
+            read_executable_architecture(
                 &best.path
             ),
 

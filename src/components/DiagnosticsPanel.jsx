@@ -804,7 +804,7 @@ export default function DiagnosticsPanel({
               title="System"
             >
               <DiagnosticRow
-                label="Windows"
+                label="Operating System"
                 value={
                   hardware
                     ? `${hardware.os} ${hardware.osVersion}`

@@ -5,6 +5,8 @@ import {
   useState,
   } from "react";
 
+import { invoke } from "@tauri-apps/api/core";
+
 import Sidebar from "./components/Sidebar";
 import GameDetails from "./components/GameDetails";
 import AppErrorBoundary from "./components/AppErrorBoundary";
@@ -169,6 +171,94 @@ function isRecentlyAnalyzed(
   ) &&
     Date.now() - timestamp <
       freshMs;
+}
+
+
+async function getLinuxIntegratedGames(installedGames) {
+  let platform = null;
+
+  try {
+    platform = await invoke("get_platform_info");
+  } catch {
+    return installedGames;
+  }
+
+  if (String(platform?.hostPlatform ?? "").toLowerCase() !== "linux") {
+    return installedGames;
+  }
+
+  try {
+    const [
+      steamResult,
+      heroicResult,
+      lutrisResult,
+    ] =
+      await Promise.allSettled([
+        invoke(
+          "get_linux_steam_games"
+        ),
+        invoke(
+          "get_heroic_installed_games"
+        ),
+        invoke(
+          "get_lutris_installed_games"
+        ),
+      ]);
+
+    const linuxSteamGames =
+      steamResult.status ===
+      "fulfilled"
+        ? steamResult.value
+        : [];
+
+    const heroicGames =
+      heroicResult.status ===
+      "fulfilled"
+        ? heroicResult.value
+        : [];
+
+    const lutrisGames =
+      lutrisResult.status ===
+      "fulfilled"
+        ? lutrisResult.value
+        : [];
+
+    if (
+      heroicResult.status ===
+      "rejected"
+    ) {
+      console.warn(
+        "[GameAtlas] Heroic discovery failed:",
+        heroicResult.reason
+      );
+    }
+
+    if (
+      lutrisResult.status ===
+      "rejected"
+    ) {
+      console.warn(
+        "[GameAtlas] Lutris discovery failed:",
+        lutrisResult.reason
+      );
+    }
+
+    const merged = [
+      ...(Array.isArray(installedGames) ? installedGames : []),
+      ...(Array.isArray(linuxSteamGames) ? linuxSteamGames : []),
+      ...(Array.isArray(heroicGames) ? heroicGames : []),
+      ...(Array.isArray(lutrisGames) ? lutrisGames : []),
+    ];
+
+    return Array.from(
+      new Map(
+        merged.map((game) => [game.id, game])
+      ).values()
+    );
+  } catch (error) {
+    console.warn("[GameAtlas] Linux Steam discovery failed:", error);
+    return installedGames;
+  }
 }
 
 
@@ -808,6 +898,93 @@ function prepareGameForUiWithCachedInsight(
   };
 }
 
+function selectPcgwPlatformPath(
+  game,
+  data,
+  type
+) {
+  const isConfig =
+    type === "config";
+
+  const generic =
+    isConfig
+      ? data.configLocation
+      : data.saveLocation;
+
+  const windows =
+    isConfig
+      ? data.configLocationWindows
+      : data.saveLocationWindows;
+
+  const linux =
+    isConfig
+      ? data.configLocationLinux
+      : data.saveLocationLinux;
+
+  const steamPlay =
+    isConfig
+      ? data.configLocationSteamPlay
+      : data.saveLocationSteamPlay;
+
+  const runtime =
+    String(
+      game?.runtime
+      ?? ""
+    )
+    .trim()
+    .toLowerCase();
+
+  const isLinuxSteamGame =
+    game?.source === "steam-linux"
+    || runtime === "proton"
+    || runtime === "native_linux"
+    || Boolean(
+      game?.protonPrefix
+    );
+
+  if (!isLinuxSteamGame) {
+    return windows
+      ?? generic
+      ?? linux
+      ?? steamPlay
+      ?? null;
+  }
+
+  if (
+    runtime === "native_linux"
+    || game?.nativeLinux === true
+  ) {
+    /*
+     * A native Linux game should never present a Windows path as if it
+     * were valid Linux data. Prefer PCGW's native Linux row, then a
+     * generic non-Windows value if the backend found one.
+     */
+    return linux
+      ?? null;
+  }
+
+  if (
+    runtime === "proton"
+    || game?.proton === true
+    || game?.protonPrefix
+  ) {
+    /*
+     * PCGW's Steam Play row is authoritative when supplied.
+     * If absent, return the Windows row so the existing Proton-aware
+     * Rust resolver can translate it through the exact prefix.
+     */
+    return steamPlay
+      ?? windows
+      ?? generic
+      ?? null;
+  }
+
+  return linux
+    ?? steamPlay
+    ?? null;
+}
+
+
 function mergePcgwData(
   game,
   data
@@ -1203,12 +1380,18 @@ function mergePcgwData(
         null,
 
       configLocation:
-        data.configLocation ??
-        null,
+        selectPcgwPlatformPath(
+          game,
+          data,
+          "config"
+        ),
 
       saveLocation:
-        data.saveLocation ??
-        null,
+        selectPcgwPlatformPath(
+          game,
+          data,
+          "save"
+        ),
     },
   };
 }
@@ -2696,8 +2879,13 @@ export default function App() {
 
 
     try {
-      const installedGames =
+      const scannedInstalledGames =
         await getInstalledGames();
+
+      const installedGames =
+        await getLinuxIntegratedGames(
+          scannedInstalledGames
+        );
 
       const manualGames =
         getManualGames();

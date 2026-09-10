@@ -184,7 +184,60 @@ fn steam_candidates() -> Vec<PathBuf> {
 }
 
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn steam_candidates() -> Vec<PathBuf> {
+    let mut candidates =
+        Vec::new();
+
+    /*
+     * Native Linux install.
+     */
+    for path in [
+        "/usr/bin/steam",
+        "/usr/local/bin/steam",
+    ] {
+        candidates.push(
+            PathBuf::from(
+                path
+            )
+        );
+    }
+
+    /*
+     * Bazzite development commonly runs GameAtlas inside Distrobox.
+     * The container shares HOME with the host, so detecting a host
+     * Steam data directory is enough to know Steam is present even
+     * when the host's /usr/bin/steam is not mounted into the container.
+     */
+    if let Ok(home) =
+        env::var(
+            "HOME"
+        )
+    {
+        for relative in [
+            ".steam/steam",
+            ".local/share/Steam",
+            ".var/app/com.valvesoftware.Steam/data/Steam",
+        ] {
+            candidates.push(
+                PathBuf::from(
+                    &home
+                )
+                .join(
+                    relative
+                )
+            );
+        }
+    }
+
+    candidates
+}
+
+
+#[cfg(not(any(
+    target_os = "windows",
+    target_os = "linux"
+)))]
 fn steam_candidates() -> Vec<PathBuf> {
     Vec::new()
 }
@@ -653,8 +706,591 @@ fn xbox_launcher_status() -> LauncherStatus {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn heroic_command_available(
+    program: &str,
+    args: &[&str],
+) -> bool {
+    let direct =
+        Command::new(
+            program
+        )
+        .args(
+            args
+        )
+        .status()
+        .map(
+            |status| {
+                status.success()
+            }
+        )
+        .unwrap_or(
+            false
+        );
+
+    if direct {
+        return true;
+    }
+
+    if command_exists(
+        "distrobox-host-exec"
+    ) {
+        let mut host_args =
+            Vec::with_capacity(
+                args.len() + 1
+            );
+
+        host_args.push(
+            program
+        );
+
+        host_args.extend_from_slice(
+            args
+        );
+
+        return Command::new(
+            "distrobox-host-exec"
+        )
+        .args(
+            host_args
+        )
+        .status()
+        .map(
+            |status| {
+                status.success()
+            }
+        )
+        .unwrap_or(
+            false
+        );
+    }
+
+    false
+}
+
+
+#[cfg(target_os = "linux")]
+fn heroic_flatpak_available() -> bool {
+    heroic_command_available(
+        "flatpak",
+        &[
+            "info",
+            "com.heroicgameslauncher.hgl",
+        ],
+    )
+}
+
+
+#[cfg(target_os = "linux")]
+fn heroic_native_available() -> bool {
+    heroic_command_available(
+        "heroic",
+        &[
+            "--version",
+        ],
+    )
+}
+
+
+#[cfg(target_os = "linux")]
+fn heroic_launcher_status() -> LauncherStatus {
+    let flatpak =
+        heroic_flatpak_available();
+
+    let native =
+        heroic_native_available();
+
+    let installed =
+        flatpak
+            || native;
+
+    LauncherStatus {
+        id:
+            "heroic"
+                .to_string(),
+
+        label:
+            "Heroic Games Launcher"
+                .to_string(),
+
+        installed,
+
+        path:
+            if flatpak {
+                Some(
+                    "flatpak:com.heroicgameslauncher.hgl"
+                        .to_string()
+                )
+            } else if native {
+                Some(
+                    "heroic"
+                        .to_string()
+                )
+            } else {
+                None
+            },
+
+        protocol_registered:
+            installed,
+
+        launch_method:
+            "Heroic launch protocol"
+                .to_string(),
+
+        message:
+            if flatpak {
+                "Heroic Flatpak detected. Epic and GOG games can launch through Heroic with their configured Wine/Proton settings."
+                    .to_string()
+            } else if native {
+                "Heroic detected. Epic and GOG games can launch through Heroic with their configured Wine/Proton settings."
+                    .to_string()
+            } else {
+                "Heroic Games Launcher was not detected on the Linux host."
+                    .to_string()
+            },
+    }
+}
+
+
+#[cfg(not(target_os = "linux"))]
+fn heroic_launcher_status() -> LauncherStatus {
+    LauncherStatus {
+        id:
+            "heroic"
+                .to_string(),
+
+        label:
+            "Heroic Games Launcher"
+                .to_string(),
+
+        installed:
+            false,
+
+        path:
+            None,
+
+        protocol_registered:
+            false,
+
+        launch_method:
+            "Heroic launch protocol"
+                .to_string(),
+
+        message:
+            "Heroic integration is currently enabled for Linux GameAtlas builds."
+                .to_string(),
+    }
+}
+
+
+#[cfg(target_os = "linux")]
+fn launch_heroic_game(
+    runner: &str,
+    app_name: &str,
+) -> Result<(), String> {
+    let uri =
+        format!(
+            "heroic://launch?appName={}&runner={}",
+            app_name,
+            runner
+        );
+
+    let use_host =
+        command_exists(
+            "distrobox-host-exec"
+        );
+
+    if heroic_flatpak_available() {
+        let mut command =
+            if use_host {
+                let mut command =
+                    Command::new(
+                        "distrobox-host-exec"
+                    );
+
+                command.arg(
+                    "flatpak"
+                );
+
+                command
+            } else {
+                Command::new(
+                    "flatpak"
+                )
+            };
+
+        command
+            .args([
+                "run",
+                "com.heroicgameslauncher.hgl",
+                "--no-gui",
+                &uri,
+            ])
+            .spawn()
+            .map_err(
+                |error| {
+                    format!(
+                        "Heroic Flatpak was detected, but GameAtlas could not start the game: {}",
+                        error
+                    )
+                }
+            )?;
+
+        return Ok(());
+    }
+
+    if heroic_native_available() {
+        let mut command =
+            if use_host {
+                let mut command =
+                    Command::new(
+                        "distrobox-host-exec"
+                    );
+
+                command.arg(
+                    "heroic"
+                );
+
+                command
+            } else {
+                Command::new(
+                    "heroic"
+                )
+            };
+
+        command
+            .arg(
+                "--no-gui"
+            )
+            .arg(
+                &uri
+            )
+            .spawn()
+            .map_err(
+                |error| {
+                    format!(
+                        "Heroic was detected, but GameAtlas could not start the game: {}",
+                        error
+                    )
+                }
+            )?;
+
+        return Ok(());
+    }
+
+    /*
+     * Last chance: use the desktop protocol handler. This covers
+     * installations where Heroic registered the protocol but its binary
+     * isn't on GameAtlas's PATH.
+     */
+    open_protocol(
+        &uri
+    )
+}
+
+
+#[cfg(not(target_os = "linux"))]
+fn launch_heroic_game(
+    _runner: &str,
+    _app_name: &str,
+) -> Result<(), String> {
+    Err(
+        "Heroic game launching is currently enabled for Linux GameAtlas builds."
+            .to_string()
+    )
+}
+
+
+#[cfg(target_os = "linux")]
+fn lutris_command_success(
+    program: &str,
+    args: &[&str],
+) -> bool {
+    let direct =
+        Command::new(
+            program
+        )
+        .args(
+            args
+        )
+        .status()
+        .map(
+            |status| {
+                status.success()
+            }
+        )
+        .unwrap_or(
+            false
+        );
+
+    if direct {
+        return true;
+    }
+
+    if command_exists(
+        "distrobox-host-exec"
+    ) {
+        let mut host_args =
+            Vec::with_capacity(
+                args.len() + 1
+            );
+
+        host_args.push(
+            program
+        );
+
+        host_args.extend_from_slice(
+            args
+        );
+
+        return Command::new(
+            "distrobox-host-exec"
+        )
+        .args(
+            host_args
+        )
+        .status()
+        .map(
+            |status| {
+                status.success()
+            }
+        )
+        .unwrap_or(
+            false
+        );
+    }
+
+    false
+}
+
+
+#[cfg(target_os = "linux")]
+fn lutris_flatpak_available() -> bool {
+    lutris_command_success(
+        "flatpak",
+        &[
+            "info",
+            "net.lutris.Lutris",
+        ],
+    )
+}
+
+
+#[cfg(target_os = "linux")]
+fn lutris_native_available() -> bool {
+    lutris_command_success(
+        "lutris",
+        &[
+            "--version",
+        ],
+    )
+}
+
+
+#[cfg(target_os = "linux")]
+fn lutris_launcher_status() -> LauncherStatus {
+    let flatpak =
+        lutris_flatpak_available();
+
+    let native =
+        lutris_native_available();
+
+    let installed =
+        flatpak
+            || native;
+
+    LauncherStatus {
+        id:
+            "lutris"
+                .to_string(),
+
+        label:
+            "Lutris"
+                .to_string(),
+
+        installed,
+
+        path:
+            if flatpak {
+                Some(
+                    "flatpak:net.lutris.Lutris"
+                        .to_string()
+                )
+            } else if native {
+                Some(
+                    "lutris"
+                        .to_string()
+                )
+            } else {
+                None
+            },
+
+        protocol_registered:
+            installed,
+
+        launch_method:
+            "Lutris rungameid protocol"
+                .to_string(),
+
+        message:
+            if flatpak {
+                "Lutris Flatpak detected. Games launch through Lutris with their configured runner and prefix."
+                    .to_string()
+            } else if native {
+                "Lutris detected. Games launch through Lutris with their configured runner and prefix."
+                    .to_string()
+            } else {
+                "Lutris was not detected on the Linux host."
+                    .to_string()
+            },
+    }
+}
+
+
+#[cfg(not(target_os = "linux"))]
+fn lutris_launcher_status() -> LauncherStatus {
+    LauncherStatus {
+        id:
+            "lutris"
+                .to_string(),
+
+        label:
+            "Lutris"
+                .to_string(),
+
+        installed:
+            false,
+
+        path:
+            None,
+
+        protocol_registered:
+            false,
+
+        launch_method:
+            "Lutris rungameid protocol"
+                .to_string(),
+
+        message:
+            "Lutris integration is currently enabled for Linux GameAtlas builds."
+                .to_string(),
+    }
+}
+
+
+#[cfg(target_os = "linux")]
+fn launch_lutris_game(
+    game_id: &str,
+) -> Result<(), String> {
+    let uri =
+        format!(
+            "lutris:rungameid/{}",
+            game_id
+        );
+
+    let host_exec =
+        command_exists(
+            "distrobox-host-exec"
+        );
+
+    if lutris_flatpak_available() {
+        let mut command =
+            if host_exec {
+                let mut command =
+                    Command::new(
+                        "distrobox-host-exec"
+                    );
+
+                command.arg(
+                    "flatpak"
+                );
+
+                command
+            } else {
+                Command::new(
+                    "flatpak"
+                )
+            };
+
+        command
+            .args([
+                "run",
+                "net.lutris.Lutris",
+                &uri,
+            ])
+            .spawn()
+            .map_err(
+                |error| {
+                    format!(
+                        "Lutris Flatpak was detected, but GameAtlas could not start the game: {}",
+                        error
+                    )
+                }
+            )?;
+
+        return Ok(());
+    }
+
+    if lutris_native_available() {
+        let mut command =
+            if host_exec {
+                let mut command =
+                    Command::new(
+                        "distrobox-host-exec"
+                    );
+
+                command.arg(
+                    "lutris"
+                );
+
+                command
+            } else {
+                Command::new(
+                    "lutris"
+                )
+            };
+
+        command
+            .arg(
+                &uri
+            )
+            .spawn()
+            .map_err(
+                |error| {
+                    format!(
+                        "Lutris was detected, but GameAtlas could not start the game: {}",
+                        error
+                    )
+                }
+            )?;
+
+        return Ok(());
+    }
+
+    Err(
+        "Lutris is not available on the Linux host."
+            .to_string()
+    )
+}
+
+
+#[cfg(not(target_os = "linux"))]
+fn launch_lutris_game(
+    _game_id: &str,
+) -> Result<(), String> {
+    Err(
+        "Lutris launching is currently enabled for Linux GameAtlas builds."
+            .to_string()
+    )
+}
+
+
 fn all_launcher_statuses() -> Vec<LauncherStatus> {
     vec![
+        lutris_launcher_status(),
+
+        heroic_launcher_status(),
+
         launcher_status(
             "steam",
             "Steam",
@@ -714,7 +1350,11 @@ fn launcher_status_for_store(
         );
 
     let id =
-        if normalized == "steam" {
+        if normalized == "heroic - epic" || normalized == "heroic - gog" || normalized == "heroic" {
+            "heroic"
+        } else if normalized == "lutris" || normalized.starts_with("lutris - ") {
+            "lutris"
+        } else if normalized == "steam" {
             "steam"
         } else if normalized == "epic"
             || normalized == "epic games"
@@ -797,33 +1437,135 @@ fn open_protocol(
 }
 
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn command_exists(
+    command: &str,
+) -> bool {
+    Command::new(
+        "sh"
+    )
+    .args([
+        "-lc",
+        &format!(
+            "command -v {} >/dev/null 2>&1",
+            command
+        ),
+    ])
+    .status()
+    .map(
+        |status| {
+            status.success()
+        }
+    )
+    .unwrap_or(
+        false
+    )
+}
+
+
+#[cfg(target_os = "linux")]
 fn open_protocol(
     uri: &str,
 ) -> Result<(), String> {
-    let status =
-        Command::new(
-            "xdg-open"
+    /*
+     * When developing GameAtlas in Distrobox, Steam lives on the
+     * Bazzite host rather than inside the Fedora development container.
+     * Prefer a host-exec handoff for Steam URIs when available.
+     */
+    if uri.starts_with(
+        "steam://"
+    )
+        && command_exists(
+            "distrobox-host-exec"
         )
-        .arg(uri)
-        .status()
+    {
+        Command::new(
+            "distrobox-host-exec"
+        )
+        .arg(
+            "steam"
+        )
+        .arg(
+            uri
+        )
+        .spawn()
         .map_err(
             |error| {
                 format!(
-                    "Failed to open launcher URI: {}",
+                    "GameAtlas could not send the Steam launch request to the Bazzite host: {}",
                     error
                 )
             }
         )?;
 
-    if !status.success() {
-        return Err(
-            "The launcher URI could not be opened."
-                .to_string()
-        );
+        return Ok(());
     }
 
+    /*
+     * Native Linux GameAtlas build with a directly available Steam
+     * client.
+     */
+    if uri.starts_with(
+        "steam://"
+    )
+        && command_exists(
+            "steam"
+        )
+    {
+        Command::new(
+            "steam"
+        )
+        .arg(
+            uri
+        )
+        .spawn()
+        .map_err(
+            |error| {
+                format!(
+                    "GameAtlas detected Steam but could not start the game: {}",
+                    error
+                )
+            }
+        )?;
+
+        return Ok(());
+    }
+
+    /*
+     * Desktop URI handler / portal fallback. This also allows a
+     * containerized environment to hand the URI out through xdg-open.
+     */
+    Command::new(
+        "xdg-open"
+    )
+    .arg(
+        uri
+    )
+    .spawn()
+    .map_err(
+        |error| {
+            format!(
+                "Failed to open launcher URI: {}",
+                error
+            )
+        }
+    )?;
+
     Ok(())
+}
+
+
+#[cfg(not(any(
+    target_os = "windows",
+    target_os = "linux"
+)))]
+fn open_protocol(
+    _uri: &str,
+) -> Result<(), String> {
+    Err(
+        "Launcher URI opening is not supported on this operating system."
+            .to_string()
+    )
 }
 
 
@@ -999,6 +1741,117 @@ pub fn launch_game(
             }
         );
     }
+
+    if store_normalized
+        == "heroic - epic"
+        || store_normalized
+            == "heroic - gog"
+        || store_normalized
+            == "heroic"
+    {
+        let encoded =
+            clean_launcher_id(
+                launcher_id
+                    .as_deref()
+            )
+            .ok_or_else(
+                || {
+                    "This Heroic game is missing its Heroic runner/app identifier."
+                        .to_string()
+                }
+            )?;
+
+        let (
+            runner,
+            app_name
+        ) =
+            encoded
+                .split_once(
+                    ':'
+                )
+                .ok_or_else(
+                    || {
+                        "The Heroic game identifier is invalid."
+                            .to_string()
+                    }
+                )?;
+
+        logging::dev_log(
+            &format!(
+                "[HEROIC LAUNCH] runner={:?}, app={:?}",
+                runner,
+                app_name
+            )
+        );
+
+        launch_heroic_game(
+            runner,
+            app_name,
+        )?;
+
+        return Ok(
+            LaunchResult {
+                launched:
+                    true,
+
+                method:
+                    "heroic_protocol"
+                        .to_string(),
+
+                message:
+                    "Launch request sent to Heroic."
+                        .to_string(),
+            }
+        );
+    }
+
+
+    if store_normalized
+        == "lutris"
+        || store_normalized
+            .starts_with(
+                "lutris - "
+            )
+    {
+        let game_id =
+            clean_launcher_id(
+                launcher_id
+                    .as_deref()
+            )
+            .ok_or_else(
+                || {
+                    "This Lutris game is missing its Lutris game ID."
+                        .to_string()
+                }
+            )?;
+
+        logging::dev_log(
+            &format!(
+                "[LUTRIS LAUNCH] id={:?}",
+                game_id
+            )
+        );
+
+        launch_lutris_game(
+            &game_id
+        )?;
+
+        return Ok(
+            LaunchResult {
+                launched:
+                    true,
+
+                method:
+                    "lutris_rungameid"
+                        .to_string(),
+
+                message:
+                    "Launch request sent to Lutris."
+                        .to_string(),
+            }
+        );
+    }
+
 
     logging::dev_log(
         &format!(

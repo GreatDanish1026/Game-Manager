@@ -24,6 +24,10 @@ export async function inspectSaveBrowser(
       installPath:
         game?.installPath
         ?? null,
+
+      protonPrefix:
+        game?.protonPrefix
+        ?? null,
     }
   );
 }

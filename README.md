@@ -19,9 +19,7 @@ It scans supported launchers, matches games with PCGamingWiki data, and brings t
 
 ## Platform
 
-GameAtlas currently supports **Windows**.
-
-Linux / Proton support is planned for a future major release.
+GameAtlas supports **Windows** and **Linux**. Linux 2.0 support is focused on Steam, Heroic (Epic/GOG), and Lutris, including Proton-aware paths and save tools.
 
 ## Install
 

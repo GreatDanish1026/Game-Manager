@@ -25,6 +25,10 @@ function commonArgs(
     installPath:
       game.installPath
       ?? null,
+
+    protonPrefix:
+      game?.protonPrefix
+      ?? null,
   };
 }
 

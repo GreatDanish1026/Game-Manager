@@ -29,6 +29,8 @@ import {
   useState,
 } from "react";
 
+import { invoke } from "@tauri-apps/api/core";
+
 import {
   openUrl,
 } from "@tauri-apps/plugin-opener";
@@ -40,6 +42,7 @@ import CollapsibleSection from "./CollapsibleSection";
 import CompactFeatureGrid from "./CompactFeatureGrid";
 import ModDashboard from "./ModDashboard";
 import QuickStatusBar from "./QuickStatusBar";
+import LinuxRuntimePanel from "./LinuxRuntimePanel";
 import LaunchProfilesPanel from "./LaunchProfilesPanel";
 import PlayStatusNotesPanel from "./PlayStatusNotesPanel";
 import RecentActivityPanel from "./RecentActivityPanel";
@@ -762,10 +765,26 @@ export default function GameDetails({
     );
 
     try {
-      await openGamePath(
-        path,
-        game.installPath
-      );
+      if (
+        game.protonPrefix
+      ) {
+        await invoke(
+          "open_game_path_with_context",
+          {
+            path,
+            installPath:
+              game.installPath
+              ?? null,
+            protonPrefix:
+              game.protonPrefix,
+          }
+        );
+      } else {
+        await openGamePath(
+          path,
+          game.installPath
+        );
+      }
     } catch (error) {
       logError(
         "[Paths] Failed to open:",
@@ -986,7 +1005,13 @@ export default function GameDetails({
                 }
               />
 
-              <GamePersonalization
+                            <LinuxRuntimePanel
+                game={
+                  game
+                }
+              />
+
+<GamePersonalization
                 game={
                   game
                 }

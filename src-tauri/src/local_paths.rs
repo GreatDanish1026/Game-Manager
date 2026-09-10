@@ -401,8 +401,23 @@ fn normalize_platform_separators(
 
     #[cfg(not(target_os = "windows"))]
     {
+        /*
+         * PCGamingWiki path templates frequently use Windows-style
+         * backslashes even when the platform-specific root has already
+         * been expanded to a Linux filesystem path.
+         *
+         * On Unix, backslash is a normal filename character rather than
+         * a path separator, so a mixed path such as:
+         *
+         *   /home/user/.steam/steam/userdata\\123\\456\\remote
+         *
+         * must be normalized before existence checks or opening.
+         */
         value
-            .to_string()
+            .replace(
+                '\\',
+                "/"
+            )
     }
 }
 
@@ -532,7 +547,48 @@ fn steam_root_candidates() -> Vec<PathBuf> {
 }
 
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn steam_root_candidates() -> Vec<PathBuf> {
+    let Ok(home) =
+        env::var(
+            "HOME"
+        )
+    else {
+        return Vec::new();
+    };
+
+    let home =
+        PathBuf::from(
+            home
+        );
+
+    let candidates = [
+        home.join(
+            ".steam/steam"
+        ),
+        home.join(
+            ".local/share/Steam"
+        ),
+        home.join(
+            ".var/app/com.valvesoftware.Steam/data/Steam"
+        ),
+    ];
+
+    candidates
+        .into_iter()
+        .filter(
+            |path| {
+                path.is_dir()
+            }
+        )
+        .collect()
+}
+
+
+#[cfg(not(any(
+    target_os = "windows",
+    target_os = "linux"
+)))]
 fn steam_root_candidates() -> Vec<PathBuf> {
     Vec::new()
 }
@@ -728,6 +784,307 @@ fn steam_path_candidates(
 }
 
 
+#[cfg(target_os = "linux")]
+fn normalize_proton_relative_path(
+    value: &str,
+) -> String {
+    value
+        .replace(
+            '\\',
+            "/"
+        )
+        .trim_start_matches(
+            '/'
+        )
+        .to_string()
+}
+
+
+#[cfg(target_os = "linux")]
+fn proton_translate_candidate(
+    candidate: &str,
+    proton_prefix: Option<&str>,
+) -> String {
+    let Some(prefix) =
+        proton_prefix
+            .map(str::trim)
+            .filter(
+                |value| {
+                    !value.is_empty()
+                }
+            )
+    else {
+        return candidate
+            .to_string();
+    };
+
+    let prefix =
+        PathBuf::from(
+            prefix
+        );
+
+    let user =
+        prefix
+            .join(
+                "drive_c"
+            )
+            .join(
+                "users"
+            )
+            .join(
+                "steamuser"
+            );
+
+    let roaming =
+        user
+            .join(
+                "AppData"
+            )
+            .join(
+                "Roaming"
+            );
+
+    let local =
+        user
+            .join(
+                "AppData"
+            )
+            .join(
+                "Local"
+            );
+
+    let documents =
+        user
+            .join(
+                "Documents"
+            );
+
+    let saved_games =
+        user
+            .join(
+                "Saved Games"
+            );
+
+    let program_data =
+        prefix
+            .join(
+                "drive_c"
+            )
+            .join(
+                "ProgramData"
+            );
+
+    let mut output =
+        candidate
+            .trim()
+            .to_string();
+
+    for (
+        token,
+        replacement,
+    ) in [
+        (
+            "<userprofile\\documents>",
+            documents
+                .to_string_lossy()
+                .as_ref(),
+        ),
+        (
+            "<userprofile/documents>",
+            documents
+                .to_string_lossy()
+                .as_ref(),
+        ),
+        (
+            "<userprofile\\saved games>",
+            saved_games
+                .to_string_lossy()
+                .as_ref(),
+        ),
+        (
+            "<userprofile/saved games>",
+            saved_games
+                .to_string_lossy()
+                .as_ref(),
+        ),
+        (
+            "%userprofile%",
+            user
+                .to_string_lossy()
+                .as_ref(),
+        ),
+        (
+            "<userprofile>",
+            user
+                .to_string_lossy()
+                .as_ref(),
+        ),
+        (
+            "{userprofile}",
+            user
+                .to_string_lossy()
+                .as_ref(),
+        ),
+        (
+            "%appdata%",
+            roaming
+                .to_string_lossy()
+                .as_ref(),
+        ),
+        (
+            "<appdata>",
+            roaming
+                .to_string_lossy()
+                .as_ref(),
+        ),
+        (
+            "%localappdata%",
+            local
+                .to_string_lossy()
+                .as_ref(),
+        ),
+        (
+            "<localappdata>",
+            local
+                .to_string_lossy()
+                .as_ref(),
+        ),
+        (
+            "<documents>",
+            documents
+                .to_string_lossy()
+                .as_ref(),
+        ),
+        (
+            "<saved games>",
+            saved_games
+                .to_string_lossy()
+                .as_ref(),
+        ),
+        (
+            "%programdata%",
+            program_data
+                .to_string_lossy()
+                .as_ref(),
+        ),
+        (
+            "<programdata>",
+            program_data
+                .to_string_lossy()
+                .as_ref(),
+        ),
+    ] {
+        output =
+            replace_case_insensitive(
+                &output,
+                token,
+                replacement,
+            );
+    }
+
+    /*
+     * PCGamingWiki sometimes provides a literal Windows path rather
+     * than a placeholder-based path. Translate the common Proton user
+     * root and C: drive forms conservatively.
+     */
+    let lower =
+        output
+            .to_ascii_lowercase();
+
+    if let Some(relative) =
+        lower.strip_prefix(
+            "c:\\users\\steamuser\\"
+        )
+    {
+        let offset =
+            output.len()
+                - relative.len();
+
+        let actual_relative =
+            normalize_proton_relative_path(
+                &output[
+                    offset..
+                ]
+            );
+
+        output =
+            user
+                .join(
+                    actual_relative
+                )
+                .to_string_lossy()
+                .to_string();
+    } else if let Some(relative) =
+        lower.strip_prefix(
+            "c:/users/steamuser/"
+        )
+    {
+        let offset =
+            output.len()
+                - relative.len();
+
+        output =
+            user
+                .join(
+                    normalize_proton_relative_path(
+                        &output[
+                            offset..
+                        ]
+                    )
+                )
+                .to_string_lossy()
+                .to_string();
+    } else if lower.starts_with(
+        "c:\\"
+    )
+        || lower.starts_with(
+            "c:/"
+        )
+    {
+        output =
+            prefix
+                .join(
+                    "drive_c"
+                )
+                .join(
+                    normalize_proton_relative_path(
+                        &output[3..]
+                    )
+                )
+                .to_string_lossy()
+                .to_string();
+    }
+
+    /*
+     * Any remaining backslashes are Windows separators within the
+     * translated Proton path.
+     */
+    if output.starts_with(
+        prefix
+            .to_string_lossy()
+            .as_ref()
+    ) {
+        output =
+            output.replace(
+                '\\',
+                "/"
+            );
+    }
+
+    output
+}
+
+
+#[cfg(not(target_os = "linux"))]
+fn proton_translate_candidate(
+    candidate: &str,
+    _proton_prefix: Option<&str>,
+) -> String {
+    candidate
+        .to_string()
+}
+
+
 fn normalize_candidate(
     candidate: &str,
     install_path: Option<&str>,
@@ -804,9 +1161,10 @@ fn normalize_candidate(
 }
 
 
-pub(crate) fn resolve_game_path(
+fn resolve_game_path_internal(
     raw_path: &str,
     install_path: Option<&str>,
+    proton_prefix: Option<&str>,
 ) -> Result<PathBuf, String> {
     let candidates =
         candidate_strings(
@@ -834,9 +1192,15 @@ pub(crate) fn resolve_game_path(
         for expanded_candidate in
             expanded_candidates
         {
+            let translated_candidate =
+                proton_translate_candidate(
+                    &expanded_candidate,
+                    proton_prefix,
+                );
+
             let Some(path) =
                 normalize_candidate(
-                    &expanded_candidate,
+                    &translated_candidate,
                     install_path,
                 )
             else {
@@ -894,6 +1258,32 @@ pub(crate) fn resolve_game_path(
     Err(
         "The reported location is not a filesystem path that Game Manager can open."
             .to_string()
+    )
+}
+
+
+
+pub(crate) fn resolve_game_path(
+    raw_path: &str,
+    install_path: Option<&str>,
+) -> Result<PathBuf, String> {
+    resolve_game_path_internal(
+        raw_path,
+        install_path,
+        None,
+    )
+}
+
+
+pub(crate) fn resolve_game_path_with_context(
+    raw_path: &str,
+    install_path: Option<&str>,
+    proton_prefix: Option<&str>,
+) -> Result<PathBuf, String> {
+    resolve_game_path_internal(
+        raw_path,
+        install_path,
+        proton_prefix,
     )
 }
 
@@ -1266,3 +1656,29 @@ pub fn open_game_path(
         &resolved
     )
 }
+
+#[tauri::command]
+pub fn open_game_path_with_context(
+    path: String,
+    install_path: Option<String>,
+    proton_prefix: Option<String>,
+) -> Result<(), String> {
+    let resolved =
+        resolve_game_path_with_context(
+            &path,
+            install_path
+                .as_deref(),
+            proton_prefix
+                .as_deref(),
+        )?;
+
+    println!(
+        "[PATHS] Opening with runtime context: {}",
+        resolved.display()
+    );
+
+    open_in_file_manager(
+        &resolved
+    )
+}
+

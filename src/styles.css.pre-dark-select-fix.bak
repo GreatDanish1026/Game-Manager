@@ -69,24 +69,3 @@ input {
 button {
   user-select: none;
 }
-/* ============================================================
-   Native form controls
-   Keep selects consistent with GameAtlas's dark UI.
-   ============================================================ */
-select {
-  font: inherit;
-  color-scheme: dark;
-  background-color: #0b0f14;
-  color: #e5e7eb;
-  border-color: #242a33;
-}
-
-select:focus {
-  outline: none;
-  border-color: #5eead4;
-}
-
-select option {
-  background-color: #0b0f14;
-  color: #e5e7eb;
-}

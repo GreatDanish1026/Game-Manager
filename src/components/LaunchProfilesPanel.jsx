@@ -28,6 +28,7 @@ import {
 import {
   createLaunchProfile,
   getLaunchProfileState,
+  getInstalledProtonTools,
   launchConfiguredProfile,
   resetLaunchProfiles,
   saveLaunchProfileState,
@@ -111,6 +112,9 @@ function ProfileEditor({
   profile,
   isDefault,
   detectedExecutable,
+  protonTools,
+  loadingProtonTools,
+  onRefreshProtonTools,
   launching,
   onChange,
   onDelete,
@@ -468,13 +472,14 @@ function ProfileEditor({
                   text-white/75
                   outline-none
                   focus:border-cyan-400/30
-                "
+                                    [color-scheme:dark]
+                  "
               >
-                <option value="launcher">
+                <option value="launcher" className="bg-[#101722] text-white">
                   Standard Launcher
                 </option>
 
-                <option value="direct">
+                <option value="direct" className="bg-[#101722] text-white">
                   Direct Executable
                 </option>
               </select>
@@ -617,6 +622,121 @@ function ProfileEditor({
                     focus:border-cyan-400/30
                   "
                 />
+              </label>
+
+
+              <label>
+                <div
+                  className="
+                    mb-1.5
+                    flex
+                    items-center
+                    justify-between
+                    gap-3
+                  "
+                >
+                  <span
+                    className="
+                      text-[10px]
+                      font-semibold
+                      uppercase
+                      tracking-wide
+                      text-white/30
+                    "
+                  >
+                    Custom Proton Override
+                    <span
+                      className="
+                        ml-2
+                        normal-case
+                        font-normal
+                        tracking-normal
+                        text-white/18
+                      "
+                    >
+                      optional
+                    </span>
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={
+                      onRefreshProtonTools
+                    }
+                    disabled={
+                      loadingProtonTools
+                    }
+                    className="
+                      text-[10px]
+                      font-semibold
+                      text-cyan-300/60
+                      hover:text-cyan-200
+                      disabled:opacity-40
+                    "
+                  >
+                    {
+                      loadingProtonTools
+                        ? "Refreshing..."
+                        : "Refresh Proton Versions"
+                    }
+                  </button>
+                </div>
+
+                <select
+                  value={
+                    profile
+                      .customProtonPath
+                    ?? ""
+                  }
+                  onChange={
+                    (event) =>
+                      onChange({
+                        ...profile,
+
+                        customProtonPath:
+                          event.target
+                            .value,
+                      })
+                  }
+                  className="
+                    w-full
+                    rounded-lg
+                    border
+                    border-white/[0.08]
+                    bg-[#101722]
+                    px-3
+                    py-2.5
+                    text-xs
+                    text-white/70
+                    outline-none
+                    focus:border-cyan-400/30
+                                      [color-scheme:dark]
+                  "
+                >
+                  <option value="" className="bg-[#101722] text-white">
+                    Detected / Steam Default
+                  </option>
+
+                  {protonTools.map(
+                    (tool) => (
+                      <option
+                        key={
+                          tool.path
+                        }
+                        value={
+                          tool.path
+                        }
+                       className="bg-[#101722] text-white">
+                        {tool.name}
+                        {
+                          tool.source
+                            ? ` · ${tool.source}`
+                            : ""
+                        }
+                      </option>
+                    )
+                  )}
+                </select>
               </label>
 
 
@@ -821,6 +941,22 @@ export default function LaunchProfilesPanel({
   ] =
     useState(
       null
+    );
+
+  const [
+    protonTools,
+    setProtonTools,
+  ] =
+    useState(
+      []
+    );
+
+  const [
+    loadingProtonTools,
+    setLoadingProtonTools,
+  ] =
+    useState(
+      false
     );
 
 
@@ -1061,6 +1197,34 @@ export default function LaunchProfilesPanel({
       },
       `"${profile.name}" is now the default Play Game profile.`
     );
+  }
+
+
+  async function refreshProtonTools() {
+    setLoadingProtonTools(
+      true
+    );
+
+    try {
+      const tools =
+        await getInstalledProtonTools();
+
+      setProtonTools(
+        Array.isArray(
+          tools
+        )
+          ? tools
+          : []
+      );
+    } catch {
+      setProtonTools(
+        []
+      );
+    } finally {
+      setLoadingProtonTools(
+        false
+      );
+    }
   }
 
 
@@ -1311,6 +1475,15 @@ export default function LaunchProfilesPanel({
               detectedExecutable={
                 detectedExecutable
               }
+              protonTools={
+                protonTools
+              }
+              loadingProtonTools={
+                loadingProtonTools
+              }
+              onRefreshProtonTools={
+                refreshProtonTools
+              }
               launching={
                 launchingId
                   === profile.id
@@ -1362,7 +1535,7 @@ export default function LaunchProfilesPanel({
           text-white/22
         "
       >
-        Launcher mode preserves GameAtlas's existing Steam, Epic, GOG, Ubisoft, EA, and Xbox launch behavior. Direct Executable mode is intended for modded executables, launch wrappers, benchmark modes, and games that accept command-line arguments. Some launcher-protected games may still require their normal store launcher.
+        Launcher mode preserves GameAtlas's existing store launch behavior. Direct Executable mode supports native Linux executables/scripts and Windows .exe targets for Steam games when GameAtlas knows the exact Proton compatibility tool. Some launcher-protected games may still require their normal store launcher.
       </div>
     </div>
   );

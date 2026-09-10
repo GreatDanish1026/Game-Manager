@@ -16,7 +16,9 @@ use serde::Serialize;
 
 use crate::logging;
 
-use crate::local_paths::resolve_game_path;
+use crate::local_paths::{
+    resolve_game_path_with_context,
+};
 
 
 #[derive(Debug, Clone, Serialize)]
@@ -465,27 +467,12 @@ fn apply_retention(
                 return Ok(0),
         };
 
-    /*
-     * Retention applies only to normal/manual backups.
-     * Restore-safety and pre-launch backups are intentionally protected
-     * from automatic pruning.
-     */
-    let manual_backups =
+    let backups =
         list_backups(
             directory
-        )?
-        .into_iter()
-        .filter(
-            |backup| {
-                backup.file_name
-                    .starts_with(
-                        "backup_"
-                    )
-            }
-        )
-        .collect::<Vec<_>>();
+        )?;
 
-    if manual_backups.len()
+    if backups.len()
         <= keep
     {
         return Ok(0);
@@ -495,7 +482,7 @@ fn apply_retention(
         0usize;
 
     for backup in
-        manual_backups
+        backups
             .iter()
             .skip(
                 keep
@@ -507,7 +494,7 @@ fn apply_retention(
         .map_err(
             |error| {
                 format!(
-                    "Failed to remove old manual backup {}: {}",
+                    "Failed to remove old backup {}: {}",
                     backup.file_name,
                     error
                 )
@@ -598,13 +585,251 @@ fn create_zip_archive(
 
 #[cfg(not(target_os = "windows"))]
 fn create_zip_archive(
-    _source: &Path,
-    _destination: &Path,
+    source: &Path,
+    destination: &Path,
 ) -> Result<(), String> {
-    Err(
-        "ZIP save backups are currently implemented for Windows."
-            .to_string()
-    )
+    use std::fs::File;
+    use std::io::{
+        Read,
+        Write,
+    };
+
+    use zip::write::FileOptions;
+    use zip::{
+        CompressionMethod,
+        ZipWriter,
+    };
+
+    fn add_path(
+        writer: &mut ZipWriter<File>,
+        path: &Path,
+        archive_name: &Path,
+    ) -> Result<(), String> {
+        let options =
+            FileOptions::default()
+                .compression_method(
+                    CompressionMethod::Deflated
+                )
+                .unix_permissions(
+                    0o644
+                );
+
+        if path.is_dir() {
+            let mut directory_name =
+                archive_name
+                    .to_string_lossy()
+                    .replace(
+                        '\\',
+                        "/"
+                    );
+
+            if !directory_name.ends_with(
+                '/'
+            ) {
+                directory_name.push(
+                    '/'
+                );
+            }
+
+            writer
+                .add_directory(
+                    directory_name,
+                    FileOptions::default()
+                        .unix_permissions(
+                            0o755
+                        ),
+                )
+                .map_err(
+                    |error| {
+                        format!(
+                            "Failed to add directory to save backup: {}",
+                            error
+                        )
+                    }
+                )?;
+
+            for entry in
+                fs::read_dir(
+                    path
+                )
+                .map_err(
+                    |error| {
+                        format!(
+                            "Failed to read save directory while creating backup: {}",
+                            error
+                        )
+                    }
+                )?
+            {
+                let entry =
+                    entry
+                        .map_err(
+                            |error| {
+                                format!(
+                                    "Failed to read save entry while creating backup: {}",
+                                    error
+                                )
+                            }
+                        )?;
+
+                add_path(
+                    writer,
+                    &entry.path(),
+                    &archive_name.join(
+                        entry.file_name()
+                    ),
+                )?;
+            }
+
+            return Ok(());
+        }
+
+        if !path.is_file() {
+            /*
+             * Do not follow unusual filesystem nodes such as sockets
+             * or device files into a save archive.
+             */
+            return Ok(());
+        }
+
+        let archive_name =
+            archive_name
+                .to_string_lossy()
+                .replace(
+                    '\\',
+                    "/"
+                );
+
+        writer
+            .start_file(
+                archive_name,
+                options,
+            )
+            .map_err(
+                |error| {
+                    format!(
+                        "Failed to add file to save backup: {}",
+                        error
+                    )
+                }
+            )?;
+
+        let mut input =
+            File::open(
+                path
+            )
+            .map_err(
+                |error| {
+                    format!(
+                        "Failed to open save file while creating backup: {}",
+                        error
+                    )
+                }
+            )?;
+
+        let mut buffer =
+            [0u8; 64 * 1024];
+
+        loop {
+            let count =
+                input
+                    .read(
+                        &mut buffer
+                    )
+                    .map_err(
+                        |error| {
+                            format!(
+                                "Failed to read save file while creating backup: {}",
+                                error
+                            )
+                        }
+                    )?;
+
+            if count == 0 {
+                break;
+            }
+
+            writer
+                .write_all(
+                    &buffer[..count]
+                )
+                .map_err(
+                    |error| {
+                        format!(
+                            "Failed to write save file into backup: {}",
+                            error
+                        )
+                    }
+                )?;
+        }
+
+        Ok(())
+    }
+
+    let source_name =
+        source
+            .file_name()
+            .ok_or_else(
+                || {
+                    "Save path does not have a file or folder name."
+                        .to_string()
+                }
+            )?;
+
+    if let Some(parent) =
+        destination.parent()
+    {
+        fs::create_dir_all(
+            parent
+        )
+        .map_err(
+            |error| {
+                format!(
+                    "Failed to create save backup directory: {}",
+                    error
+                )
+            }
+        )?;
+    }
+
+    let file =
+        File::create(
+            destination
+        )
+        .map_err(
+            |error| {
+                format!(
+                    "Failed to create save backup archive: {}",
+                    error
+                )
+            }
+        )?;
+
+    let mut writer =
+        ZipWriter::new(
+            file
+        );
+
+    add_path(
+        &mut writer,
+        source,
+        Path::new(
+            source_name
+        ),
+    )?;
+
+    writer
+        .finish()
+        .map_err(
+            |error| {
+                format!(
+                    "Failed to finalize save backup archive: {}",
+                    error
+                )
+            }
+        )?;
+
+    Ok(())
 }
 
 
@@ -657,13 +882,154 @@ fn extract_zip_archive(
 
 #[cfg(not(target_os = "windows"))]
 fn extract_zip_archive(
-    _archive: &Path,
-    _destination: &Path,
+    archive: &Path,
+    destination: &Path,
 ) -> Result<(), String> {
-    Err(
-        "ZIP save restore is currently implemented for Windows."
-            .to_string()
-    )
+    use std::fs::File;
+    use std::io;
+
+    use zip::ZipArchive;
+
+    let file =
+        File::open(
+            archive
+        )
+        .map_err(
+            |error| {
+                format!(
+                    "Failed to open save backup archive: {}",
+                    error
+                )
+            }
+        )?;
+
+    let mut zip =
+        ZipArchive::new(
+            file
+        )
+        .map_err(
+            |error| {
+                format!(
+                    "Failed to read save backup archive: {}",
+                    error
+                )
+            }
+        )?;
+
+    for index in
+        0..zip.len()
+    {
+        let mut entry =
+            zip
+                .by_index(
+                    index
+                )
+                .map_err(
+                    |error| {
+                        format!(
+                            "Failed to read save backup entry: {}",
+                            error
+                        )
+                    }
+                )?;
+
+        /*
+         * enclosed_name() rejects paths that could escape the restore
+         * directory through absolute paths or '..' traversal.
+         */
+        let relative =
+            entry
+                .enclosed_name()
+                .ok_or_else(
+                    || {
+                        format!(
+                            "Save backup contains an unsafe path: {}",
+                            entry.name()
+                        )
+                    }
+                )?
+                .to_owned();
+
+        let output =
+            destination.join(
+                relative
+            );
+
+        if entry.is_dir() {
+            fs::create_dir_all(
+                &output
+            )
+            .map_err(
+                |error| {
+                    format!(
+                        "Failed to create extracted save directory: {}",
+                        error
+                    )
+                }
+            )?;
+
+            continue;
+        }
+
+        if let Some(parent) =
+            output.parent()
+        {
+            fs::create_dir_all(
+                parent
+            )
+            .map_err(
+                |error| {
+                    format!(
+                        "Failed to create extracted save parent directory: {}",
+                        error
+                    )
+                }
+            )?;
+        }
+
+        let mut output_file =
+            File::create(
+                &output
+            )
+            .map_err(
+                |error| {
+                    format!(
+                        "Failed to create extracted save file: {}",
+                        error
+                    )
+                }
+            )?;
+
+        io::copy(
+            &mut entry,
+            &mut output_file,
+        )
+        .map_err(
+            |error| {
+                format!(
+                    "Failed to extract save file: {}",
+                    error
+                )
+            }
+        )?;
+
+        #[cfg(unix)]
+        if let Some(mode) =
+            entry.unix_mode()
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let _ =
+                fs::set_permissions(
+                    &output,
+                    fs::Permissions::from_mode(
+                        mode
+                    ),
+                );
+        }
+    }
+
+    Ok(())
 }
 
 
@@ -811,13 +1177,15 @@ fn create_backup_internal(
     game_id: Option<&str>,
     save_path: &str,
     install_path: Option<&str>,
+    proton_prefix: Option<&str>,
     prefix: &str,
     retention_count: Option<usize>,
 ) -> Result<PathBuf, String> {
     let resolved =
-        resolve_game_path(
+        resolve_game_path_with_context(
             save_path,
             install_path,
+            proton_prefix,
         )?;
 
     if !resolved.exists() {
@@ -891,11 +1259,14 @@ pub fn get_save_backup_status(
     game_id: Option<String>,
     save_path: String,
     install_path: Option<String>,
+    proton_prefix: Option<String>,
 ) -> Result<SaveBackupStatus, String> {
     let resolved =
-        resolve_game_path(
+        resolve_game_path_with_context(
             &save_path,
             install_path
+                .as_deref(),
+            proton_prefix
                 .as_deref(),
         )?;
 
@@ -1046,6 +1417,7 @@ pub fn create_save_backup(
     game_id: Option<String>,
     save_path: String,
     install_path: Option<String>,
+    proton_prefix: Option<String>,
     retention_count: Option<usize>,
     backup_type: Option<String>,
 ) -> Result<SaveBackupStatus, String> {
@@ -1071,6 +1443,8 @@ pub fn create_save_backup(
             &save_path,
             install_path
                 .as_deref(),
+            proton_prefix
+                .as_deref(),
             prefix,
             retention_count,
         )?;
@@ -1087,6 +1461,7 @@ pub fn create_save_backup(
         game_id,
         save_path,
         install_path,
+        proton_prefix,
     )
 }
 
@@ -1097,6 +1472,7 @@ pub fn delete_save_backup(
     game_id: Option<String>,
     save_path: String,
     install_path: Option<String>,
+    proton_prefix: Option<String>,
     backup_file_name: String,
 ) -> Result<SaveBackupStatus, String> {
     let directory =
@@ -1147,6 +1523,7 @@ pub fn delete_save_backup(
         game_id,
         save_path,
         install_path,
+        proton_prefix,
     )
 }
 
@@ -1157,13 +1534,16 @@ pub fn restore_save_backup(
     game_id: Option<String>,
     save_path: String,
     install_path: Option<String>,
+    proton_prefix: Option<String>,
     backup_file_name: String,
     retention_count: Option<usize>,
 ) -> Result<SaveBackupStatus, String> {
     let resolved_save =
-        resolve_game_path(
+        resolve_game_path_with_context(
             &save_path,
             install_path
+                .as_deref(),
+            proton_prefix
                 .as_deref(),
         )?;
 
@@ -1200,6 +1580,8 @@ pub fn restore_save_backup(
                     .as_deref(),
                 &save_path,
                 install_path
+                    .as_deref(),
+                proton_prefix
                     .as_deref(),
                 "pre_restore",
                 retention_count,
@@ -1319,5 +1701,6 @@ pub fn restore_save_backup(
         game_id,
         save_path,
         install_path,
+        proton_prefix,
     )
 }

@@ -12,7 +12,7 @@ use std::{
 
 use serde::Serialize;
 
-use crate::local_paths::resolve_game_path;
+use crate::local_paths::resolve_game_path_with_context;
 
 
 const MAX_SAVE_FILES: usize =
@@ -310,11 +310,14 @@ fn scan_save_directory(
 pub fn inspect_save_browser(
     save_path: String,
     install_path: Option<String>,
+    proton_prefix: Option<String>,
 ) -> Result<SaveBrowserInfo, String> {
     let resolved =
-        resolve_game_path(
+        resolve_game_path_with_context(
             &save_path,
             install_path
+                .as_deref(),
+            proton_prefix
                 .as_deref(),
         )?;
 

@@ -802,12 +802,568 @@ pub fn get_system_hardware() -> Result<SystemHardwareInfo, String> {
     )
 }
 
+#[cfg(target_os = "linux")]
+fn linux_cpu_name() -> Option<String> {
+    let text =
+        std::fs::read_to_string(
+            "/proc/cpuinfo"
+        )
+        .ok()?;
 
-#[cfg(not(target_os = "windows"))]
+    for line in text.lines() {
+        let Some(
+            (
+                key,
+                value,
+            )
+        ) =
+            line.split_once(':')
+        else {
+            continue;
+        };
+
+        let key =
+            key.trim()
+                .to_ascii_lowercase();
+
+        if key == "model name"
+            || key == "hardware"
+        {
+            let value =
+                value.trim();
+
+            if !value.is_empty() {
+                return Some(
+                    value.to_string()
+                );
+            }
+        }
+    }
+
+    None
+}
+
+
+#[cfg(target_os = "linux")]
+fn linux_ram_bytes() -> Option<u64> {
+    let text =
+        std::fs::read_to_string(
+            "/proc/meminfo"
+        )
+        .ok()?;
+
+    for line in text.lines() {
+        if !line.starts_with(
+            "MemTotal:"
+        ) {
+            continue;
+        }
+
+        let kilobytes =
+            line
+                .split_whitespace()
+                .nth(
+                    1
+                )?
+                .parse::<u64>()
+                .ok()?;
+
+        return Some(
+            kilobytes
+                .saturating_mul(
+                    1024
+                )
+        );
+    }
+
+    None
+}
+
+
+#[cfg(target_os = "linux")]
+fn linux_os_release_value(
+    key: &str,
+) -> Option<String> {
+    let text =
+        std::fs::read_to_string(
+            "/etc/os-release"
+        )
+        .ok()?;
+
+    for line in text.lines() {
+        let Some(
+            (
+                candidate_key,
+                value,
+            )
+        ) =
+            line.split_once('=')
+        else {
+            continue;
+        };
+
+        if candidate_key.trim()
+            != key
+        {
+            continue;
+        }
+
+        let value =
+            value
+                .trim()
+                .trim_matches('"')
+                .to_string();
+
+        if !value.is_empty() {
+            return Some(
+                value
+            );
+        }
+    }
+
+    None
+}
+
+
+#[cfg(target_os = "linux")]
+fn linux_os_info() -> (
+    Option<String>,
+    Option<String>,
+) {
+    (
+        linux_os_release_value(
+            "PRETTY_NAME"
+        )
+        .or_else(
+            || {
+                linux_os_release_value(
+                    "NAME"
+                )
+            }
+        ),
+
+        linux_os_release_value(
+            "VERSION_ID"
+        ),
+    )
+}
+
+
+#[cfg(target_os = "linux")]
+fn linux_gpu_command_output(
+    program: &str,
+    args: &[&str],
+) -> Option<String> {
+    fn run(
+        program: &str,
+        args: &[&str],
+    ) -> Option<String> {
+        let output =
+            std::process::Command::new(
+                program
+            )
+            .args(
+                args
+            )
+            .output()
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        let text =
+            String::from_utf8_lossy(
+                &output.stdout
+            )
+            .trim()
+            .to_string();
+
+        if text.is_empty() {
+            None
+        } else {
+            Some(
+                text
+            )
+        }
+    }
+
+    /*
+     * Native Linux builds should use the local command directly.
+     * Development inside Distrobox may not expose host GPU utilities,
+     * so fall back to executing the same command on the host.
+     */
+    run(
+        program,
+        args,
+    )
+    .or_else(
+        || {
+            let mut host_args =
+                Vec::with_capacity(
+                    args.len() + 1
+                );
+
+            host_args.push(
+                program
+            );
+
+            host_args.extend_from_slice(
+                args
+            );
+
+            run(
+                "distrobox-host-exec",
+                &host_args,
+            )
+        }
+    )
+}
+
+
+#[cfg(target_os = "linux")]
+fn linux_nvidia_gpus() -> Vec<GpuInfo> {
+    let Some(
+        output
+    ) =
+        linux_gpu_command_output(
+            "nvidia-smi",
+            &[
+                "--query-gpu=name,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+        )
+    else {
+        return Vec::new();
+    };
+
+    output
+        .lines()
+        .filter_map(
+            |line| {
+                let (
+                    name,
+                    memory
+                ) =
+                    line.split_once(
+                        ','
+                    )?;
+
+                let name =
+                    name
+                        .trim()
+                        .to_string();
+
+                if name.is_empty() {
+                    return None;
+                }
+
+                let dedicated_memory_bytes =
+                    memory
+                        .trim()
+                        .parse::<u64>()
+                        .ok()
+                        .map(
+                            |mebibytes| {
+                                mebibytes
+                                    .saturating_mul(
+                                        1024
+                                    )
+                                    .saturating_mul(
+                                        1024
+                                    )
+                            }
+                        );
+
+                Some(
+                    GpuInfo {
+                        vendor:
+                            normalized_vendor(
+                                &name
+                            ),
+
+                        nvidia_rtx:
+                            nvidia_rtx(
+                                &name
+                            ),
+
+                        nvidia_frame_generation_capable:
+                            nvidia_frame_generation_capable(
+                                &name
+                            ),
+
+                        amd_ray_tracing_class:
+                            amd_ray_tracing_class(
+                                &name
+                            ),
+
+                        intel_arc:
+                            intel_arc(
+                                &name
+                            ),
+
+                        dedicated_memory_bytes,
+
+                        name,
+                    }
+                )
+            }
+        )
+        .collect()
+}
+
+
+#[cfg(target_os = "linux")]
+fn linux_lspci_gpus() -> Vec<GpuInfo> {
+    let Some(
+        output
+    ) =
+        linux_gpu_command_output(
+            "lspci",
+            &[
+                "-nn",
+            ],
+        )
+    else {
+        return Vec::new();
+    };
+
+    output
+        .lines()
+        .filter(
+            |line| {
+                let lower =
+                    line.to_ascii_lowercase();
+
+                lower.contains(
+                    "vga compatible controller"
+                )
+                    || lower.contains(
+                        "3d controller"
+                    )
+                    || lower.contains(
+                        "display controller"
+                    )
+            }
+        )
+        .filter_map(
+            |line| {
+                /*
+                 * Keep the human-readable controller description while
+                 * removing the PCI address/class prefix.
+                 */
+                let name =
+                    line
+                        .split_once(
+                            ": "
+                        )
+                        .map(
+                            |(
+                                _,
+                                value,
+                            )| {
+                                value
+                            }
+                        )
+                        .unwrap_or(
+                            line
+                        )
+                        .trim()
+                        .to_string();
+
+                if name.is_empty() {
+                    return None;
+                }
+
+                Some(
+                    GpuInfo {
+                        vendor:
+                            normalized_vendor(
+                                &name
+                            ),
+
+                        nvidia_rtx:
+                            nvidia_rtx(
+                                &name
+                            ),
+
+                        nvidia_frame_generation_capable:
+                            nvidia_frame_generation_capable(
+                                &name
+                            ),
+
+                        amd_ray_tracing_class:
+                            amd_ray_tracing_class(
+                                &name
+                            ),
+
+                        intel_arc:
+                            intel_arc(
+                                &name
+                            ),
+
+                        dedicated_memory_bytes:
+                            None,
+
+                        name,
+                    }
+                )
+            }
+        )
+        .collect()
+}
+
+
+#[cfg(target_os = "linux")]
+fn linux_gpus() -> Vec<GpuInfo> {
+    let mut gpus =
+        linux_nvidia_gpus();
+
+    /*
+     * PCI discovery fills in AMD/Intel GPUs and is also a fallback when
+     * nvidia-smi is unavailable. NVIDIA entries already discovered by
+     * nvidia-smi are not duplicated.
+     */
+    for candidate in
+        linux_lspci_gpus()
+    {
+        let candidate_lower =
+            candidate
+                .name
+                .to_ascii_lowercase();
+
+        let duplicate =
+            gpus
+                .iter()
+                .any(
+                    |existing| {
+                        let existing_lower =
+                            existing
+                                .name
+                                .to_ascii_lowercase();
+
+                        existing_lower
+                            == candidate_lower
+                            || (
+                                existing.vendor
+                                    == candidate.vendor
+                                && existing.vendor
+                                    == "NVIDIA"
+                                && (
+                                    candidate_lower
+                                        .contains(
+                                            &existing_lower
+                                        )
+                                    || existing_lower
+                                        .contains(
+                                            &candidate_lower
+                                        )
+                                )
+                            )
+                    }
+                );
+
+        if !duplicate {
+            gpus.push(
+                candidate
+            );
+        }
+    }
+
+    /*
+     * Prefer discrete NVIDIA entries with known VRAM first. This keeps
+     * the primary gaming GPU near the top without assuming there is only
+     * one GPU in the system.
+     */
+    gpus.sort_by(
+        |left, right| {
+            let left_rank =
+                (
+                    left.dedicated_memory_bytes
+                        .is_some(),
+                    left.nvidia_rtx,
+                    left.dedicated_memory_bytes
+                        .unwrap_or(
+                            0
+                        ),
+                );
+
+            let right_rank =
+                (
+                    right.dedicated_memory_bytes
+                        .is_some(),
+                    right.nvidia_rtx,
+                    right.dedicated_memory_bytes
+                        .unwrap_or(
+                            0
+                        ),
+                );
+
+            right_rank
+                .cmp(
+                    &left_rank
+                )
+        }
+    );
+
+    gpus
+}
+
+
+#[cfg(target_os = "linux")]
+fn detect_linux_system_hardware() -> SystemHardwareInfo {
+    let (
+        os_name,
+        os_version,
+    ) =
+        linux_os_info();
+
+    SystemHardwareInfo {
+        cpu_name:
+            linux_cpu_name(),
+
+        ram_bytes:
+            linux_ram_bytes(),
+
+        os_name,
+
+        os_version,
+
+        gpus:
+            linux_gpus(),
+    }
+}
+
+
+#[cfg(target_os = "linux")]
+static LINUX_HARDWARE_CACHE:
+    std::sync::OnceLock<SystemHardwareInfo> =
+    std::sync::OnceLock::new();
+
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub fn get_system_hardware() -> Result<SystemHardwareInfo, String> {
+    let cached =
+        LINUX_HARDWARE_CACHE
+            .get_or_init(
+                detect_linux_system_hardware
+            );
+
+    Ok(
+        cached.clone()
+    )
+}
+
+
+#[cfg(not(any(
+    target_os = "windows",
+    target_os = "linux"
+)))]
 #[tauri::command]
 pub fn get_system_hardware() -> Result<SystemHardwareInfo, String> {
     Err(
-        "System hardware detection is currently implemented for Windows."
+        "System hardware detection is currently implemented for Windows and Linux."
             .to_string()
     )
 }

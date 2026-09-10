@@ -433,10 +433,7 @@ export default function HardwareCapabilityPanel({
           >
             <MonitorCog
               className="h-4 w-4"
-            />
-
-            Windows
-          </div>
+            />Operating System</div>
 
           <div
             className="

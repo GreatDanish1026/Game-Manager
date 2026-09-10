@@ -103,8 +103,25 @@ pub struct PcgwGameData {
     // ============================================================
 
     pub graphics_api: Option<String>,
+
+    /*
+     * Backward-compatible generic path fields. These retain the
+     * historical Windows-first behavior so existing Windows clients
+     * continue to receive exactly the same values.
+     */
     pub config_location: Option<String>,
     pub save_location: Option<String>,
+
+    /*
+     * GameAtlas 2.0 platform-specific PCGamingWiki paths.
+     */
+    pub config_location_windows: Option<String>,
+    pub config_location_linux: Option<String>,
+    pub config_location_steam_play: Option<String>,
+
+    pub save_location_windows: Option<String>,
+    pub save_location_linux: Option<String>,
+    pub save_location_steam_play: Option<String>,
 
     // ============================================================
     // CONTROLLERS
@@ -275,6 +292,14 @@ fn empty_result() -> PcgwGameData {
         graphics_api: None,
         config_location: None,
         save_location: None,
+
+        config_location_windows: None,
+        config_location_linux: None,
+        config_location_steam_play: None,
+
+        save_location_windows: None,
+        save_location_linux: None,
+        save_location_steam_play: None,
 
         xbox_controller_support: None,
         xbox_controller_models: None,
@@ -1742,10 +1767,37 @@ fn clean_game_data_path(
 }
 
 
-fn extract_game_data_location(
+#[derive(Debug, Clone, Default)]
+struct GameDataLocations {
+    windows: Option<String>,
+    linux: Option<String>,
+    steam_play: Option<String>,
+    fallback: Option<String>,
+}
+
+
+fn join_game_data_paths(
+    mut paths: Vec<String>,
+) -> Option<String> {
+    paths.sort();
+    paths.dedup();
+
+    if paths.is_empty() {
+        None
+    } else {
+        Some(
+            paths.join(
+                " | "
+            )
+        )
+    }
+}
+
+
+fn extract_game_data_locations(
     wikitext: &str,
     template_name: &str,
-) -> Option<String> {
+) -> GameDataLocations {
     let templates =
         find_templates(
             wikitext,
@@ -1753,6 +1805,12 @@ fn extract_game_data_location(
         );
 
     let mut windows_paths =
+        Vec::new();
+
+    let mut linux_paths =
+        Vec::new();
+
+    let mut steam_play_paths =
         Vec::new();
 
     let mut fallback_paths =
@@ -1772,7 +1830,8 @@ fn extract_game_data_location(
             parts[
                 1
             ]
-            .trim();
+            .trim()
+            .to_ascii_lowercase();
 
         let mut paths =
             Vec::new();
@@ -1802,40 +1861,100 @@ fn extract_game_data_location(
             continue;
         }
 
-        if platform
-            .eq_ignore_ascii_case(
-                "windows"
+        /*
+         * PCGamingWiki template values have historically appeared as
+         * "Steam Play", while the rendered table labels the row
+         * "Steam Play (Linux)". Accept both forms, plus Proton wording,
+         * so the parser is resilient to page/template variations.
+         */
+        if platform.contains(
+            "steam play"
+        )
+            || platform.contains(
+                "proton"
+            )
+        {
+            steam_play_paths.extend(
+                paths
+            );
+        } else if platform == "linux"
+            || platform.starts_with(
+                "linux "
+            )
+        {
+            linux_paths.extend(
+                paths
+            );
+        } else if platform == "windows"
+            || platform.starts_with(
+                "windows "
             )
         {
             windows_paths.extend(
                 paths
             );
-        } else if
-            fallback_paths
-                .is_empty()
-        {
-            fallback_paths =
-                paths;
+        } else {
+            fallback_paths.extend(
+                paths
+            );
         }
     }
 
-    let mut selected =
-        if !windows_paths.is_empty() {
-            windows_paths
-        } else {
-            fallback_paths
-        };
+    GameDataLocations {
+        windows:
+            join_game_data_paths(
+                windows_paths
+            ),
 
-    selected.sort();
-    selected.dedup();
+        linux:
+            join_game_data_paths(
+                linux_paths
+            ),
 
-    if selected.is_empty() {
-        None
-    } else {
-        Some(
-            selected.join(" | ")
-        )
+        steam_play:
+            join_game_data_paths(
+                steam_play_paths
+            ),
+
+        fallback:
+            join_game_data_paths(
+                fallback_paths
+            ),
     }
+}
+
+
+fn historical_game_data_location(
+    locations: &GameDataLocations,
+) -> Option<String> {
+    /*
+     * Preserve v1.x semantics for the existing generic field.
+     * Platform-aware clients should use the explicit fields.
+     */
+    locations
+        .windows
+        .clone()
+        .or_else(
+            || {
+                locations
+                    .fallback
+                    .clone()
+            }
+        )
+        .or_else(
+            || {
+                locations
+                    .linux
+                    .clone()
+            }
+        )
+        .or_else(
+            || {
+                locations
+                    .steam_play
+                    .clone()
+            }
+        )
 }
 
 
@@ -2551,226 +2670,6 @@ async fn get_section_html(
 
 
 // ================================================================
-// COVER IMAGE
-// ================================================================
-
-/*
- * PCGamingWiki stores the infobox cover as a MediaWiki File title,
- * not as a direct image URL. Resolve that title through imageinfo.
- *
- * MediaWiki's image repository handling also allows this to work
- * when the file is provided by a shared repository such as Commons.
- */
-async fn get_cover_image_url(
-    client: &Client,
-    cover_filename: &str,
-) -> Result<Option<String>, String> {
-    let mut filename =
-        cover_filename
-            .trim()
-            .to_string();
-
-    if filename.is_empty()
-        || filename.eq_ignore_ascii_case(
-            "none"
-        )
-        || filename.eq_ignore_ascii_case(
-            "unknown"
-        )
-    {
-        return Ok(
-            None
-        );
-    }
-
-    if filename
-        .to_ascii_lowercase()
-        .starts_with("file:")
-    {
-        filename =
-            filename[
-                "file:".len()..
-            ]
-            .trim()
-            .to_string();
-    }
-
-    if filename.is_empty() {
-        return Ok(
-            None
-        );
-    }
-
-    let file_title =
-        format!(
-            "File:{}",
-            filename
-        );
-
-    println!(
-        "[PCGW] Resolving cover file: {:?}",
-        file_title
-    );
-
-    let response =
-        client
-            .get(
-                PCGW_API_URL
-            )
-            .query(
-                &[
-                    (
-                        "action",
-                        "query",
-                    ),
-                    (
-                        "titles",
-                        file_title.as_str(),
-                    ),
-                    (
-                        "prop",
-                        "imageinfo",
-                    ),
-                    (
-                        "iiprop",
-                        "url",
-                    ),
-                    (
-                        "iiurlwidth",
-                        "600",
-                    ),
-                    (
-                        "format",
-                        "json",
-                    ),
-                ]
-            )
-            .send()
-            .await
-            .map_err(
-                |error| {
-                    format!(
-                        "Failed to retrieve PCGW cover image: {}",
-                        error
-                    )
-                }
-            )?;
-
-    if !response
-        .status()
-        .is_success()
-    {
-        return Err(
-            format!(
-                "PCGW cover image request returned HTTP {}",
-                response.status()
-            )
-        );
-    }
-
-    let json:
-        serde_json::Value =
-        response
-            .json()
-            .await
-            .map_err(
-                |error| {
-                    format!(
-                        "Failed to parse PCGW cover image response: {}",
-                        error
-                    )
-                }
-            )?;
-
-    let Some(pages) =
-        json
-            .get("query")
-            .and_then(
-                |value| {
-                    value.get(
-                        "pages"
-                    )
-                }
-            )
-            .and_then(
-                |value| {
-                    value.as_object()
-                }
-            )
-    else {
-        return Ok(
-            None
-        );
-    };
-
-    for page in
-        pages.values()
-    {
-        let image_info =
-            page
-                .get("imageinfo")
-                .and_then(
-                    |value| {
-                        value.as_array()
-                    }
-                )
-                .and_then(
-                    |values| {
-                        values.first()
-                    }
-                );
-
-        let Some(image_info) =
-            image_info
-        else {
-            continue;
-        };
-
-        /*
-         * Prefer MediaWiki's resized image. It is much smaller than
-         * downloading the original cover and is more than enough for
-         * the Game Manager header.
-         */
-        if let Some(url) =
-            image_info
-                .get("thumburl")
-                .and_then(
-                    |value| {
-                        value.as_str()
-                    }
-                )
-        {
-            return Ok(
-                Some(
-                    url.to_string()
-                )
-            );
-        }
-
-        if let Some(url) =
-            image_info
-                .get("url")
-                .and_then(
-                    |value| {
-                        value.as_str()
-                    }
-                )
-        {
-            return Ok(
-                Some(
-                    url.to_string()
-                )
-            );
-        }
-    }
-
-    Ok(
-        None
-    )
-}
-
-
-// ================================================================
 // PARSE PCGW GAME DATA
 // ================================================================
 
@@ -3268,17 +3167,57 @@ fn parse_game_data(
             &wikitext
         );
 
-    let config_location =
-        extract_game_data_location(
+    let config_locations =
+        extract_game_data_locations(
             &wikitext,
             "game data/config",
         );
 
-    let save_location =
-        extract_game_data_location(
+    let save_locations =
+        extract_game_data_locations(
             &wikitext,
             "game data/saves",
         );
+
+    let config_location =
+        historical_game_data_location(
+            &config_locations
+        );
+
+    let save_location =
+        historical_game_data_location(
+            &save_locations
+        );
+
+    let config_location_windows =
+        config_locations
+            .windows
+            .clone();
+
+    let config_location_linux =
+        config_locations
+            .linux
+            .clone();
+
+    let config_location_steam_play =
+        config_locations
+            .steam_play
+            .clone();
+
+    let save_location_windows =
+        save_locations
+            .windows
+            .clone();
+
+    let save_location_linux =
+        save_locations
+            .linux
+            .clone();
+
+    let save_location_steam_play =
+        save_locations
+            .steam_play
+            .clone();
 
 
     // ============================================================
@@ -3447,12 +3386,7 @@ fn parse_game_data(
                 )
             ),
 
-        /*
-         * Resolved later by get_pcgw_game_data() after the
-         * infobox cover filename has been extracted.
-         */
-        cover_image_url:
-            None,
+        cover_image_url: None,
 
         developer,
         publisher,
@@ -3527,6 +3461,14 @@ fn parse_game_data(
         graphics_api,
         config_location,
         save_location,
+
+        config_location_windows,
+        config_location_linux,
+        config_location_steam_play,
+
+        save_location_windows,
+        save_location_linux,
+        save_location_steam_play,
 
         xbox_controller_support,
         xbox_controller_models,
@@ -3759,65 +3701,12 @@ pub async fn get_pcgw_game_data(
     };
 
 
-    /*
-     * Extract the raw cover filename before wikitext is moved into
-     * parse_game_data(). The display name remains untouched.
-     */
-    let cover_filename =
-        extract_parameter(
-            &wikitext,
-            &[
-                "cover"
-            ],
-        );
-
-
-    println!(
-        "[PCGW] Cover filename: {:?}",
-        cover_filename
-    );
-
-
     let mut result =
         parse_game_data(
             resolved_page_name
                 .clone(),
             wikitext,
         );
-
-
-    if let Some(cover_filename) =
-        cover_filename
-    {
-        match get_cover_image_url(
-            &client,
-            &cover_filename,
-        )
-        .await
-        {
-            Ok(url) => {
-                result.cover_image_url =
-                    url;
-            }
-
-            Err(error) => {
-                /*
-                 * A missing/broken cover must never break the rest
-                 * of the PCGamingWiki lookup.
-                 */
-                println!(
-                    "[PCGW] Cover lookup failed: {}",
-                    error
-                );
-            }
-        }
-    }
-
-
-    println!(
-        "[PCGW] Cover image URL: {:?}",
-        result.cover_image_url
-    );
 
 
     if let Some(section_index) =

@@ -80,6 +80,9 @@ function defaultProfiles() {
 
       workingDirectory:
         "",
+
+      customProtonPath:
+        "",
     },
 
     {
@@ -100,6 +103,9 @@ function defaultProfiles() {
 
       workingDirectory:
         "",
+
+      customProtonPath:
+        "",
     },
 
     {
@@ -119,6 +125,9 @@ function defaultProfiles() {
         "",
 
       workingDirectory:
+        "",
+
+      customProtonPath:
         "",
     },
   ];
@@ -167,6 +176,12 @@ function normalizeProfile(
     workingDirectory:
       String(
         value?.workingDirectory
+        ?? ""
+      ),
+
+    customProtonPath:
+      String(
+        value?.customProtonPath
         ?? ""
       ),
   };
@@ -408,6 +423,9 @@ export function createLaunchProfile() {
 
     workingDirectory:
       "",
+
+      customProtonPath:
+        "",
   };
 }
 
@@ -657,6 +675,20 @@ export async function launchConfiguredProfile(
             .workingDirectory
             .trim()
           || null,
+
+        protonPrefix:
+          game?.protonPrefix
+          ?? null,
+
+        compatibilityTool:
+          game?.compatibilityTool
+          ?? null,
+
+        customProtonPath:
+          normalized
+            .customProtonPath
+            .trim()
+          || null,
       }
     );
 
@@ -699,5 +731,12 @@ export async function launchDefaultProfile(
   return launchConfiguredProfile(
     game,
     profile
+  );
+}
+
+
+export async function getInstalledProtonTools() {
+  return invoke(
+    "get_installed_proton_tools"
   );
 }
