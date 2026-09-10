@@ -20,7 +20,6 @@ mod launch_profiles;
 mod local_installation;
 mod system_hardware;
 mod platform;
-mod linux_steam;
 mod pcgw_issues;
 
 
@@ -83,7 +82,6 @@ pub fn run() {
 
                 local_installation::inspect_local_installation,
                 platform::get_platform_info,
-                linux_steam::get_linux_steam_games,
 
 
                 system_hardware::get_system_hardware,
