@@ -407,6 +407,327 @@ fn normalize_platform_separators(
 }
 
 
+
+#[cfg(target_os = "windows")]
+fn steam_root_candidates() -> Vec<PathBuf> {
+    let mut roots =
+        Vec::new();
+
+    /*
+     * Steam's userdata directory lives under the Steam client root,
+     * which may be different from a game's library/install drive.
+     *
+     * Prefer the per-user Steam registry value, then common defaults.
+     */
+    if let Ok(output) =
+        Command::new(
+            "reg.exe"
+        )
+        .args([
+            "query",
+            r"HKCU\Software\Valve\Steam",
+            "/v",
+            "SteamPath",
+        ])
+        .output()
+    {
+        if output.status.success() {
+            let stdout =
+                String::from_utf8_lossy(
+                    &output.stdout
+                );
+
+            for line in
+                stdout.lines()
+            {
+                let trimmed =
+                    line.trim();
+
+                if !trimmed
+                    .to_ascii_lowercase()
+                    .starts_with(
+                        "steampath"
+                    )
+                {
+                    continue;
+                }
+
+                let parts =
+                    trimmed
+                        .split_whitespace()
+                        .collect::<Vec<_>>();
+
+                if parts.len() >= 3 {
+                    let value =
+                        parts[2..]
+                            .join(
+                                " "
+                            );
+
+                    if !value.is_empty() {
+                        roots.push(
+                            PathBuf::from(
+                                value
+                            )
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    if let Ok(program_files_x86) =
+        env::var(
+            "ProgramFiles(x86)"
+        )
+    {
+        roots.push(
+            PathBuf::from(
+                program_files_x86
+            )
+            .join(
+                "Steam"
+            )
+        );
+    }
+
+    if let Ok(program_files) =
+        env::var(
+            "ProgramFiles"
+        )
+    {
+        roots.push(
+            PathBuf::from(
+                program_files
+            )
+            .join(
+                "Steam"
+            )
+        );
+    }
+
+    let mut unique =
+        Vec::new();
+
+    for root in
+        roots
+    {
+        if !unique.iter().any(
+            |existing: &PathBuf| {
+                existing
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(
+                        &root
+                            .to_string_lossy()
+                    )
+            }
+        ) {
+            unique.push(
+                root
+            );
+        }
+    }
+
+    unique
+}
+
+
+#[cfg(not(target_os = "windows"))]
+fn steam_root_candidates() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+
+fn steam_user_ids(
+    steam_root: &Path,
+) -> Vec<String> {
+    let userdata =
+        steam_root.join(
+            "userdata"
+        );
+
+    let entries =
+        match std::fs::read_dir(
+            userdata
+        ) {
+            Ok(entries) =>
+                entries,
+
+            Err(_) =>
+                return Vec::new(),
+        };
+
+    let mut ids =
+        Vec::new();
+
+    for entry in
+        entries.flatten()
+    {
+        let path =
+            entry.path();
+
+        if !path.is_dir() {
+            continue;
+        }
+
+        let name =
+            entry
+                .file_name()
+                .to_string_lossy()
+                .to_string();
+
+        if !name.is_empty()
+            && name.chars().all(
+                |character| {
+                    character
+                        .is_ascii_digit()
+                }
+            )
+        {
+            ids.push(
+                name
+            );
+        }
+    }
+
+    ids
+}
+
+
+fn steam_path_candidates(
+    raw_candidate: &str,
+) -> Vec<String> {
+    let lower =
+        raw_candidate
+            .to_ascii_lowercase();
+
+    let has_steam =
+        lower.contains(
+            "<steam>"
+        )
+        || lower.contains(
+            "{steam}"
+        );
+
+    let has_user_id =
+        lower.contains(
+            "<user-id>"
+        )
+        || lower.contains(
+            "<userid>"
+        )
+        || lower.contains(
+            "{user-id}"
+        )
+        || lower.contains(
+            "{userid}"
+        );
+
+    if !has_steam
+        && !has_user_id
+    {
+        return vec![
+            raw_candidate
+                .to_string(),
+        ];
+    }
+
+    let steam_roots =
+        steam_root_candidates();
+
+    if steam_roots.is_empty() {
+        return vec![
+            raw_candidate
+                .to_string(),
+        ];
+    }
+
+    let mut output =
+        Vec::new();
+
+    for steam_root in
+        steam_roots
+    {
+        let steam =
+            steam_root
+                .to_string_lossy()
+                .to_string();
+
+        let mut root_expanded =
+            raw_candidate
+                .to_string();
+
+        for token in [
+            "<steam>",
+            "{steam}",
+        ] {
+            root_expanded =
+                replace_case_insensitive(
+                    &root_expanded,
+                    token,
+                    &steam,
+                );
+        }
+
+        if !has_user_id {
+            output.push(
+                root_expanded
+            );
+
+            continue;
+        }
+
+        let user_ids =
+            steam_user_ids(
+                &steam_root
+            );
+
+        if user_ids.is_empty() {
+            output.push(
+                root_expanded
+            );
+
+            continue;
+        }
+
+        for user_id in
+            user_ids
+        {
+            let mut candidate =
+                root_expanded
+                    .clone();
+
+            for token in [
+                "<user-id>",
+                "<userid>",
+                "{user-id}",
+                "{userid}",
+            ] {
+                candidate =
+                    replace_case_insensitive(
+                        &candidate,
+                        token,
+                        &user_id,
+                    );
+            }
+
+            output.push(
+                candidate
+            );
+        }
+    }
+
+    if output.is_empty() {
+        vec![
+            raw_candidate
+                .to_string(),
+        ]
+    } else {
+        output
+    }
+}
+
+
 fn normalize_candidate(
     candidate: &str,
     install_path: Option<&str>,
@@ -505,39 +826,52 @@ pub(crate) fn resolve_game_path(
     for candidate in
         candidates
     {
-        let Some(path) =
-            normalize_candidate(
-                &candidate,
-                install_path,
-            )
-        else {
-            continue;
-        };
+        let expanded_candidates =
+            steam_path_candidates(
+                &candidate
+            );
 
-        /*
-         * Prefer an existing candidate. If it points to a file,
-         * open the parent folder instead.
-         */
-        if path.exists() {
-            if path.is_file() {
-                if let Some(parent) =
-                    path.parent()
-                {
-                    return Ok(
-                        parent
-                            .to_path_buf()
-                    );
+        for expanded_candidate in
+            expanded_candidates
+        {
+            let Some(path) =
+                normalize_candidate(
+                    &expanded_candidate,
+                    install_path,
+                )
+            else {
+                continue;
+            };
+
+            /*
+             * Prefer an existing candidate. If it points to a file,
+             * open the parent folder instead.
+             *
+             * Steam placeholders can expand into several local user
+             * accounts. Returning the first existing full path avoids
+             * guessing which Steam account owns the game's data.
+             */
+            if path.exists() {
+                if path.is_file() {
+                    if let Some(parent) =
+                        path.parent()
+                    {
+                        return Ok(
+                            parent
+                                .to_path_buf()
+                        );
+                    }
                 }
+
+                return Ok(
+                    path
+                );
             }
 
-            return Ok(
+            normalized.push(
                 path
             );
         }
-
-        normalized.push(
-            path
-        );
     }
 
     /*

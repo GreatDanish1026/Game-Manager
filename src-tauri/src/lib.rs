@@ -1,16 +1,22 @@
+mod game_version;
 mod ea_games;
 mod xbox_games;
 mod logging;
 mod diagnostics;
 mod installed_games;
+mod manual_games;
 mod pcgamingwiki;
+mod steam_rating;
 mod renodx;
 mod rhi;
 mod vortex;
 mod fluffy;
 mod local_paths;
 mod save_backups;
+mod save_browser;
+mod game_file_utilities;
 mod game_launcher;
+mod launch_profiles;
 mod local_installation;
 mod system_hardware;
 mod pcgw_issues;
@@ -40,11 +46,14 @@ pub fn run() {
             tauri::generate_handler![
                 
 
-                ea_games::get_ea_installed_games,
+                
+            game_version::inspect_game_version,ea_games::get_ea_installed_games,
                 xbox_games::get_xbox_installed_games,
                 installed_games::get_installed_games,
+                manual_games::pick_manual_game_executable,
 
                 pcgamingwiki::get_pcgw_game_data,
+                steam_rating::get_steam_community_rating,
 
                 renodx::get_renodx_mod_status,
 
@@ -59,12 +68,15 @@ pub fn run() {
                 local_paths::open_game_file,
 
                 save_backups::get_save_backup_status,
+                save_browser::inspect_save_browser,
+                game_file_utilities::inspect_game_utility_directories,
                 save_backups::get_backup_storage_summary,
                 save_backups::create_save_backup,
                 save_backups::delete_save_backup,
                 save_backups::restore_save_backup,
 
                 game_launcher::launch_game,
+                launch_profiles::launch_profile_executable,
                 game_launcher::get_launcher_status,
 
                 local_installation::inspect_local_installation,

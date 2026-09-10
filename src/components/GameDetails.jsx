@@ -40,8 +40,15 @@ import CollapsibleSection from "./CollapsibleSection";
 import CompactFeatureGrid from "./CompactFeatureGrid";
 import ModDashboard from "./ModDashboard";
 import QuickStatusBar from "./QuickStatusBar";
+import LaunchProfilesPanel from "./LaunchProfilesPanel";
+import PlayStatusNotesPanel from "./PlayStatusNotesPanel";
+import RecentActivityPanel from "./RecentActivityPanel";
+import ChangeHistoryPanel from "./ChangeHistoryPanel";
+import GameFileUtilitiesPanel from "./GameFileUtilitiesPanel";
 import SaveBackupPanel from "./SaveBackupPanel";
+import SaveBrowserPanel from "./SaveBrowserPanel";
 import GamePersonalization from "./GamePersonalization";
+import PersonalRatingPanel from "./PersonalRatingPanel";
 import LocalInstallationPanel from "./LocalInstallationPanel";
 import StorageInstallPanel from "./StorageInstallPanel";
 import ScreenshotBrowserPanel from "./ScreenshotBrowserPanel";
@@ -53,6 +60,10 @@ import KnownIssuesPanel from "./KnownIssuesPanel";
 import LibraryDashboard from "./LibraryDashboard";
 import LibraryEntryEditor from "./LibraryEntryEditor";
 
+import ModChangeTimeline from "./ModChangeTimeline";
+import GameVersionPanel from "./GameVersionPanel";
+import CompatibilitySetupPanel from "./CompatibilitySetupPanel";
+import GameSectionNavigator from "./GameSectionNavigator";
 import {
   error as logError,
 } from "../services/logging";
@@ -62,8 +73,8 @@ import {
 } from "../services/pathActions";
 
 import {
-  launchGame,
-} from "../services/gameLaunch";
+  launchDefaultProfile,
+} from "../services/launchProfiles";
 
 import {
   storeGameInsight,
@@ -721,7 +732,7 @@ export default function GameDetails({
     );
 
     try {
-      await launchGame(
+      await launchDefaultProfile(
         game
       );
     } catch (error) {
@@ -980,6 +991,11 @@ export default function GameDetails({
                   game
                 }
               />
+              <PersonalRatingPanel
+                game={
+                  game
+                }
+              />
             </div>
 
 
@@ -1040,14 +1056,14 @@ export default function GameDetails({
         </section>
 
 
-        {/* ====================================================
-            PROGRESSIVE-DISCLOSURE SECTIONS
-        ==================================================== */}
+        
+        <GameSectionNavigator />
+
 
         <CollapsibleSection
           id="overview"
-          title="Quick Overview"
-          description="Core game information."
+          title="Overview"
+          description="Core game information and the currently detected game version."
           icon={Info}
           defaultOpen
           summary={
@@ -1097,16 +1113,56 @@ export default function GameDetails({
               }
             />
           </div>
+
+          <div className="mt-4">
+            <GameVersionPanel
+              game={
+                game
+              }
+            />
+          </div>
+        </CollapsibleSection>
+
+
+        <CollapsibleSection
+          id="compatibility-performance"
+          title="Compatibility & Performance"
+          description="System fit, verified settings, hardware capability, and installation readiness in one place."
+          icon={MonitorCog}
+          defaultOpen
+          summary="Estimate, known-good setup, health & hardware"
+        >
+          <CompatibilitySetupPanel
+            game={
+              game
+            }
+          />
+
+          <div className="mt-5">
+            <HardwareCapabilityPanel
+              game={
+                game
+              }
+            />
+          </div>
+
+          <div className="mt-5">
+            <GameHealthPanel
+              game={
+                game
+              }
+            />
+          </div>
         </CollapsibleSection>
 
 
         <CollapsibleSection
           id="pc-features"
-          title="PC Features"
-          description="Graphics, display, frame-rate, and video features from PCGamingWiki. Click any tile with notes to expand it."
+          title="Graphics & PC Features"
+          description="Graphics, display, frame-rate, widescreen, and controller capabilities from PCGamingWiki."
           icon={Monitor}
-          defaultOpen
-          summary="17 feature checks"
+          defaultOpen={false}
+          summary="Graphics, display, frame rate & controllers"
         >
           <CompactFeatureGrid
             features={
@@ -1119,15 +1175,23 @@ export default function GameDetails({
               features
             }
           />
+
+          <div className="mt-5">
+            <ControllerCompatibility
+              game={
+                game
+              }
+            />
+          </div>
         </CollapsibleSection>
 
 
         <CollapsibleSection
           id="mods"
           title="Mods & Enhancements"
-          description="Consolidated enhancement support, mod managers, and local mod evidence."
+          description="Enhancement support, mod managers, local mod evidence, tools, and mod-change history."
           icon={Puzzle}
-          defaultOpen
+          defaultOpen={false}
           summary={
             modSummary(
               game
@@ -1139,187 +1203,107 @@ export default function GameDetails({
               game
             }
           />
+
+          <div className="mt-5">
+            <ModChangeTimeline
+              game={
+                game
+              }
+            />
+          </div>
+
+          <div className="mt-5">
+            <ExternalToolsPanel
+              game={
+                game
+              }
+            />
+          </div>
         </CollapsibleSection>
 
 
         <CollapsibleSection
-          id="external-tools"
-          title="External Tools"
-          description="Detected game tools, mod managers, local integrations, and quick launch actions."
-          icon={Wrench}
-          defaultOpen={true}
-          summary="Game tools & launch hub"
-        >
-          <ExternalToolsPanel
-            game={
-              game
-            }
-          />
-        </CollapsibleSection>
-
-
-        <CollapsibleSection
-          id="controllers"
-          title="Controller Support"
-          description="Xbox, PlayStation, DualSense, Nintendo, and hot-plug information."
-          icon={Gamepad2}
-          defaultOpen={false}
-          summary={
-            controllerSummary(
-              game
-            )
-          }
-        >
-          <ControllerCompatibility
-            game={
-              game
-            }
-          />
-        </CollapsibleSection>
-
-
-        <CollapsibleSection
-          id="essential-improvements"
-          title="Essential Improvements"
-          description="Recommended fixes and improvements from PCGamingWiki."
-          icon={Wrench}
-          defaultOpen={false}
-          summary={
-            game.essentialImprovementsHtml
-              ? "Recommendations available"
-              : "No recommendations listed"
-          }
-        >
-          <EssentialImprovements
-            game={
-              game
-            }
-          />
-        </CollapsibleSection>
-
-
-        <CollapsibleSection
-          id="known-issues"
-          title="Known Issues & Fixes"
-          description="Unresolved and fixed issues from the matched PCGamingWiki page."
-          icon={TriangleAlert}
-          defaultOpen={false}
-          summary="PCGamingWiki issue tracking"
-        >
-          <KnownIssuesPanel
-            game={
-              game
-            }
-          />
-        </CollapsibleSection>
-
-
-        <CollapsibleSection
-          id="installation-health"
-          title="Installation Health"
-          description="Actionable setup-readiness checks with direct fixes where GameAtlas can safely provide them."
-          icon={HeartPulse}
-          defaultOpen={true}
-          summary="Readiness score & checks"
-        >
-          <GameHealthPanel
-            game={
-              game
-            }
-          />
-        </CollapsibleSection>
-
-
-        <CollapsibleSection
-          id="hardware-capabilities"
-          title="Hardware Compatibility"
-          description="Compare game capabilities with conservatively detected local hardware families."
-          icon={MonitorCog}
-          defaultOpen={false}
-          summary="CPU, GPU, RAM & capability checks"
-        >
-          <HardwareCapabilityPanel
-            game={
-              game
-            }
-          />
-        </CollapsibleSection>
-
-
-        <CollapsibleSection
-          id="local-installation"
-          title="Local Installation"
-          description="Inspect the files actually installed on this computer."
+          id="files-installation"
+          title="Files & Installation"
+          description="Local executable details, storage usage, file utilities, and installation-change history."
           icon={HardDrive}
-          defaultOpen={true}
-          summary="Executable, graphics DLLs, ReShade & mod-manager evidence"
+          defaultOpen={false}
+          summary="Local files, storage, utilities & changes"
         >
           <LocalInstallationPanel
             game={
               game
             }
           />
+
+          <div className="mt-5">
+            <StorageInstallPanel
+              game={
+                game
+              }
+            />
+          </div>
+
+          <div className="mt-5">
+            <GameFileUtilitiesPanel
+              game={
+                game
+              }
+            />
+          </div>
+
+          <div className="mt-5">
+            <ChangeHistoryPanel
+              game={
+                game
+              }
+            />
+          </div>
         </CollapsibleSection>
 
 
         <CollapsibleSection
-          id="storage-installation"
-          title="Storage & Installation"
-          description="Install size, drive capacity, executable size, save/config data, and largest local files."
-          icon={HardDrive}
-          defaultOpen={true}
-          summary="Disk usage & local storage"
-        >
-          <StorageInstallPanel
-            game={
-              game
-            }
-          />
-        </CollapsibleSection>
-
-
-        <CollapsibleSection
-          id="screenshots"
-          title="Screenshots"
-          description="Detected Steam and common local screenshot folders."
-          icon={Monitor}
-          defaultOpen={false}
-          summary="Count, newest screenshot & folder"
-        >
-          <ScreenshotBrowserPanel
-            game={
-              game
-            }
-          />
-        </CollapsibleSection>
-
-
-        <CollapsibleSection
-          id="save-backups"
-          title="Save Backups"
-          description="Create and restore timestamped backups of this game's save data."
+          id="saves-screenshots"
+          title="Saves & Screenshots"
+          description="Browse live save data, manage backups, and open detected screenshots."
           icon={HardDrive}
           defaultOpen={false}
-          summary="Backup & restore"
+          summary="Save browser, backups & screenshots"
         >
-          <SaveBackupPanel
+          <SaveBrowserPanel
             game={
               game
             }
           />
+
+          <div className="mt-5">
+            <SaveBackupPanel
+              game={
+                game
+              }
+            />
+          </div>
+
+          <div className="mt-5">
+            <ScreenshotBrowserPanel
+              game={
+                game
+              }
+            />
+          </div>
         </CollapsibleSection>
 
 
         <CollapsibleSection
-          id="technical"
-          title="Technical Information"
-          description="Engine, graphics API, installation, configuration, and save locations."
+          id="technical-troubleshooting"
+          title="Technical & Troubleshooting"
+          description="Engine and API details, PCGamingWiki improvements, known issues, and library metadata."
           icon={Settings2}
           defaultOpen={false}
           summary={
             game.technical?.engine
             ?? game.technical?.api
-            ?? "Technical details"
+            ?? "Technical details & fixes"
           }
         >
           <TechnicalDetailsPanel
@@ -1328,11 +1312,7 @@ export default function GameDetails({
             }
           />
 
-          <div
-            className="
-              mb-4
-            "
-          >
+          <div className="mt-5">
             <LibraryEntryEditor
               game={
                 game
@@ -1340,114 +1320,26 @@ export default function GameDetails({
             />
           </div>
 
-          {pathError ? (
-            <div
-              className="
-                mb-3
-                rounded-xl
-                border
-                border-amber-500/20
-                bg-amber-500/[0.06]
-                px-4
-                py-3
-                text-xs
-                leading-relaxed
-                text-amber-200/75
-              "
-            >
-              {pathError}
-            </div>
-          ) : null}
-
-          <div
-            className="
-              grid
-              grid-cols-1
-              gap-3
-              xl:grid-cols-2
-            "
-          >
-            <InfoRow
-              icon={Cpu}
-              label="Engine"
-              value={
-                game.technical?.engine
+          <div className="mt-5">
+            <EssentialImprovements
+              game={
+                game
               }
             />
+          </div>
 
-            <InfoRow
-              icon={Code2}
-              label="Graphics API"
-              value={
-                game.technical?.api
+          <div className="mt-5">
+            <KnownIssuesPanel
+              game={
+                game
               }
             />
+          </div>
 
-            <InfoRow
-              icon={FolderOpen}
-              label="Install Location"
-              value={
-                game.installPath
-              }
-              actionLabel="Open"
-              actionDisabled={
-                !game.installPath
-              }
-              onAction={
-                () =>
-                  handleOpenPath(
-                    game.installPath
-                  )
-              }
-            />
-
-            <InfoRow
-              icon={FileCode2}
-              label="Configuration Location"
-              value={
-                game.technical
-                  ?.configLocation
-              }
-              actionLabel="Open"
-              actionDisabled={
-                !game.technical
-                  ?.configLocation
-              }
-              onAction={
-                () =>
-                  handleOpenPath(
-                    game.technical
-                      ?.configLocation
-                  )
-              }
-            />
-
-            <InfoRow
-              icon={FolderOpen}
-              label="Save Location"
-              value={
-                game.technical
-                  ?.saveLocation
-              }
-              actionLabel="Open"
-              actionDisabled={
-                !game.technical
-                  ?.saveLocation
-              }
-              onAction={
-                () =>
-                  handleOpenPath(
-                    game.technical
-                      ?.saveLocation
-                  )
-              }
-            />
-
-            <InfoRow
-              icon={Radio}
-              label="Launcher ID"
-              value={
-                game.launcherId
+          <div className="mt-5">
+            <PcgwMatch
+              game={
+                game
               }
             />
           </div>
@@ -1455,23 +1347,35 @@ export default function GameDetails({
 
 
         <CollapsibleSection
-          id="pcgamingwiki"
-          title="PCGamingWiki"
-          description="Source match and direct link to the full game article."
-          icon={BadgeCheck}
+          id="my-game"
+          title="My Game"
+          description="Launch profiles, play status, personal notes, and GameAtlas launch history."
+          icon={UserRoundCog}
           defaultOpen={false}
-          summary={
-            game.pcgwPageName
-              ? "Matched"
-              : "No match"
-          }
+          summary="Profiles, status, notes & recent activity"
           className="mb-10"
         >
-          <PcgwMatch
+          <LaunchProfilesPanel
             game={
               game
             }
           />
+
+          <div className="mt-5">
+            <PlayStatusNotesPanel
+              game={
+                game
+              }
+            />
+          </div>
+
+          <div className="mt-5">
+            <RecentActivityPanel
+              game={
+                game
+              }
+            />
+          </div>
         </CollapsibleSection>
       </div>
     </main>

@@ -83,10 +83,48 @@ export default function CollapsibleSection({
   );
 
 
+  useEffect(
+    () => {
+      function handleOpenSection(
+        event
+      ) {
+        if (
+          event?.detail?.id
+          === id
+        ) {
+          setOpen(
+            true
+          );
+        }
+      }
+
+      window.addEventListener(
+        "game-manager-open-section",
+        handleOpenSection
+      );
+
+      return () =>
+        window.removeEventListener(
+          "game-manager-open-section",
+          handleOpenSection
+        );
+    },
+    [
+      id,
+    ]
+  );
+
+
   return (
     <section
+      id={
+        id
+          ? `game-section-${id}`
+          : undefined
+      }
       className={`
         mb-5
+        scroll-mt-16
         overflow-hidden
         rounded-2xl
         border

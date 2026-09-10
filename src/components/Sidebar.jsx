@@ -7,6 +7,7 @@ import {
   Eye,
   Filter,
   LayoutDashboard,
+  Plus,
   RefreshCcw,
   RotateCcw,
   Search,
@@ -27,6 +28,8 @@ import {
 } from "react";
 
 import StoreBadge from "./StoreBadge";
+import GameCardStatusBadges from "./GameCardStatusBadges";
+import AddGameModal from "./AddGameModal";
 
 import {
   gameHasTag,
@@ -652,6 +655,15 @@ function GameRow({
               {game.name}
             </div>
 
+            <GameCardStatusBadges
+              game={
+                game
+              }
+              compact={
+                true
+              }
+            />
+
             <span
               className="
                 shrink-0
@@ -734,6 +746,12 @@ function GameRow({
                 <StoreBadge
                   store={
                     game.store
+                  }
+                />
+
+                <GameCardStatusBadges
+                  game={
+                    game
                   }
                 />
 
@@ -876,6 +894,12 @@ export default function Sidebar({
 }) {
   const initial =
     loadLibraryPreferences();
+
+  const [
+    addGameOpen,
+    setAddGameOpen,
+  ] =
+    useState(false);
 
   const [
     query,
@@ -2275,6 +2299,36 @@ export default function Sidebar({
               }
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={
+              () =>
+                setAddGameOpen(
+                  true
+                )
+            }
+            className="
+              flex
+              h-9
+              w-9
+              items-center
+              justify-center
+              rounded-lg
+              border
+              border-cyan-400/20
+              bg-cyan-400/[0.06]
+              text-cyan-200/60
+              transition
+              hover:bg-cyan-400/[0.12]
+              hover:text-cyan-100
+            "
+            title="Add a game manually"
+          >
+            <Plus
+              className="h-4 w-4"
+            />
+          </button>
 
           <button
             type="button"
@@ -3898,6 +3952,17 @@ export default function Sidebar({
           )}
         </div>
       </div>
+      <AddGameModal
+        open={
+          addGameOpen
+        }
+        onClose={
+          () =>
+            setAddGameOpen(
+              false
+            )
+        }
+      />
     </aside>
   );
 }

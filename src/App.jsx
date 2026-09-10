@@ -47,6 +47,10 @@ import {
 } from "./services/settings";
 
 import {
+  getManualGames,
+} from "./services/manualGames";
+
+import {
   markServiceChecking,
   SERVICE_IDS,
   setServiceStatus,
@@ -2642,6 +2646,45 @@ export default function App() {
   }
 
 
+  useEffect(
+    () => {
+      const refreshManualGames =
+        () => {
+          const manualGames =
+            getManualGames().map(
+              prepareGameForUiWithCachedInsight
+            );
+
+          setGames(
+            (current) => [
+              ...current.filter(
+                (game) =>
+                  game.source !== "manual"
+                  && String(game.store ?? "")
+                    .trim()
+                    .toLowerCase() !== "manual"
+              ),
+              ...manualGames,
+            ]
+          );
+        };
+
+      window.addEventListener(
+        "game-manager-manual-games-changed",
+        refreshManualGames
+      );
+
+      return () => {
+        window.removeEventListener(
+          "game-manager-manual-games-changed",
+          refreshManualGames
+        );
+      };
+    },
+    []
+  );
+
+
   async function scanGames() {
     setLoading(
       true
@@ -2656,11 +2699,14 @@ export default function App() {
       const installedGames =
         await getInstalledGames();
 
+      const manualGames =
+        getManualGames();
+
 
       const uniqueGames =
         Array.from(
           new Map(
-            installedGames.map(
+            [...installedGames, ...manualGames].map(
               (game) => [
                 game.id,
                 game,
@@ -2693,7 +2739,9 @@ export default function App() {
 
 
       setGames(
-        []
+        getManualGames().map(
+          prepareGameForUiWithCachedInsight
+        )
       );
 
       setSelectedGame(
