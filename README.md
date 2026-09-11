@@ -1,57 +1,167 @@
 # GameAtlas
 
-**GameAtlas** is a Windows desktop app for managing, inspecting, and understanding your installed PC game library.
+**GameAtlas** is a cross-platform desktop app for managing, inspecting, and understanding your installed PC game library.
 
-It scans supported launchers, matches games with PCGamingWiki data, and brings technical details, mod support, local tools, storage information, screenshots, save tools, and launcher actions into one place.
+It brings games from multiple launchers into one library, enriches them with PCGamingWiki data, and adds local tools for launching, modding, storage, screenshots, saves, installation health, and system information.
 
-## Highlights
+## Supported Game Sources
 
-- Detects games from Steam, Epic, GOG, Ubisoft Connect, EA App, and Xbox / Microsoft Store
-- PCGamingWiki integration for game features, paths, fixes, and technical information
-- Local installation inspection for executables, graphics technologies, ReShade, mod-manager evidence, and installation health
-- External Tools & Launch Hub for Vortex, Fluffy Mod Manager, ReShade, Special K, and other detected tools
-- Engine, graphics API, executable architecture, anti-cheat, and DRM / platform-integration details
-- Storage details including install size, drive usage, save/config size, and largest installed files
-- Screenshot Browser with Steam screenshot detection, newest screenshot, and quick folder access
-- Mod Dashboard for RenoDX, Luma, Vortex, Fluffy, ReShade, Special K, and local mod evidence
-- Save backup and restore tools
-- Favorites, tags, personalization, diagnostics, and signed in-app updates
+GameAtlas is not limited to Steam. Detection depends on the operating system.
 
-## Platform
+### Windows
 
-GameAtlas currently supports **Windows**.
+GameAtlas can automatically detect installed games from:
 
-Linux / Proton support is planned for a future major release.
+- **Steam**
+- **Epic Games Launcher**
+- **GOG Galaxy**
+- **Ubisoft Connect**
+- **EA App**
+- **Xbox / Microsoft Store**
 
-## Install
+Supported games can be launched directly from GameAtlas using the appropriate launcher or platform integration.
 
-Download the latest installer from the GitHub **Releases** page.
+### Linux
 
-GameAtlas includes signed automatic updates, so future releases can be installed from inside the app.
+GameAtlas can discover installed games from:
 
-## Development
+- **Steam for Linux**
+- **Heroic Games Launcher** — including supported Epic and GOG installations managed through Heroic
+- **Lutris**
 
-Built with:
+Linux discovery results are merged into the same GameAtlas library, so games from different sources can be managed together.
 
-- Rust
-- Tauri 2
-- React
-- Vite
-- Tailwind CSS
+Games that cannot be detected automatically can also be added manually.
 
-Run the development build:
+## Features
 
-```powershell
-npm install
-npm run tauri:dev
-```
+### Unified Game Library
 
-Build a release:
+- Multi-launcher game detection
+- Searchable library
+- Favorites and custom tags
+- Hidden games
+- Saved views and advanced filters
+- Manual game entries
+- Per-launcher rescans
 
-```powershell
-npm run tauri:build
-```
+### PCGamingWiki Integration
+
+For matched games, GameAtlas can surface useful PC-specific information such as:
+
+- HDR, ray tracing, upscaling, and frame generation support
+- Controller and accessibility information
+- Engine and graphics API details
+- Save and configuration locations
+- Essential improvements
+- Known issues and fixes
+- Cover artwork and game metadata
+
+### Mods & Enhancements
+
+GameAtlas combines enhancement and modding information into a single view, including support or local evidence for tools such as:
+
+- **RenoDX**
+- **Luma Framework**
+- **Vortex Mod Manager**
+- **Fluffy Mod Manager**
+- **ReShade**
+- **Special K**
+- Cheat Engine tables and other detected local tools
+
+### External Tools & Launch Hub
+
+Per-game actions can include:
+
+- Play Game
+- Open Mod Manager
+- Open Install Folder
+- Open Config Folder
+- Open Save Folder
+- Open detected external tools
+
+### Launch Profiles
+
+Games can use multiple launch profiles, including:
+
+- **Normal**
+- **Modded**
+- **Benchmark**
+- Custom profiles
+
+Profiles can use the standard launcher or a direct executable with custom arguments and working directories. Any profile can be selected as the default launch method for a game.
+
+### Local Technical Inspection
+
+GameAtlas can inspect installed files and report locally detected information such as:
+
+- Main executable and architecture
+- 32-bit / 64-bit information
+- Game engine evidence
+- Graphics API evidence
+- Anti-cheat evidence
+- DRM / platform integration
+- Graphics DLLs
+- ReShade and mod-manager evidence
+
+### Storage & Installation Details
+
+Per-game storage information can include:
+
+- Installed size
+- Install drive
+- Free and total drive space
+- Executable size
+- Save-data size
+- Config-data size
+- Largest installed files
+
+### Screenshot Browser
+
+GameAtlas can locate Steam screenshots and common local screenshot folders, showing information such as screenshot count, newest screenshot, date, and folder location.
+
+### Save Backup & Restore
+
+GameAtlas can create and restore per-game save backups with:
+
+- Timestamped backup history
+- Optional notes
+- Per-game backup retention
+- Restore safety backups
+- Optional automatic backup before launching a game
+
+### Installation Health
+
+GameAtlas can summarize the local state of a game using information it can verify, including installation paths, executables, saves, configuration, PCGamingWiki data, and detected enhancements.
+
+### System Awareness
+
+GameAtlas adapts to the system it is running on and can surface platform and hardware information, including operating system and GPU detection where available.
+
+## Cross-Platform
+
+GameAtlas is being developed for both **Windows** and **Linux**. Platform-specific integrations differ where the underlying launchers and game-installation systems differ.
+
+## Technology
+
+GameAtlas is built with:
+
+- **Rust**
+- **Tauri 2**
+- **React**
+- **Vite**
+- **Tailwind CSS**
 
 ## Project Status
 
-GameAtlas is actively developed. Current work focuses on improving game-level management, local analysis, launcher support, and PC gaming utilities.
+GameAtlas is under active development. Features and supported integrations continue to expand as the application evolves.
+
+## Data Sources & Third-Party Services
+
+GameAtlas uses information from third-party services such as [PCGamingWiki](https://www.pcgamingwiki.com/). Availability of individual fields varies by game.
+
+GameAtlas is not affiliated with Valve, Epic Games, GOG, Ubisoft, Electronic Arts, Microsoft, PCGamingWiki, Nexus Mods, Vortex, RenoDX, or the developers of other detected third-party tools.
+
+## License
+
+See the repository license for details.
