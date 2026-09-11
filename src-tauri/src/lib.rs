@@ -21,6 +21,8 @@ mod local_installation;
 mod system_hardware;
 mod platform;
 mod linux_steam;
+mod heroic_games;
+mod lutris_games;
 mod pcgw_issues;
 
 
@@ -67,6 +69,7 @@ pub fn run() {
                 fluffy::get_fluffy_support,
 
                 local_paths::open_game_path,
+                local_paths::open_game_path_with_context,
                 local_paths::open_game_file,
 
                 save_backups::get_save_backup_status,
@@ -79,11 +82,14 @@ pub fn run() {
 
                 game_launcher::launch_game,
                 launch_profiles::launch_profile_executable,
+                launch_profiles::get_installed_proton_tools,
                 game_launcher::get_launcher_status,
 
                 local_installation::inspect_local_installation,
                 platform::get_platform_info,
                 linux_steam::get_linux_steam_games,
+                heroic_games::get_heroic_installed_games,
+                lutris_games::get_lutris_installed_games,
 
 
                 system_hardware::get_system_hardware,

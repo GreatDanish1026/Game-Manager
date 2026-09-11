@@ -340,48 +340,62 @@ fn linux_binary_evidence(
     let Ok(
         entries
     ) =
-        fs::read_dir(
-            install_path
-        )
+    fs::read_dir(
+        install_path
+    )
     else {
         return false;
     };
 
     let mut checked =
-        0usize;
+    0usize;
 
     for entry in entries.flatten() {
-        if checked >= 250 {
+        if checked >= 128 {
             break;
         }
 
         checked += 1;
 
         let path =
-            entry.path();
+        entry.path();
 
         if !path.is_file() {
             continue;
         }
 
         let Ok(
-            bytes
+            mut file
         ) =
-            fs::read(
-                &path
-            )
+        std::fs::File::open(
+            &path
+        )
         else {
             continue;
         };
 
-        if bytes.len() >= 4
-            && bytes[0] == 0x7f
-            && bytes[1] == b'E'
-            && bytes[2] == b'L'
-            && bytes[3] == b'F'
-        {
-            return true;
-        }
+        let mut header =
+        [0u8; 4];
+
+        if std::io::Read::read_exact(
+            &mut file,
+            &mut header
+        )
+            .is_err()
+            {
+                continue;
+            }
+
+            if header
+                == [
+                    0x7f,
+                    b'E',
+                    b'L',
+                    b'F',
+                ]
+                {
+                    return true;
+                }
     }
 
     false

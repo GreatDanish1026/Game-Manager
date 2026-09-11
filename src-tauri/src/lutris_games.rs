@@ -22,25 +22,50 @@ enum LutrisBackend {
 
 
 #[cfg(target_os = "linux")]
+#[cfg(target_os = "linux")]
 fn command_success(
     program: &str,
     args: &[&str],
 ) -> bool {
+    let mut command =
     Command::new(
         program
-    )
-    .args(
+    );
+
+    command.args(
         args
-    )
-    .status()
-    .map(
-        |status| {
-            status.success()
+    );
+
+    /*
+     * AppImages inject library/Python environment variables which can
+     * interfere with host-native Lutris. Do not pass those into Lutris.
+     */
+    if program == "lutris"
+        || program == "/usr/bin/lutris"
+        {
+            command.env_remove(
+                "LD_LIBRARY_PATH"
+            );
+
+            command.env_remove(
+                "PYTHONHOME"
+            );
+
+            command.env_remove(
+                "PYTHONPATH"
+            );
         }
-    )
-    .unwrap_or(
-        false
-    )
+
+        command
+        .status()
+        .map(
+            |status| {
+                status.success()
+            }
+        )
+        .unwrap_or(
+            false
+        )
 }
 
 
@@ -92,15 +117,22 @@ fn detect_lutris_backend() -> Option<LutrisBackend> {
     }
 
     if command_success(
-        "lutris",
+        "/usr/bin/lutris",
         &[
             "--version",
         ],
-    ) {
-        return Some(
-            LutrisBackend::NativeLocal
-        );
-    }
+    )
+        || command_success(
+            "lutris",
+            &[
+                "--version",
+            ],
+        )
+        {
+            return Some(
+                LutrisBackend::NativeLocal
+            );
+        }
 
     if command_success(
         "flatpak",
@@ -225,21 +257,47 @@ fn output_text(
 
 
 #[cfg(target_os = "linux")]
+#[cfg(target_os = "linux")]
 fn run_local(
     program: &str,
     args: &[&str],
 ) -> Option<String> {
+    let mut command =
     Command::new(
         program
-    )
-    .args(
+    );
+
+    command.args(
         args
-    )
-    .output()
-    .ok()
-    .and_then(
-        output_text
-    )
+    );
+
+    /*
+     * A packaged AppImage modifies its process environment. Native Lutris
+     * must use the host's Python and system libraries rather than the
+     * AppImage environment.
+     */
+    if program == "lutris"
+        || program == "/usr/bin/lutris"
+        {
+            command.env_remove(
+                "LD_LIBRARY_PATH"
+            );
+
+            command.env_remove(
+                "PYTHONHOME"
+            );
+
+            command.env_remove(
+                "PYTHONPATH"
+            );
+        }
+
+        command
+        .output()
+        .ok()
+        .and_then(
+            output_text
+        )
 }
 
 
@@ -282,7 +340,7 @@ fn lutris_json_for_backend(
     match backend {
         LutrisBackend::NativeLocal =>
             run_local(
-                "lutris",
+                "/usr/bin/lutris",
                 &[
                     "--list-games",
                     "--installed",
@@ -328,11 +386,12 @@ fn lutris_json_for_backend(
 
 
 #[cfg(target_os = "linux")]
+#[cfg(target_os = "linux")]
 fn native_lutris_json()
-    -> Option<String>
+-> Option<String>
 {
     run_local(
-        "lutris",
+        "/usr/bin/lutris",
         &[
             "--list-games",
             "--installed",
@@ -341,12 +400,24 @@ fn native_lutris_json()
     )
     .or_else(
         || {
-            run_host(
+            run_local(
                 "lutris",
                 &[
                     "--list-games",
                     "--installed",
                     "--json",
+                ],
+            )
+        }
+    )
+    .or_else(
+        || {
+            run_host(
+                "lutris",
+                &[
+                    "--list-games",
+                     "--installed",
+                     "--json",
                 ],
             )
         }
