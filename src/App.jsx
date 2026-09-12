@@ -13,6 +13,7 @@ import AppErrorBoundary from "./components/AppErrorBoundary";
 import UpdateNotification from "./components/UpdateNotification";
 import LibraryAnalysisPanel from "./components/LibraryAnalysisPanel";
 import SettingsScreen from "./components/SettingsScreen";
+import GameLoadingOverlay from "./components/GameLoadingOverlay";
 
 import {
   gameMatchesLauncher,
@@ -254,22 +255,56 @@ async function getLinuxIntegratedGames(installedGames) {
 
 async function timedLookup(
   label,
-  lookup
+  lookup,
+  progressMeta = null
 ) {
+  /*
+   * GAME_LOADING_OVERLAY_PROGRESS_EVENTS_PHASE1_1
+   */
   const started =
     performance.now();
 
+  let progressStatus =
+    "complete";
+
   try {
     return await lookup();
+  } catch (error) {
+    progressStatus =
+      "error";
+
+    throw error;
   } finally {
     const elapsed =
       performance.now()
       - started;
 
     perf(
-          "${label}",
-          elapsed.toFixed(0)
-        );
+      label,
+      elapsed.toFixed(0)
+    );
+
+    if (
+      progressMeta?.gameId &&
+      progressMeta?.sourceId &&
+      typeof window !== "undefined"
+    ) {
+      window.dispatchEvent(
+        new CustomEvent(
+          "gameatlas:game-loading-progress",
+          {
+            detail: {
+              gameId:
+                progressMeta.gameId,
+              sourceId:
+                progressMeta.sourceId,
+              status:
+                progressStatus,
+            },
+          }
+        )
+      );
+    }
   }
 }
 
@@ -3445,13 +3480,19 @@ function hideGame(
   async function selectGame(
     game
   ) {
+    /*
+     * GAME_SELECTION_PROGRESSIVE_HYDRATION_PHASE1
+     *
+     * External services begin together, but each result updates the selected
+     * game immediately. A slow service can no longer keep unrelated cards
+     * waiting.
+     */
     const analysisStarted =
       performance.now();
 
     setSelectedGame(
       game
     );
-
 
     if (
       game.pcgwLoaded &&
@@ -3462,28 +3503,21 @@ function hideGame(
       !game.vortexError
     ) {
       perf(
-          "Selected game cache hit",
-          (performance.now() - analysisStarted).toFixed(0)
-        );
+        "Selected game cache hit",
+        (performance.now() - analysisStarted).toFixed(0)
+      );
 
       return;
     }
-
 
     if (
       !isNetworkOnline()
     ) {
       const offlineGame = {
         ...game,
-
-        pcgwLoading:
-          false,
-
-        renodxLoading:
-          false,
-
-        vortexLoading:
-          false,
+        pcgwLoading: false,
+        renodxLoading: false,
+        vortexLoading: false,
       };
 
       setSelectedGame(
@@ -3503,25 +3537,22 @@ function hideGame(
       return;
     }
 
-
     const loadingGame = {
       ...game,
-
       pcgwLoading:
-        !game.pcgwLoaded,
-
+        !game.pcgwLoaded
+        || Boolean(game.pcgwError),
       renodxLoading:
-        !game.renodxLoaded,
-
+        !game.renodxLoaded
+        || Boolean(game.renodxError),
       vortexLoading:
-        !game.vortexLoaded,
+        !game.vortexLoaded
+        || Boolean(game.vortexError),
     };
-
 
     setSelectedGame(
       loadingGame
     );
-
 
     setGames(
       (current) =>
@@ -3533,6 +3564,27 @@ function hideGame(
         )
     );
 
+    const applyGameUpdate =
+      (updater) => {
+        setGames(
+          (current) =>
+            current.map(
+              (item) =>
+                item.id === game.id
+                  ? updater(item)
+                  : item
+            )
+        );
+
+        setSelectedGame(
+          (current) =>
+            current?.id === game.id
+              ? updater(current)
+              : current
+        );
+      };
+
+    const tasks = [];
 
     if (
       !game.pcgwLoaded ||
@@ -3540,6 +3592,57 @@ function hideGame(
     ) {
       markServiceChecking(
         SERVICE_IDS.pcgw
+      );
+
+      tasks.push(
+        timedLookup(
+          "PCGamingWiki",
+          () =>
+            getPcGamingWikiData(
+              game
+            )
+        ,
+          {
+            gameId: game.id,
+            sourceId: "pcgw",
+          }
+        )
+        .then(
+          (result) => {
+            markLookupSuccess(
+              SERVICE_IDS.pcgw
+            );
+
+            applyGameUpdate(
+              (current) =>
+                mergePcgwData(
+                  {
+                    ...current,
+                    pcgwLoading: false,
+                    pcgwError: null,
+                  },
+                  result
+                )
+            );
+          }
+        )
+        .catch(
+          (error) => {
+            markLookupFailure(
+              SERVICE_IDS.pcgw,
+              error
+            );
+
+            applyGameUpdate(
+              (current) => ({
+                ...current,
+                pcgwLoaded: true,
+                pcgwLoading: false,
+                pcgwError: String(error),
+              })
+            );
+          }
+        )
       );
     }
 
@@ -3554,6 +3657,66 @@ function hideGame(
       markServiceChecking(
         SERVICE_IDS.luma
       );
+
+      tasks.push(
+        timedLookup(
+          "RenoDX / Luma",
+          () =>
+            getRenoDxModStatus(
+              game
+            )
+        ,
+          {
+            gameId: game.id,
+            sourceId: "renodx",
+          }
+        )
+        .then(
+          (result) => {
+            markLookupSuccess(
+              SERVICE_IDS.renodx
+            );
+
+            markLookupSuccess(
+              SERVICE_IDS.luma
+            );
+
+            applyGameUpdate(
+              (current) =>
+                mergeRenoDxData(
+                  {
+                    ...current,
+                    renodxLoading: false,
+                    renodxError: null,
+                  },
+                  result
+                )
+            );
+          }
+        )
+        .catch(
+          (error) => {
+            markLookupFailure(
+              SERVICE_IDS.renodx,
+              error
+            );
+
+            markLookupFailure(
+              SERVICE_IDS.luma,
+              error
+            );
+
+            applyGameUpdate(
+              (current) => ({
+                ...current,
+                renodxLoaded: true,
+                renodxLoading: false,
+                renodxError: String(error),
+              })
+            );
+          }
+        )
+      );
     }
 
     if (
@@ -3563,282 +3726,73 @@ function hideGame(
       markServiceChecking(
         SERVICE_IDS.vortex
       );
-    }
 
-    /*
-     * All three external lookups run in parallel.
-     */
-    const [
-      pcgwResult,
-      hdrModsResult,
-      vortexResult,
-    ] =
-      await Promise.allSettled([
-        game.pcgwLoaded &&
-        !game.pcgwError
-          ? Promise.resolve(
-              null
+      tasks.push(
+        timedLookup(
+          "Vortex",
+          () =>
+            getVortexSupport(
+              game
             )
-          : timedLookup(
-              "PCGamingWiki",
-              () =>
-                getPcGamingWikiData(
-                  game
+        ,
+          {
+            gameId: game.id,
+            sourceId: "vortex",
+          }
+        )
+        .then(
+          (result) => {
+            markLookupSuccess(
+              SERVICE_IDS.vortex
+            );
+
+            devLog(
+              "[Vortex Frontend] Rust returned:",
+              result
+            );
+
+            applyGameUpdate(
+              (current) =>
+                mergeVortexData(
+                  {
+                    ...current,
+                    vortexLoading: false,
+                    vortexError: null,
+                  },
+                  result
                 )
-            ),
+            );
+          }
+        )
+        .catch(
+          (error) => {
+            markLookupFailure(
+              SERVICE_IDS.vortex,
+              error
+            );
 
-        game.renodxLoaded &&
-        !game.renodxError
-          ? Promise.resolve(
-              null
-            )
-          : timedLookup(
-              "RenoDX / Luma",
-              () =>
-                getRenoDxModStatus(
-                  game
-                )
-            ),
-
-        game.vortexLoaded &&
-        !game.vortexError
-          ? Promise.resolve(
-              null
-            )
-          : timedLookup(
-              "Vortex",
-              () =>
-                getVortexSupport(
-                  game
-                )
-            ),
-      ]);
-
-
-    let updatedGame =
-      loadingGame;
-
-
-    // ============================================================
-    // PCGW
-    // ============================================================
-
-    if (
-      !game.pcgwLoaded ||
-      game.pcgwError
-    ) {
-      if (
-        pcgwResult.status ===
-        "fulfilled"
-      ) {
-        markLookupSuccess(
-          SERVICE_IDS.pcgw
-        );
-
-        updatedGame =
-          mergePcgwData(
-            updatedGame,
-            pcgwResult.value
-          );
-      } else {
-        markLookupFailure(
-          SERVICE_IDS.pcgw,
-          pcgwResult.reason
-        );
-
-        updatedGame = {
-          ...updatedGame,
-
-          pcgwLoaded:
-            true,
-
-          pcgwLoading:
-            false,
-
-          pcgwError:
-            String(
-              pcgwResult.reason
-            ),
-        };
-      }
+            applyGameUpdate(
+              (current) => ({
+                ...current,
+                vortexLoaded: true,
+                vortexLoading: false,
+                vortexError: String(error),
+              })
+            );
+          }
+        )
+      );
     }
 
-
-    // ============================================================
-    // RENODX / LUMA
-    // ============================================================
-
-    if (
-      !game.renodxLoaded ||
-      game.renodxError
-    ) {
-      if (
-        hdrModsResult.status ===
-        "fulfilled"
-      ) {
-        markLookupSuccess(
-          SERVICE_IDS.renodx
-        );
-
-        markLookupSuccess(
-          SERVICE_IDS.luma
-        );
-
-        updatedGame =
-          mergeRenoDxData(
-            updatedGame,
-            hdrModsResult.value
-          );
-      } else {
-        markLookupFailure(
-          SERVICE_IDS.renodx,
-          hdrModsResult.reason
-        );
-
-        markLookupFailure(
-          SERVICE_IDS.luma,
-          hdrModsResult.reason
-        );
-
-        updatedGame = {
-          ...updatedGame,
-
-          renodxLoaded:
-            true,
-
-          renodxLoading:
-            false,
-
-          renodxError:
-            String(
-              hdrModsResult.reason
-            ),
-        };
-      }
-    }
-
-
-    // ============================================================
-    // VORTEX
-    // ============================================================
-
-    if (
-      !game.vortexLoaded ||
-      game.vortexError
-    ) {
-      if (
-        vortexResult.status ===
-        "fulfilled"
-      ) {
-        markLookupSuccess(
-          SERVICE_IDS.vortex
-        );
-
-        devLog(
-          "[Vortex Frontend] Rust returned:",
-          vortexResult.value
-        );
-
-
-        updatedGame =
-          mergeVortexData(
-            updatedGame,
-            vortexResult.value
-          );
-      } else {
-        markLookupFailure(
-          SERVICE_IDS.vortex,
-          vortexResult.reason
-        );
-
-        logError(
-          "[Vortex] Lookup failed:",
-          vortexResult.reason
-        );
-
-
-        updatedGame = {
-          ...updatedGame,
-
-          vortexLoaded:
-            true,
-
-          vortexLoading:
-            false,
-
-          vortexError:
-            String(
-              vortexResult.reason
-            ),
-        };
-      }
-    }
-
-
-    perf(
-          "Selected game analysis",
+    Promise.allSettled(
+      tasks
+    ).then(
+      () => {
+        perf(
+          "Selected game background hydration complete",
           (performance.now() - analysisStarted).toFixed(0)
         );
-
-    try {
-      storeGameInsight(
-        updatedGame
-      );
-    } catch (error) {
-      logError(
-        "[Library Analysis] Failed to store selected-game insight:",
-        error
-      );
-    }
-
-    try {
-      recordGameAnalysis(
-        updatedGame
-      );
-    } catch (error) {
-      logError(
-        "[Library Analysis] Failed to store selected-game analysis state:",
-        error
-      );
-    }
-
-    if (
-      !updatedGame.pcgwError &&
-      !updatedGame.renodxError &&
-      !updatedGame.vortexError
-    ) {
-      const timestamps =
-        loadAnalysisTimestamps();
-
-      timestamps[
-        updatedGame.id
-      ] =
-        Date.now();
-
-      saveAnalysisTimestamps(
-        timestamps
-      );
-    }
-
-
-    setGames(
-      (current) =>
-        current.map(
-          (item) =>
-            item.id ===
-            updatedGame.id
-              ? updatedGame
-              : item
-        )
-    );
-
-
-    setSelectedGame(
-      (current) =>
-        current?.id ===
-        updatedGame.id
-          ? updatedGame
-          : current
+      }
     );
   }
 
@@ -4108,6 +4062,14 @@ onAnalyzeRemaining={
         }
         onCancel={
           cancelLibraryAnalysis
+        }
+      />
+
+
+      {/* GAME_LOADING_OVERLAY_PHASE1 */}
+      <GameLoadingOverlay
+        game={
+          selectedGame
         }
       />
 

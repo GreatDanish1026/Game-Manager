@@ -1,8 +1,11 @@
 use serde::Serialize;
 use std::{
+    collections::HashMap,
     fs,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant, UNIX_EPOCH},
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -230,6 +233,18 @@ fn choose_executable(
 ) -> Option<PathBuf> {
     let install_path = install_path;
 
+    /*
+     * GAMEATLAS_PREFER_SUPPLIED_EXECUTABLE_PHASE2
+     *
+     * Trust the executable already selected by the general local inspector.
+     * This avoids repeating executable discovery when the RenoDX card mounts.
+     */
+    if let Some(path) = supplied_executable.as_ref() {
+        if is_executable(path) {
+            return supplied_executable;
+        }
+    }
+
     // Important RenoDX/ReShade rule:
     //
     // If the game has a credible executable directly in the Steam/Heroic/
@@ -244,15 +259,6 @@ fn choose_executable(
             if let Some(root_exe) = choose_best_root_executable(root) {
                 return Some(root_exe);
             }
-        }
-    }
-
-    // If no root-level game EXE exists, preserve the existing Local
-    // Installation inspector result. This keeps games such as Unreal titles
-    // under Binaries/Win64 working correctly.
-    if let Some(path) = supplied_executable {
-        if is_executable(&path) {
-            return Some(path);
         }
     }
 
@@ -290,6 +296,160 @@ fn file_record(path: &Path, kind: &str) -> RenoDxReadinessFile {
     }
 }
 
+
+/*
+ * GAMEATLAS_LOCAL_INSPECTION_CACHE_PHASE2
+ *
+ * Cache local RenoDX/ReShade readiness. Filesystem fingerprints are part of
+ * the key so add/remove/update operations invalidate cached results.
+ */
+static RENODX_READINESS_CACHE:
+    OnceLock<
+        Mutex<
+            HashMap<
+                String,
+                (
+                    Instant,
+                    RenoDxReadinessInfo,
+                ),
+            >,
+        >,
+    > =
+    OnceLock::new();
+
+const RENODX_READINESS_CACHE_TTL:
+    Duration =
+    Duration::from_secs(300);
+
+
+fn modified_stamp(
+    path: &Path,
+) -> u128 {
+    fs::metadata(path)
+        .ok()
+        .and_then(|metadata| {
+            metadata.modified().ok()
+        })
+        .and_then(|modified| {
+            modified
+                .duration_since(UNIX_EPOCH)
+                .ok()
+        })
+        .map(|duration| {
+            duration.as_millis()
+        })
+        .unwrap_or(0)
+}
+
+
+fn metadata_size(
+    path: &Path,
+) -> u64 {
+    fs::metadata(path)
+        .map(|metadata| {
+            metadata.len()
+        })
+        .unwrap_or(0)
+}
+
+
+fn readiness_cache_key(
+    install: Option<&Path>,
+    executable: Option<&Path>,
+    graphics_api: Option<&str>,
+    renodx_supported: bool,
+    renodx_match_name: Option<&str>,
+    renodx_provider_status: Option<&str>,
+) -> String {
+    let binary_directory =
+        executable
+            .and_then(|path| path.parent())
+            .or(install);
+
+    format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        install
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        executable
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        graphics_api.unwrap_or(""),
+        renodx_supported,
+        renodx_match_name.unwrap_or(""),
+        renodx_provider_status.unwrap_or(""),
+        binary_directory.map(modified_stamp).unwrap_or(0),
+        executable.map(modified_stamp).unwrap_or(0),
+        executable.map(metadata_size).unwrap_or(0),
+    )
+}
+
+
+fn get_cached_readiness(
+    key: &str,
+) -> Option<RenoDxReadinessInfo> {
+    let cache =
+        RENODX_READINESS_CACHE
+            .get_or_init(|| {
+                Mutex::new(HashMap::new())
+            });
+
+    let guard =
+        cache.lock().ok()?;
+
+    let (
+        cached_at,
+        cached_value,
+    ) =
+        guard.get(key)?;
+
+    if cached_at.elapsed()
+        >= RENODX_READINESS_CACHE_TTL
+    {
+        return None;
+    }
+
+    Some(cached_value.clone())
+}
+
+
+fn store_cached_readiness(
+    key: String,
+    value: &RenoDxReadinessInfo,
+) {
+    let cache =
+        RENODX_READINESS_CACHE
+            .get_or_init(|| {
+                Mutex::new(HashMap::new())
+            });
+
+    if let Ok(mut guard) =
+        cache.lock()
+    {
+        guard.insert(
+            key,
+            (
+                Instant::now(),
+                value.clone(),
+            ),
+        );
+
+        if guard.len() > 128 {
+            guard.retain(
+                |_,
+                 (
+                    cached_at,
+                    _,
+                 )| {
+                    cached_at.elapsed()
+                        < RENODX_READINESS_CACHE_TTL
+                },
+            );
+        }
+    }
+}
+
+
 #[tauri::command]
 pub fn get_renodx_readiness(
     install_path: Option<String>,
@@ -303,7 +463,29 @@ pub fn get_renodx_readiness(
 
     let supplied_executable = normalize_existing_path(executable_path);
 
-    let executable = choose_executable(install.as_deref(), supplied_executable);
+    let executable =
+        choose_executable(
+            install.as_deref(),
+            supplied_executable,
+        );
+
+    let cache_key =
+        readiness_cache_key(
+            install.as_deref(),
+            executable.as_deref(),
+            graphics_api.as_deref(),
+            renodx_supported,
+            renodx_match_name.as_deref(),
+            renodx_provider_status.as_deref(),
+        );
+
+    if let Some(cached) =
+        get_cached_readiness(
+            &cache_key
+        )
+    {
+        return Ok(cached);
+    }
 
     let binary_directory = executable
         .as_ref()
@@ -402,17 +584,25 @@ pub fn get_renodx_readiness(
     let addon_support_state = if reshade_state == "not-installed" {
         "not-installed".to_string()
     } else {
-        let log_text = reshade_log
-            .as_deref()
-            .map(Path::new)
-            .map(read_small_text)
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-
-        let confirms_addons = log_text.contains("add-on")
-            || log_text.contains("addon")
-            || !other_addon_files.is_empty()
+        let has_addon_files =
+            !other_addon_files.is_empty()
             || !renodx_files.is_empty();
+
+        let confirms_addons =
+            if has_addon_files {
+                true
+            } else {
+                let log_text =
+                    reshade_log
+                        .as_deref()
+                        .map(Path::new)
+                        .map(read_small_text)
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+
+                log_text.contains("add-on")
+                    || log_text.contains("addon")
+            };
 
         if confirms_addons {
             "confirmed".to_string()
@@ -469,7 +659,8 @@ pub fn get_renodx_readiness(
         )
     };
 
-    Ok(RenoDxReadinessInfo {
+    let result =
+        RenoDxReadinessInfo {
         supported: renodx_supported,
         support_name: renodx_match_name,
         support_status,
@@ -491,5 +682,12 @@ pub fn get_renodx_readiness(
         conflicts,
         readiness: readiness.to_string(),
         next_action: next_action.to_string(),
-    })
+    };
+
+    store_cached_readiness(
+        cache_key,
+        &result,
+    );
+
+    Ok(result)
 }

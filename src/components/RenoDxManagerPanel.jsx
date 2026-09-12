@@ -10,7 +10,7 @@ import {
 import {
   downloadReShadeAddonInstaller,
   getReShadeAddonInstallerInfo,
-  installReShadeAddonsDirectLinux,
+  installReShadeAddonsForCurrentPlatform,
 } from "../services/reshadeManager";
 
 import {
@@ -358,7 +358,7 @@ export default function RenoDxManagerPanel({
       );
 
       const result =
-        await installReShadeAddonsDirectLinux({
+        await installReShadeAddonsForCurrentPlatform({
           installerPath:
             download.installerPath,
           game,

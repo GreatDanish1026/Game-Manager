@@ -47,3 +47,53 @@ export async function installReShadeAddonsDirectLinux({
     }
   );
 }
+
+export async function installReShadeAddonsForCurrentPlatform({
+  installerPath,
+  game,
+  readiness,
+}) {
+  const userAgent =
+    typeof navigator !== "undefined"
+      ? String(navigator.userAgent ?? "").toLowerCase()
+      : "";
+
+  const platform =
+    typeof navigator !== "undefined"
+      ? String(navigator.platform ?? "").toLowerCase()
+      : "";
+
+  const isWindows =
+    userAgent.includes("windows")
+    || platform.startsWith("win");
+
+  if (!isWindows) {
+    return installReShadeAddonsDirectLinux({
+      installerPath,
+      game,
+      readiness,
+    });
+  }
+
+  const executablePath =
+    readiness?.executablePath
+    ?? null;
+
+  if (!executablePath) {
+    throw new Error(
+      "GameAtlas could not determine the Windows game executable for ReShade installation."
+    );
+  }
+
+  return invoke(
+    "install_reshade_addons_windows",
+    {
+      installerPath,
+      executablePath,
+      graphicsApi:
+        readiness?.graphicsApi
+        ?? null,
+    }
+  );
+}
+

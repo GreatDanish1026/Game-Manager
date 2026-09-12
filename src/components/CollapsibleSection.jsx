@@ -255,7 +255,8 @@ export default function CollapsibleSection({
             pt-5
           "
         >
-          {children}
+          {/* GAMEATLAS_LAZY_COLLAPSIBLE_CHILDREN_PHASE3 */}
+        {open ? children : null}
         </div>
       ) : null}
     </section>

@@ -1238,6 +1238,7 @@ export default function GameDetails({
           defaultOpen={false}
           summary="Local files, storage, utilities & changes"
         >
+          {/* GAMEATLAS_LOCAL_INSTALLATION_FAST_PATH_PHASE3 */}
           <LocalInstallationPanel
             game={
               game

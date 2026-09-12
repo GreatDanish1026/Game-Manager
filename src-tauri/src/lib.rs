@@ -33,6 +33,7 @@ mod proton_troubleshooting;
 mod renodx_installer;
 mod renodx_manager;
 mod reshade_manager;
+mod reshade_windows;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -40,6 +41,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            reshade_windows::install_reshade_addons_windows,
             renodx_installer::get_renodx_package_info,
             renodx_installer::install_renodx_package_linux,
                 renodx_installer::uninstall_renodx_package_linux,
