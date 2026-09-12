@@ -11,47 +11,67 @@ import {
 } from "lucide-react";
 
 
+
+
+const GAMEATLAS_IS_LINUX =
+  typeof navigator !== "undefined"
+  && /linux/i.test(
+    [
+      navigator.userAgent,
+      navigator.platform,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+
 const SECTIONS = [
   {
-    id: "overview",
-    label: "Overview",
-    icon: Info,
+  id: "overview",
+  label: "Overview",
+  icon: Info,
   },
   {
-    id: "compatibility-performance",
-    label: "Performance",
-    icon: MonitorCog,
+  id: "compatibility-performance",
+  label: "Performance",
+  icon: MonitorCog,
   },
   {
-    id: "pc-features",
-    label: "PC Features",
-    icon: Cpu,
+  id: "pc-features",
+  label: "PC Features",
+  icon: Cpu,
   },
   {
-    id: "mods",
-    label: "Mods",
-    icon: Puzzle,
+  id: "mods",
+  label: "Mods",
+  icon: Puzzle,
   },
   {
-    id: "files-installation",
-    label: "Files",
-    icon: FolderOpen,
+  id: "files-installation",
+  label: "Files",
+  icon: FolderOpen,
   },
   {
-    id: "saves-screenshots",
-    label: "Saves",
-    icon: HardDrive,
+  id: "saves-screenshots",
+  label: "Saves",
+  icon: HardDrive,
   },
   {
-    id: "technical-troubleshooting",
-    label: "Technical",
-    icon: Settings2,
+  id: "technical-troubleshooting",
+  label: "Technical",
+  icon: Settings2,
   },
   {
-    id: "my-game",
-    label: "My Game",
-    icon: UserRoundCog,
+  id: "my-game",
+  label: "My Game",
+  icon: UserRoundCog,
   },
+  {
+  id: "proton-toolbox",
+  label: "Proton Toolbox",
+  icon: Settings2,
+  linuxOnly: true,
+  }
 ];
 
 
@@ -112,7 +132,13 @@ export default function GameSectionNavigator() {
           gap-2
         "
       >
-        {SECTIONS.map(
+        {SECTIONS
+          .filter(
+            (item) =>
+              !item.linuxOnly
+              || GAMEATLAS_IS_LINUX
+          )
+          .map(
           (
             section
           ) => {

@@ -21,3 +21,5 @@ src-tauri/target/
 .idea/
 .DS_Store
 Thumbs.db
+# Generated Linux release binaries
+*.AppImage

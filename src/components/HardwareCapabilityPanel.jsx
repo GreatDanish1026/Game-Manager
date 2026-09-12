@@ -305,6 +305,39 @@ export default function HardwareCapabilityPanel({
   }
 
 
+  const displayedGpu =
+    hardware?.primaryGpu
+    ?? (
+      hardware?.gpus
+      ?? []
+    ).find(
+      (gpu) =>
+        gpu.nvidiaRtx
+        || String(
+          gpu.name
+          ?? ""
+        )
+        .toLowerCase()
+        .includes(
+          "geforce"
+        )
+        || String(
+          gpu.name
+          ?? ""
+        )
+        .toLowerCase()
+        .includes(
+          "radeon rx"
+        )
+        || gpu.intelArc
+    )
+    ?? (
+      hardware?.gpus
+      ?? []
+    )[0]
+    ?? null;
+
+
   const features =
     game.features
     ?? {};
@@ -484,65 +517,6 @@ export default function HardwareCapabilityPanel({
           "
         >
           <div
-            className="
-              text-sm
-              font-semibold
-              text-white/70
-            "
-          >
-            Detected GPUs
-          </div>
-        </div>
-
-        {(hardware?.gpus
-          ?? [])
-          .map(
-            (
-              gpu,
-              index
-            ) => (
-              <div
-                key={
-                  `${gpu.name}-${index}`
-                }
-                className="
-                  border-b
-                  border-white/[0.055]
-                  px-4
-                  py-3
-                  last:border-b-0
-                "
-              >
-                <div
-                  className="
-                    text-sm
-                    font-medium
-                    text-white/68
-                  "
-                >
-                  {gpu.name}
-                </div>
-
-                <div
-                  className="
-                    mt-1
-                    text-xs
-                    text-white/28
-                  "
-                >
-                  {gpu.vendor}
-                  {gpu.dedicatedMemoryBytes
-                    ? ` • ${formatBytes(gpu.dedicatedMemoryBytes)} reported VRAM`
-                    : ""
-                  }
-                </div>
-              </div>
-            )
-          )}
-      </div>
-
-
-      <div
         className="
           overflow-hidden
           rounded-xl
@@ -560,6 +534,63 @@ export default function HardwareCapabilityPanel({
           "
         >
           <div
+            className="
+              text-sm
+              font-semibold
+              text-white/70
+            "
+          >
+            Primary GPU
+          </div>
+        </div>
+
+        {displayedGpu ? (
+          <div
+            className="
+              px-4
+              py-3
+            "
+          >
+            <div
+              className="
+                text-sm
+                font-medium
+                text-white/68
+              "
+            >
+              {displayedGpu.name}
+            </div>
+
+            <div
+              className="
+                mt-1
+                text-xs
+                text-white/28
+              "
+            >
+              {displayedGpu.vendor}
+              {displayedGpu.dedicatedMemoryBytes
+                ? ` • ${formatBytes(displayedGpu.dedicatedMemoryBytes)} reported VRAM`
+                : ""
+              }
+            </div>
+          </div>
+        ) : (
+          <div
+            className="
+              px-4
+              py-3
+              text-xs
+              text-white/30
+            "
+          >
+            No GPU detected.
+          </div>
+        )}
+      </div>
+
+
+      <div
             className="
               flex
               items-center

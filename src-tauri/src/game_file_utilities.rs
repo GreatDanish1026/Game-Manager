@@ -1,20 +1,13 @@
 use std::{
     fs,
-    path::{
-        Path,
-        PathBuf,
-    },
+    path::{Path, PathBuf},
 };
 
 use serde::Serialize;
 
+const MAX_DIRECTORY_DEPTH: usize = 5;
 
-const MAX_DIRECTORY_DEPTH: usize =
-    5;
-
-const MAX_DIRECTORIES_VISITED: usize =
-    5000;
-
+const MAX_DIRECTORIES_VISITED: usize = 5000;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,47 +19,23 @@ pub struct GameUtilityDirectories {
     pub scan_truncated: bool,
 }
 
-
-fn path_string(
-    path: &Path,
-) -> String {
-    path
-        .to_string_lossy()
-        .to_string()
+fn path_string(path: &Path) -> String {
+    path.to_string_lossy().to_string()
 }
 
-
-fn normalized_name(
-    path: &Path,
-) -> String {
-    path
-        .file_name()
-        .and_then(
-            |value| {
-                value.to_str()
-            }
-        )
+fn normalized_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|value| value.to_str())
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase()
 }
 
-
-fn is_log_directory(
-    name: &str,
-) -> bool {
-    matches!(
-        name,
-        "log"
-            | "logs"
-            | "logging"
-    )
+fn is_log_directory(name: &str) -> bool {
+    matches!(name, "log" | "logs" | "logging")
 }
 
-
-fn is_crash_directory(
-    name: &str,
-) -> bool {
+fn is_crash_directory(name: &str) -> bool {
     matches!(
         name,
         "crash"
@@ -79,10 +48,7 @@ fn is_crash_directory(
     )
 }
 
-
-fn is_shader_cache_directory(
-    name: &str,
-) -> bool {
+fn is_shader_cache_directory(name: &str) -> bool {
     matches!(
         name,
         "shadercache"
@@ -95,162 +61,83 @@ fn is_shader_cache_directory(
     )
 }
 
-
 #[tauri::command]
 pub fn inspect_game_utility_directories(
     install_path: String,
 ) -> Result<GameUtilityDirectories, String> {
-    let root =
-        PathBuf::from(
-            install_path
-                .trim()
-                .trim_matches('"')
-        );
+    let root = PathBuf::from(install_path.trim().trim_matches('"'));
 
     if !root.exists() {
-        return Err(
-            format!(
-                "The install path does not exist: {}",
-                root.display()
-            )
-        );
+        return Err(format!(
+            "The install path does not exist: {}",
+            root.display()
+        ));
     }
 
     if !root.is_dir() {
-        return Err(
-            "The install path is not a directory."
-                .to_string()
-        );
+        return Err("The install path is not a directory.".to_string());
     }
 
-    let mut stack =
-        vec![
-            (
-                root.clone(),
-                0usize,
-            ),
-        ];
+    let mut stack = vec![(root.clone(), 0usize)];
 
-    let mut visited =
-        0usize;
+    let mut visited = 0usize;
 
-    let mut truncated =
-        false;
+    let mut truncated = false;
 
-    let mut log_directory:
-        Option<PathBuf> =
-        None;
+    let mut log_directory: Option<PathBuf> = None;
 
-    let mut crash_directory:
-        Option<PathBuf> =
-        None;
+    let mut crash_directory: Option<PathBuf> = None;
 
-    let mut shader_cache_directory:
-        Option<PathBuf> =
-        None;
+    let mut shader_cache_directory: Option<PathBuf> = None;
 
-    while let Some(
-        (
-            directory,
-            depth,
-        )
-    ) = stack.pop()
-    {
-        if depth
-            > MAX_DIRECTORY_DEPTH
-        {
+    while let Some((directory, depth)) = stack.pop() {
+        if depth > MAX_DIRECTORY_DEPTH {
             continue;
         }
 
-        let entries =
-            match fs::read_dir(
-                &directory
-            ) {
-                Ok(entries) =>
-                    entries,
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
 
-                Err(_) =>
-                    continue,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+
+                Err(_) => continue,
             };
-
-        for entry in
-            entries.flatten()
-        {
-            let file_type =
-                match entry.file_type() {
-                    Ok(file_type) =>
-                        file_type,
-
-                    Err(_) =>
-                        continue,
-                };
 
             if !file_type.is_dir() {
                 continue;
             }
 
-            visited +=
-                1;
+            visited += 1;
 
-            if visited
-                >= MAX_DIRECTORIES_VISITED
-            {
-                truncated =
-                    true;
+            if visited >= MAX_DIRECTORIES_VISITED {
+                truncated = true;
 
                 break;
             }
 
-            let path =
-                entry.path();
+            let path = entry.path();
 
-            let name =
-                normalized_name(
-                    &path
-                );
+            let name = normalized_name(&path);
 
-            if log_directory.is_none()
-                && is_log_directory(
-                    &name
-                )
-            {
-                log_directory =
-                    Some(
-                        path.clone()
-                    );
+            if log_directory.is_none() && is_log_directory(&name) {
+                log_directory = Some(path.clone());
             }
 
-            if crash_directory.is_none()
-                && is_crash_directory(
-                    &name
-                )
-            {
-                crash_directory =
-                    Some(
-                        path.clone()
-                    );
+            if crash_directory.is_none() && is_crash_directory(&name) {
+                crash_directory = Some(path.clone());
             }
 
-            if shader_cache_directory.is_none()
-                && is_shader_cache_directory(
-                    &name
-                )
-            {
-                shader_cache_directory =
-                    Some(
-                        path.clone()
-                    );
+            if shader_cache_directory.is_none() && is_shader_cache_directory(&name) {
+                shader_cache_directory = Some(path.clone());
             }
 
-            if depth
-                < MAX_DIRECTORY_DEPTH
-            {
-                stack.push(
-                    (
-                        path,
-                        depth + 1,
-                    )
-                );
+            if depth < MAX_DIRECTORY_DEPTH {
+                stack.push((path, depth + 1));
             }
 
             if log_directory.is_some()
@@ -262,44 +149,23 @@ pub fn inspect_game_utility_directories(
         }
 
         if truncated
-            || (
-                log_directory.is_some()
+            || (log_directory.is_some()
                 && crash_directory.is_some()
-                && shader_cache_directory.is_some()
-            )
+                && shader_cache_directory.is_some())
         {
             break;
         }
     }
 
-    Ok(
-        GameUtilityDirectories {
-            log_directory:
-                log_directory
-                    .as_deref()
-                    .map(
-                        path_string
-                    ),
+    Ok(GameUtilityDirectories {
+        log_directory: log_directory.as_deref().map(path_string),
 
-            crash_directory:
-                crash_directory
-                    .as_deref()
-                    .map(
-                        path_string
-                    ),
+        crash_directory: crash_directory.as_deref().map(path_string),
 
-            shader_cache_directory:
-                shader_cache_directory
-                    .as_deref()
-                    .map(
-                        path_string
-                    ),
+        shader_cache_directory: shader_cache_directory.as_deref().map(path_string),
 
-            directories_visited:
-                visited,
+        directories_visited: visited,
 
-            scan_truncated:
-                truncated,
-        }
-    )
+        scan_truncated: truncated,
+    })
 }

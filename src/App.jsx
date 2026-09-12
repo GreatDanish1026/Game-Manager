@@ -4037,6 +4037,10 @@ function hideGame(
           />
         ) : (
           <GameDetails
+            key={
+              selectedGame?.id
+              ?? "dashboard"
+            }
             game={
               selectedGame
             }

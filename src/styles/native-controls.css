@@ -1,0 +1,35 @@
+/*
+ * GameAtlas native form controls
+ * Keeps WebKitGTK/Linux native selects aligned with the dark GameAtlas UI.
+ */
+:root {
+  color-scheme: dark;
+}
+
+select {
+  color-scheme: dark;
+  background-color: #111827 !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+select:hover {
+  background-color: #151d2b !important;
+}
+
+select:focus {
+  background-color: #111827 !important;
+  color: #ffffff !important;
+}
+
+select:disabled {
+  background-color: #0f1520 !important;
+  color: rgba(255, 255, 255, 0.35) !important;
+}
+
+select option,
+select optgroup {
+  color-scheme: dark;
+  background: #111827 !important;
+  color: #f3f4f6 !important;
+}

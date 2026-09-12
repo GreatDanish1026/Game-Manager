@@ -1,18 +1,13 @@
 use serde::Serialize;
 
 #[cfg(target_os = "windows")]
-use std::{
-    collections::BTreeMap,
-    sync::OnceLock,
-    time::Instant,
-};
+use std::{collections::BTreeMap, sync::OnceLock, time::Instant};
 
 #[cfg(target_os = "windows")]
-use winreg::{
-    enums::HKEY_LOCAL_MACHINE,
-    RegKey,
-};
+use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
 
+#[cfg(target_os = "linux")]
+use std::{collections::BTreeSet, fs, process::Command};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,7 +21,6 @@ pub struct GpuInfo {
     pub intel_arc: bool,
 }
 
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemHardwareInfo {
@@ -37,133 +31,62 @@ pub struct SystemHardwareInfo {
     pub gpus: Vec<GpuInfo>,
 }
 
+fn normalized_vendor(name: &str) -> String {
+    let lower = name.to_ascii_lowercase();
 
-fn normalized_vendor(
-    name: &str,
-) -> String {
-    let lower =
-        name.to_ascii_lowercase();
-
-    if lower.contains(
-        "nvidia"
-    ) {
-        "NVIDIA"
-            .to_string()
-    } else if lower.contains(
-        "amd"
-    )
-        || lower.contains(
-            "radeon"
-        )
+    if lower.contains("nvidia") {
+        "NVIDIA".to_string()
+    } else if lower.contains("amd")
+        || lower.contains("radeon")
+        || lower.contains("advanced micro devices")
     {
-        "AMD"
-            .to_string()
-    } else if lower.contains(
-        "intel"
-    ) {
-        "Intel"
-            .to_string()
+        "AMD".to_string()
+    } else if lower.contains("intel") {
+        "Intel".to_string()
     } else {
-        "Unknown"
-            .to_string()
+        "Unknown".to_string()
     }
 }
 
+fn extract_nvidia_series(name: &str) -> Option<u32> {
+    let upper = name.to_ascii_uppercase();
 
-fn extract_nvidia_series(
-    name: &str,
-) -> Option<u32> {
-    let upper =
-        name.to_ascii_uppercase();
+    let rtx_index = upper.find("RTX")?;
 
-    let rtx_index =
-        upper.find(
-            "RTX"
-        )?;
+    let tail = &upper[rtx_index + 3..];
 
-    let tail =
-        &upper[
-            rtx_index + 3..
-        ];
+    let digits = tail
+        .chars()
+        .skip_while(|character| !character.is_ascii_digit())
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<String>();
 
-    let digits =
-        tail
-            .chars()
-            .skip_while(
-                |character| {
-                    !character
-                        .is_ascii_digit()
-                }
-            )
-            .take_while(
-                |character| {
-                    character
-                        .is_ascii_digit()
-                }
-            )
-            .collect::<String>();
-
-    if digits.len()
-        < 4
-    {
+    if digits.len() < 4 {
         return None;
     }
 
-    digits[0..2]
-        .parse::<u32>()
-        .ok()
+    digits[0..2].parse::<u32>().ok()
 }
 
-
-fn nvidia_rtx(
-    name: &str,
-) -> bool {
-    name
-        .to_ascii_uppercase()
-        .contains(
-            "RTX"
-        )
+fn nvidia_rtx(name: &str) -> bool {
+    name.to_ascii_uppercase().contains("RTX")
 }
 
-
-fn nvidia_frame_generation_capable(
-    name: &str,
-) -> bool {
-    extract_nvidia_series(
-        name
-    )
-    .map(
-        |series| {
-            series >= 40
-        }
-    )
-    .unwrap_or(
-        false
-    )
+fn nvidia_frame_generation_capable(name: &str) -> bool {
+    extract_nvidia_series(name)
+        .map(|series| series >= 40)
+        .unwrap_or(false)
 }
 
+fn amd_ray_tracing_class(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
 
-fn amd_ray_tracing_class(
-    name: &str,
-) -> bool {
-    let upper =
-        name.to_ascii_uppercase();
-
-    if !upper.contains(
-        "RADEON"
-    ) {
+    if !upper.contains("RADEON") {
         return false;
     }
 
-    for marker in [
-        "RX 6",
-        "RX 7",
-        "RX 8",
-        "RX 9",
-    ] {
-        if upper.contains(
-            marker
-        ) {
+    for marker in ["RX 6", "RX 7", "RX 8", "RX 9"] {
+        if upper.contains(marker) {
             return true;
         }
     }
@@ -171,1056 +94,584 @@ fn amd_ray_tracing_class(
     false
 }
 
-
-fn intel_arc(
-    name: &str,
-) -> bool {
-    name
-        .to_ascii_uppercase()
-        .contains(
-            "ARC"
-        )
+fn intel_arc(name: &str) -> bool {
+    name.to_ascii_uppercase().contains("ARC")
 }
 
+// ============================================================
+// Windows
+// ============================================================
 
 #[cfg(target_os = "windows")]
-fn cpu_name_from_registry() -> Option<String> {
-    let hklm =
-        RegKey::predef(
-            HKEY_LOCAL_MACHINE
-        );
+fn windows_cpu_name() -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
 
-    let key =
-        hklm
-            .open_subkey(
-                r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"
-            )
-            .ok()?;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    let value:
-        String =
-        key
-            .get_value(
-                "ProcessorNameString"
-            )
-            .ok()?;
+    let output = Command::new("powershell.exe")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            "(Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name)",
+        ])
+        .output()
+        .ok()?;
 
-    let trimmed =
-        value.trim();
+    if !output.status.success() {
+        return None;
+    }
 
-    if trimmed.is_empty() {
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if value.is_empty() {
         None
     } else {
-        Some(
-            trimmed.to_string()
-        )
+        Some(value)
     }
 }
 
+#[cfg(target_os = "windows")]
+fn windows_ram_bytes() -> Option<u64> {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let output = Command::new("powershell.exe")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory",
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u64>()
+        .ok()
+}
 
 #[cfg(target_os = "windows")]
-fn os_from_registry() -> (
-    Option<String>,
-    Option<String>,
-) {
-    let hklm =
-        RegKey::predef(
-            HKEY_LOCAL_MACHINE
-        );
+fn windows_os_info() -> (Option<String>, Option<String>) {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
 
-    let Ok(key) =
-        hklm.open_subkey(
-            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let output =
+        Command::new(
+            "powershell.exe"
         )
-    else {
-        return (
-            None,
-            None,
-        );
+        .creation_flags(
+            CREATE_NO_WINDOW
+        )
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            "$o=Get-CimInstance Win32_OperatingSystem; Write-Output $o.Caption; Write-Output $o.Version",
+        ])
+        .output();
+
+    let Ok(output) = output else {
+        return (None, None);
     };
 
-    let mut product_name =
-        key
-            .get_value::<String, _>(
-                "ProductName"
-            )
-            .ok();
-
-    let display_version =
-        key
-            .get_value::<String, _>(
-                "DisplayVersion"
-            )
-            .ok()
-            .or_else(
-                || {
-                    key
-                        .get_value::<String, _>(
-                            "ReleaseId"
-                        )
-                        .ok()
-                }
-            );
-
-    let build =
-        key
-            .get_value::<String, _>(
-                "CurrentBuildNumber"
-            )
-            .ok();
-
-    let ubr =
-        key
-            .get_value::<u32, _>(
-                "UBR"
-            )
-            .ok();
-
-    if let (
-        Some(name),
-        Some(build_number),
-    ) = (
-        product_name.as_mut(),
-        build
-            .as_deref()
-            .and_then(
-                |value| {
-                    value.parse::<u32>()
-                        .ok()
-                }
-            ),
-    ) {
-        if build_number >= 22000
-            && name.contains(
-                "Windows 10"
-            )
-        {
-            *name =
-                name.replace(
-                    "Windows 10",
-                    "Windows 11",
-                );
-        }
+    if !output.status.success() {
+        return (None, None);
     }
 
-    let build_text =
-        match (
-            build.as_deref(),
-            ubr,
-        ) {
-            (
-                Some(build),
-                Some(ubr),
-            ) =>
-                Some(
-                    format!(
-                        "{}.{}",
-                        build,
-                        ubr
-                    )
-                ),
+    let lines = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
 
-            (
-                Some(build),
-                None,
-            ) =>
-                Some(
-                    build.to_string()
-                ),
-
-            _ =>
-                None,
-        };
-
-    let version =
-        match (
-            display_version,
-            build_text,
-        ) {
-            (
-                Some(display),
-                Some(build),
-            ) =>
-                Some(
-                    format!(
-                        "{} (Build {})",
-                        display,
-                        build
-                    )
-                ),
-
-            (
-                Some(display),
-                None,
-            ) =>
-                Some(
-                    display
-                ),
-
-            (
-                None,
-                Some(build),
-            ) =>
-                Some(
-                    format!(
-                        "Build {}",
-                        build
-                    )
-                ),
-
-            _ =>
-                None,
-        };
-
-    (
-        product_name,
-        version,
-    )
+    (lines.get(0).cloned(), lines.get(1).cloned())
 }
 
-
 #[cfg(target_os = "windows")]
-#[repr(C)]
-struct MemoryStatusEx {
-    length: u32,
-    memory_load: u32,
-    total_phys: u64,
-    avail_phys: u64,
-    total_page_file: u64,
-    avail_page_file: u64,
-    total_virtual: u64,
-    avail_virtual: u64,
-    avail_extended_virtual: u64,
-}
+fn windows_gpus() -> Vec<GpuInfo> {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
 
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-#[cfg(target_os = "windows")]
-#[link(name = "kernel32")]
-extern "system" {
-    fn GlobalMemoryStatusEx(
-        buffer: *mut MemoryStatusEx,
-    ) -> i32;
-}
-
-
-#[cfg(target_os = "windows")]
-fn total_ram_bytes() -> Option<u64> {
-    let mut status =
-        MemoryStatusEx {
-            length:
-                std::mem::size_of::<MemoryStatusEx>()
-                    as u32,
-            memory_load:
-                0,
-            total_phys:
-                0,
-            avail_phys:
-                0,
-            total_page_file:
-                0,
-            avail_page_file:
-                0,
-            total_virtual:
-                0,
-            avail_virtual:
-                0,
-            avail_extended_virtual:
-                0,
-        };
-
-    let success =
-        unsafe {
-            GlobalMemoryStatusEx(
-                &mut status
-            )
-        };
-
-    if success == 0 {
-        None
-    } else {
-        Some(
-            status.total_phys
+    let output =
+        Command::new(
+            "powershell.exe"
         )
-    }
-}
+        .creation_flags(
+            CREATE_NO_WINDOW
+        )
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            "Get-CimInstance Win32_VideoController | ForEach-Object { \"$($_.Name)|$($_.AdapterRAM)\" }",
+        ])
+        .output();
 
-
-#[cfg(target_os = "windows")]
-fn raw_registry_memory_bytes(
-    key: &RegKey,
-) -> Option<u64> {
-    for value_name in [
-        "HardwareInformation.qwMemorySize",
-        "HardwareInformation.MemorySize",
-    ] {
-        let Ok(raw) =
-            key.get_raw_value(
-                value_name
-            )
-        else {
-            continue;
-        };
-
-        if raw.bytes.len() >= 8 {
-            let bytes:
-                [u8; 8] =
-                raw.bytes[0..8]
-                    .try_into()
-                    .ok()?;
-
-            return Some(
-                u64::from_le_bytes(
-                    bytes
-                )
-            );
-        }
-
-        if raw.bytes.len() >= 4 {
-            let bytes:
-                [u8; 4] =
-                raw.bytes[0..4]
-                    .try_into()
-                    .ok()?;
-
-            return Some(
-                u32::from_le_bytes(
-                    bytes
-                ) as u64
-            );
-        }
-    }
-
-    None
-}
-
-
-#[cfg(target_os = "windows")]
-fn add_gpu_registry_entry(
-    key: &RegKey,
-    found: &mut BTreeMap<String, (
-        String,
-        Option<u64>,
-    )>,
-) {
-    let name =
-        key
-            .get_value::<String, _>(
-                "DriverDesc"
-            )
-            .ok()
-            .or_else(
-                || {
-                    key
-                        .get_value::<String, _>(
-                            "Device Description"
-                        )
-                        .ok()
-                }
-            );
-
-    let Some(name) =
-        name
-            .map(
-                |value| {
-                    value.trim()
-                        .to_string()
-                }
-            )
-            .filter(
-                |value| {
-                    !value.is_empty()
-                }
-            )
-    else {
-        return;
+    let Ok(output) = output else {
+        return Vec::new();
     };
 
-    let lower =
-        name.to_ascii_lowercase();
-
-    if lower.contains(
-        "microsoft basic"
-    )
-        || lower.contains(
-            "remote display"
-        )
-    {
-        return;
+    if !output.status.success() {
+        return Vec::new();
     }
 
-    let memory =
-        raw_registry_memory_bytes(
-            key
-        );
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
 
-    let dedupe_key =
-        lower;
-
-    match found.get_mut(
-        &dedupe_key
-    ) {
-        Some((
-            _,
-            existing_memory,
-        )) => {
-            if memory.unwrap_or(0)
-                > existing_memory
-                    .unwrap_or(0)
-            {
-                *existing_memory =
-                    memory;
+            if line.is_empty() {
+                return None;
             }
-        }
 
-        None => {
-            found.insert(
-                dedupe_key,
-                (
-                    name,
-                    memory,
-                ),
-            );
-        }
-    }
-}
+            let mut parts = line.splitn(2, '|');
 
+            let name = parts.next()?.trim().to_string();
 
-#[cfg(target_os = "windows")]
-fn query_gpus_from_class_registry(
-    found: &mut BTreeMap<String, (
-        String,
-        Option<u64>,
-    )>,
-) {
-    let hklm =
-        RegKey::predef(
-            HKEY_LOCAL_MACHINE
-        );
+            if name.is_empty() {
+                return None;
+            }
 
-    let Ok(class_key) =
-        hklm.open_subkey(
-            r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
-        )
-    else {
-        return;
-    };
+            let dedicated_memory_bytes = parts
+                .next()
+                .and_then(|value| value.trim().parse::<u64>().ok());
 
-    for subkey_name in
-        class_key.enum_keys()
-            .flatten()
-    {
-        if !subkey_name
-            .chars()
-            .all(
-                |character| {
-                    character.is_ascii_digit()
-                }
-            )
-        {
-            continue;
-        }
+            Some(GpuInfo {
+                vendor: normalized_vendor(&name),
 
-        if let Ok(key) =
-            class_key.open_subkey(
-                &subkey_name
-            )
-        {
-            add_gpu_registry_entry(
-                &key,
-                found,
-            );
-        }
-    }
-}
-
-
-#[cfg(target_os = "windows")]
-fn query_gpus_from_video_registry(
-    found: &mut BTreeMap<String, (
-        String,
-        Option<u64>,
-    )>,
-) {
-    let hklm =
-        RegKey::predef(
-            HKEY_LOCAL_MACHINE
-        );
-
-    let Ok(video_key) =
-        hklm.open_subkey(
-            r"SYSTEM\CurrentControlSet\Control\Video"
-        )
-    else {
-        return;
-    };
-
-    for adapter_key_name in
-        video_key.enum_keys()
-            .flatten()
-    {
-        let Ok(adapter_key) =
-            video_key.open_subkey(
-                &adapter_key_name
-            )
-        else {
-            continue;
-        };
-
-        for child_name in
-            adapter_key.enum_keys()
-                .flatten()
-        {
-            let Ok(child_key) =
-                adapter_key.open_subkey(
-                    &child_name
-                )
-            else {
-                continue;
-            };
-
-            add_gpu_registry_entry(
-                &child_key,
-                found,
-            );
-        }
-    }
-}
-
-
-#[cfg(target_os = "windows")]
-fn query_gpus() -> Vec<GpuInfo> {
-    let mut found:
-        BTreeMap<String, (
-            String,
-            Option<u64>,
-        )> =
-        BTreeMap::new();
-
-    query_gpus_from_class_registry(
-        &mut found
-    );
-
-    query_gpus_from_video_registry(
-        &mut found
-    );
-
-    found
-        .into_values()
-        .map(
-            |(
-                name,
                 dedicated_memory_bytes,
-            )| {
-                GpuInfo {
-                    vendor:
-                        normalized_vendor(
-                            &name
-                        ),
 
-                    nvidia_rtx:
-                        nvidia_rtx(
-                            &name
-                        ),
+                nvidia_rtx: nvidia_rtx(&name),
 
-                    nvidia_frame_generation_capable:
-                        nvidia_frame_generation_capable(
-                            &name
-                        ),
+                nvidia_frame_generation_capable: nvidia_frame_generation_capable(&name),
 
-                    amd_ray_tracing_class:
-                        amd_ray_tracing_class(
-                            &name
-                        ),
+                amd_ray_tracing_class: amd_ray_tracing_class(&name),
 
-                    intel_arc:
-                        intel_arc(
-                            &name
-                        ),
+                intel_arc: intel_arc(&name),
 
-                    dedicated_memory_bytes,
-
-                    name,
-                }
-            }
-        )
+                name,
+            })
+        })
         .collect()
 }
-
-
-#[cfg(target_os = "windows")]
-fn detect_system_hardware() -> SystemHardwareInfo {
-    let started =
-        Instant::now();
-
-    let cpu_name =
-        cpu_name_from_registry();
-
-    let ram_bytes =
-        total_ram_bytes();
-
-    let (
-        os_name,
-        os_version,
-    ) =
-        os_from_registry();
-
-    let gpus =
-        query_gpus();
-
-    println!(
-        "[PERFORMANCE] Hardware detection: {} ms",
-        started.elapsed().as_millis()
-    );
-
-    SystemHardwareInfo {
-        cpu_name,
-        ram_bytes,
-        os_name,
-        os_version,
-        gpus,
-    }
-}
-
-
-#[cfg(target_os = "windows")]
-static HARDWARE_CACHE:
-    OnceLock<SystemHardwareInfo> =
-    OnceLock::new();
-
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
 pub fn get_system_hardware() -> Result<SystemHardwareInfo, String> {
-    let cached =
-        HARDWARE_CACHE
-            .get_or_init(
-                detect_system_hardware
-            );
+    let (os_name, os_version) = windows_os_info();
 
-    Ok(
-        cached.clone()
-    )
+    Ok(SystemHardwareInfo {
+        cpu_name: windows_cpu_name(),
+
+        ram_bytes: windows_ram_bytes(),
+
+        os_name,
+
+        os_version,
+
+        gpus: windows_gpus(),
+    })
+}
+
+// ============================================================
+// Linux
+// ============================================================
+
+#[cfg(target_os = "linux")]
+fn linux_command_candidates(program: &str) -> Vec<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+
+    for prefix in ["/usr/bin", "/usr/sbin", "/bin", "/sbin"] {
+        let path = std::path::Path::new(prefix).join(program);
+
+        if path.exists() {
+            candidates.push(path);
+        }
+    }
+
+    // Keep the PATH-based lookup as a final fallback.
+    candidates.push(std::path::PathBuf::from(program));
+
+    candidates
+}
+
+#[cfg(target_os = "linux")]
+fn linux_command_output(program: &str, args: &[&str]) -> Option<String> {
+    for candidate in linux_command_candidates(program) {
+        let output = Command::new(&candidate).args(args).output();
+
+        let Ok(output) = output else {
+            continue;
+        };
+
+        if !output.status.success() {
+            continue;
+        }
+
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        if !value.is_empty() {
+            return Some(value);
+        }
+    }
+
+    None
 }
 
 #[cfg(target_os = "linux")]
 fn linux_cpu_name() -> Option<String> {
-    let text =
-        std::fs::read_to_string(
-            "/proc/cpuinfo"
-        )
-        .ok()?;
+    let text = fs::read_to_string("/proc/cpuinfo").ok()?;
 
     for line in text.lines() {
-        let Some(
-            (
-                key,
-                value,
-            )
-        ) =
-            line.split_once(':')
-        else {
-            continue;
-        };
-
-        let key =
-            key.trim()
-                .to_ascii_lowercase();
-
-        if key == "model name"
-            || key == "hardware"
-        {
-            let value =
-                value.trim();
+        if let Some(value) = line.strip_prefix("model name") {
+            let value = value.trim_start_matches(':').trim();
 
             if !value.is_empty() {
-                return Some(
-                    value.to_string()
-                );
+                return Some(value.to_string());
             }
         }
     }
 
     None
 }
-
 
 #[cfg(target_os = "linux")]
 fn linux_ram_bytes() -> Option<u64> {
-    let text =
-        std::fs::read_to_string(
-            "/proc/meminfo"
-        )
-        .ok()?;
+    let text = fs::read_to_string("/proc/meminfo").ok()?;
 
     for line in text.lines() {
-        if !line.starts_with(
-            "MemTotal:"
-        ) {
+        if !line.starts_with("MemTotal:") {
             continue;
         }
 
-        let kilobytes =
-            line
-                .split_whitespace()
-                .nth(
-                    1
-                )?
-                .parse::<u64>()
-                .ok()?;
+        let kilobytes = line.split_whitespace().nth(1)?.parse::<u64>().ok()?;
 
-        return Some(
-            kilobytes
-                .saturating_mul(
-                    1024
-                )
-        );
+        return Some(kilobytes.saturating_mul(1024));
     }
 
     None
 }
 
-
 #[cfg(target_os = "linux")]
-fn linux_os_release_value(
-    key: &str,
-) -> Option<String> {
-    let text =
-        std::fs::read_to_string(
-            "/etc/os-release"
-        )
-        .ok()?;
+fn os_release_value(key: &str) -> Option<String> {
+    let text = fs::read_to_string("/etc/os-release").ok()?;
 
     for line in text.lines() {
-        let Some(
-            (
-                candidate_key,
-                value,
-            )
-        ) =
-            line.split_once('=')
-        else {
+        let Some((current_key, raw_value)) = line.split_once('=') else {
             continue;
         };
 
-        if candidate_key.trim()
-            != key
+        if current_key != key {
+            continue;
+        }
+
+        let value = raw_value.trim().trim_matches('"').to_string();
+
+        if value.is_empty() {
+            return None;
+        }
+
+        return Some(value);
+    }
+
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn gpu_from_name(name: String, dedicated_memory_bytes: Option<u64>) -> GpuInfo {
+    GpuInfo {
+        vendor: normalized_vendor(&name),
+
+        dedicated_memory_bytes,
+
+        nvidia_rtx: nvidia_rtx(&name),
+
+        nvidia_frame_generation_capable: nvidia_frame_generation_capable(&name),
+
+        amd_ray_tracing_class: amd_ray_tracing_class(&name),
+
+        intel_arc: intel_arc(&name),
+
+        name,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_nvidia_proc_gpus() -> Vec<GpuInfo> {
+    let mut results = Vec::new();
+
+    let root = std::path::Path::new("/proc/driver/nvidia/gpus");
+
+    let Ok(entries) = fs::read_dir(root) else {
+        return results;
+    };
+
+    for entry in entries.flatten() {
+        let information = entry.path().join("information");
+
+        let Ok(text) = fs::read_to_string(information) else {
+            continue;
+        };
+
+        let model = text.lines().find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+
+            if key.trim() != "Model" {
+                return None;
+            }
+
+            let value = value.trim();
+
+            if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        });
+
+        if let Some(model) = model {
+            results.push(gpu_from_name(model, None));
+        }
+    }
+
+    results
+}
+
+#[cfg(target_os = "linux")]
+fn linux_nvidia_gpus() -> Vec<GpuInfo> {
+    let Some(text) = linux_command_output(
+        "nvidia-smi",
+        &[
+            "--query-gpu=name,memory.total",
+            "--format=csv,noheader,nounits",
+        ],
+    ) else {
+        return Vec::new();
+    };
+
+    text.lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(2, ',');
+
+            let name = parts.next()?.trim().to_string();
+
+            if name.is_empty() {
+                return None;
+            }
+
+            let memory_mib = parts
+                .next()
+                .and_then(|value| value.trim().parse::<u64>().ok());
+
+            let memory_bytes =
+                memory_mib.map(|value| value.saturating_mul(1024).saturating_mul(1024));
+
+            Some(gpu_from_name(name, memory_bytes))
+        })
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn linux_lspci_gpus() -> Vec<GpuInfo> {
+    let Some(text) = linux_command_output("lspci", &["-nn"]) else {
+        return Vec::new();
+    };
+
+    let mut results = Vec::new();
+
+    for line in text.lines() {
+        let lower = line.to_ascii_lowercase();
+
+        if !lower.contains("vga compatible controller")
+            && !lower.contains("3d controller")
+            && !lower.contains("display controller")
         {
             continue;
         }
 
-        let value =
-            value
-                .trim()
-                .trim_matches('"')
-                .to_string();
+        let name = line
+            .split_once(": ")
+            .map(|(_, value)| value.trim().to_string())
+            .unwrap_or_else(|| line.trim().to_string());
 
-        if !value.is_empty() {
-            return Some(
-                value
-            );
+        if name.is_empty() {
+            continue;
         }
+
+        results.push(gpu_from_name(name, None));
     }
 
-    None
+    results
 }
 
-
 #[cfg(target_os = "linux")]
-fn linux_os_info() -> (
-    Option<String>,
-    Option<String>,
-) {
-    (
-        linux_os_release_value(
-            "PRETTY_NAME"
-        )
-        .or_else(
-            || {
-                linux_os_release_value(
-                    "NAME"
-                )
-            }
-        ),
+fn linux_sysfs_gpus() -> Vec<GpuInfo> {
+    let mut results = Vec::new();
 
-        linux_os_release_value(
-            "VERSION_ID"
-        ),
-    )
-}
-
-
-#[cfg(target_os = "linux")]
-fn linux_nvidia_gpus() -> Vec<GpuInfo> {
-    let output =
-        std::process::Command::new(
-            "nvidia-smi"
-        )
-        .args([
-            "--query-gpu=name,memory.total",
-            "--format=csv,noheader,nounits",
-        ])
-        .output();
-
-    let Ok(
-        output
-    ) =
-        output
-    else {
-        return Vec::new();
+    let Ok(entries) = fs::read_dir("/sys/class/drm") else {
+        return results;
     };
 
-    if !output.status.success() {
-        return Vec::new();
+    let mut seen_devices = BTreeSet::new();
+
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        // card0, card1, ... only. Skip renderD* and connector entries.
+        if !name.starts_with("card")
+            || name[4..]
+                .chars()
+                .any(|character| !character.is_ascii_digit())
+        {
+            continue;
+        }
+
+        let device = entry.path().join("device");
+
+        let canonical = fs::canonicalize(&device).ok();
+
+        if let Some(canonical) = canonical.as_ref() {
+            if !seen_devices.insert(canonical.clone()) {
+                continue;
+            }
+        }
+
+        let vendor_id = fs::read_to_string(device.join("vendor"))
+            .ok()
+            .map(|value| value.trim().to_ascii_lowercase());
+
+        let device_id = fs::read_to_string(device.join("device"))
+            .ok()
+            .map(|value| value.trim().to_ascii_lowercase());
+
+        let driver_name = fs::read_link(device.join("driver")).ok().and_then(|path| {
+            path.file_name()
+                .map(|value| value.to_string_lossy().to_string())
+        });
+
+        let mut display_name = match vendor_id.as_deref() {
+            Some("0x10de") => "NVIDIA GPU".to_string(),
+
+            Some("0x1002") => "AMD Radeon GPU".to_string(),
+
+            Some("0x8086") => "Intel GPU".to_string(),
+
+            _ => "GPU".to_string(),
+        };
+
+        if let Some(device_id) = device_id {
+            display_name.push_str(&format!(" ({})", device_id));
+        }
+
+        if let Some(driver) = driver_name {
+            display_name.push_str(&format!(" [{}]", driver));
+        }
+
+        results.push(gpu_from_name(display_name, None));
     }
 
-    String::from_utf8_lossy(
-        &output.stdout
-    )
-    .lines()
-    .filter_map(
-        |line| {
-            let (
-                name,
-                memory
-            ) =
-                line.split_once(
-                    ','
-                )?;
-
-            let name =
-                name.trim()
-                    .to_string();
-
-            if name.is_empty() {
-                return None;
-            }
-
-            let dedicated_memory_bytes =
-                memory
-                    .trim()
-                    .parse::<u64>()
-                    .ok()
-                    .map(
-                        |mebibytes| {
-                            mebibytes
-                                .saturating_mul(
-                                    1024
-                                )
-                                .saturating_mul(
-                                    1024
-                                )
-                        }
-                    );
-
-            Some(
-                GpuInfo {
-                    vendor:
-                        normalized_vendor(
-                            &name
-                        ),
-
-                    nvidia_rtx:
-                        nvidia_rtx(
-                            &name
-                        ),
-
-                    nvidia_frame_generation_capable:
-                        nvidia_frame_generation_capable(
-                            &name
-                        ),
-
-                    amd_ray_tracing_class:
-                        amd_ray_tracing_class(
-                            &name
-                        ),
-
-                    intel_arc:
-                        intel_arc(
-                            &name
-                        ),
-
-                    dedicated_memory_bytes,
-
-                    name,
-                }
-            )
-        }
-    )
-    .collect()
+    results
 }
-
-
-#[cfg(target_os = "linux")]
-fn linux_lspci_gpus() -> Vec<GpuInfo> {
-    let output =
-        std::process::Command::new(
-            "lspci"
-        )
-        .output();
-
-    let Ok(
-        output
-    ) =
-        output
-    else {
-        return Vec::new();
-    };
-
-    if !output.status.success() {
-        return Vec::new();
-    }
-
-    String::from_utf8_lossy(
-        &output.stdout
-    )
-    .lines()
-    .filter(
-        |line| {
-            let lower =
-                line.to_ascii_lowercase();
-
-            lower.contains(
-                "vga compatible controller"
-            )
-                || lower.contains(
-                    "3d controller"
-                )
-                || lower.contains(
-                    "display controller"
-                )
-        }
-    )
-    .filter_map(
-        |line| {
-            let name =
-                line
-                    .split_once(
-                        ": "
-                    )
-                    .map(
-                        |(
-                            _,
-                            value,
-                        )| {
-                            value
-                        }
-                    )
-                    .unwrap_or(
-                        line
-                    )
-                    .trim()
-                    .to_string();
-
-            if name.is_empty() {
-                return None;
-            }
-
-            Some(
-                GpuInfo {
-                    vendor:
-                        normalized_vendor(
-                            &name
-                        ),
-
-                    nvidia_rtx:
-                        nvidia_rtx(
-                            &name
-                        ),
-
-                    nvidia_frame_generation_capable:
-                        nvidia_frame_generation_capable(
-                            &name
-                        ),
-
-                    amd_ray_tracing_class:
-                        amd_ray_tracing_class(
-                            &name
-                        ),
-
-                    intel_arc:
-                        intel_arc(
-                            &name
-                        ),
-
-                    dedicated_memory_bytes:
-                        None,
-
-                    name,
-                }
-            )
-        }
-    )
-    .collect()
-}
-
 
 #[cfg(target_os = "linux")]
 fn linux_gpus() -> Vec<GpuInfo> {
-    let nvidia =
-        linux_nvidia_gpus();
+    let mut results = linux_nvidia_proc_gpus();
 
-    if !nvidia.is_empty() {
-        return nvidia;
+    let smi_gpus = linux_nvidia_gpus();
+
+    if !smi_gpus.is_empty() {
+        results.retain(|gpu| gpu.vendor != "NVIDIA");
+
+        results.extend(smi_gpus);
     }
 
-    linux_lspci_gpus()
-}
+    let mut seen = results
+        .iter()
+        .map(|gpu| gpu.name.to_ascii_lowercase())
+        .collect::<BTreeSet<_>>();
 
+    for gpu in linux_lspci_gpus() {
+        if gpu.vendor == "NVIDIA" && results.iter().any(|existing| existing.vendor == "NVIDIA") {
+            continue;
+        }
 
-#[cfg(target_os = "linux")]
-fn detect_linux_system_hardware() -> SystemHardwareInfo {
-    let (
-        os_name,
-        os_version,
-    ) =
-        linux_os_info();
+        let lower = gpu.name.to_ascii_lowercase();
 
-    SystemHardwareInfo {
-        cpu_name:
-            linux_cpu_name(),
-
-        ram_bytes:
-            linux_ram_bytes(),
-
-        os_name,
-
-        os_version,
-
-        gpus:
-            linux_gpus(),
+        if seen.insert(lower) {
+            results.push(gpu);
+        }
     }
+
+    for gpu in linux_sysfs_gpus() {
+        if gpu.vendor == "NVIDIA" && results.iter().any(|existing| existing.vendor == "NVIDIA") {
+            continue;
+        }
+
+        let lower = gpu.name.to_ascii_lowercase();
+
+        if seen.insert(lower) {
+            results.push(gpu);
+        }
+    }
+
+    results
 }
-
-
-#[cfg(target_os = "linux")]
-static LINUX_HARDWARE_CACHE:
-    std::sync::OnceLock<SystemHardwareInfo> =
-    std::sync::OnceLock::new();
-
 
 #[cfg(target_os = "linux")]
 #[tauri::command]
 pub fn get_system_hardware() -> Result<SystemHardwareInfo, String> {
-    let cached =
-        LINUX_HARDWARE_CACHE
-            .get_or_init(
-                detect_linux_system_hardware
-            );
+    Ok(SystemHardwareInfo {
+        cpu_name: linux_cpu_name(),
 
-    Ok(
-        cached.clone()
-    )
+        ram_bytes: linux_ram_bytes(),
+
+        os_name: os_release_value("PRETTY_NAME").or_else(|| os_release_value("NAME")),
+
+        os_version: os_release_value("VERSION_ID"),
+
+        gpus: linux_gpus(),
+    })
 }
 
+// ============================================================
+// Other platforms
+// ============================================================
 
-#[cfg(not(any(
-    target_os = "windows",
-    target_os = "linux"
-)))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 #[tauri::command]
 pub fn get_system_hardware() -> Result<SystemHardwareInfo, String> {
-    Err(
-        "System hardware detection is currently implemented for Windows and Linux."
-            .to_string()
-    )
+    Ok(SystemHardwareInfo {
+        cpu_name: None,
+
+        ram_bytes: None,
+
+        os_name: Some(std::env::consts::OS.to_string()),
+
+        os_version: None,
+
+        gpus: Vec::new(),
+    })
 }

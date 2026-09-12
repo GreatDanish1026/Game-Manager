@@ -1,8 +1,6 @@
 use serde::Serialize;
 
-const FLUFFY_PAGE_URL: &str =
-    "https://www.nexusmods.com/site/mods/818";
-
+const FLUFFY_PAGE_URL: &str = "https://www.nexusmods.com/site/mods/818";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,13 +13,11 @@ pub struct FluffySupportStatus {
     pub match_score: i32,
 }
 
-
 struct SupportedGame {
     canonical_name: &'static str,
     aliases: &'static [&'static str],
     notes: &'static str,
 }
-
 
 /*
  * Fluffy does not publish a Vortex-style machine-readable
@@ -58,10 +54,7 @@ const SUPPORTED_GAMES: &[SupportedGame] = &[
     },
     SupportedGame {
         canonical_name: "Resident Evil 2",
-        aliases: &[
-            "Resident Evil 2",
-            "Resident Evil 2 1998",
-        ],
+        aliases: &["Resident Evil 2", "Resident Evil 2 1998"],
         notes: "Known Fluffy Mod Manager support for the original Resident Evil 2.",
     },
     SupportedGame {
@@ -114,17 +107,12 @@ const SUPPORTED_GAMES: &[SupportedGame] = &[
     },
     SupportedGame {
         canonical_name: "Resident Evil 5",
-        aliases: &[
-            "Resident Evil 5",
-            "Resident Evil 5 Gold Edition",
-        ],
+        aliases: &["Resident Evil 5", "Resident Evil 5 Gold Edition"],
         notes: "Known Fluffy Mod Manager support for Resident Evil 5.",
     },
     SupportedGame {
         canonical_name: "Resident Evil 6",
-        aliases: &[
-            "Resident Evil 6",
-        ],
+        aliases: &["Resident Evil 6"],
         notes: "Known Fluffy Mod Manager support for Resident Evil 6.",
     },
     SupportedGame {
@@ -159,17 +147,12 @@ const SUPPORTED_GAMES: &[SupportedGame] = &[
     },
     SupportedGame {
         canonical_name: "Resident Evil Revelations",
-        aliases: &[
-            "Resident Evil Revelations",
-            "Resident Evil Revelations 1",
-        ],
+        aliases: &["Resident Evil Revelations", "Resident Evil Revelations 1"],
         notes: "Known Fluffy Mod Manager support for Resident Evil Revelations.",
     },
     SupportedGame {
         canonical_name: "Resident Evil Revelations 2",
-        aliases: &[
-            "Resident Evil Revelations 2",
-        ],
+        aliases: &["Resident Evil Revelations 2"],
         notes: "Known Fluffy Mod Manager support for Resident Evil Revelations 2.",
     },
     SupportedGame {
@@ -183,10 +166,7 @@ const SUPPORTED_GAMES: &[SupportedGame] = &[
     },
     SupportedGame {
         canonical_name: "Devil May Cry 5",
-        aliases: &[
-            "Devil May Cry 5",
-            "DMC5",
-        ],
+        aliases: &["Devil May Cry 5", "DMC5"],
         notes: "Known Fluffy Mod Manager support for Devil May Cry 5.",
     },
     SupportedGame {
@@ -200,10 +180,7 @@ const SUPPORTED_GAMES: &[SupportedGame] = &[
     },
     SupportedGame {
         canonical_name: "Street Fighter 6",
-        aliases: &[
-            "Street Fighter 6",
-            "Street Fighter VI",
-        ],
+        aliases: &["Street Fighter 6", "Street Fighter VI"],
         notes: "Known Fluffy Mod Manager support for Street Fighter 6.",
     },
     SupportedGame {
@@ -217,18 +194,12 @@ const SUPPORTED_GAMES: &[SupportedGame] = &[
     },
     SupportedGame {
         canonical_name: "Monster Hunter Wilds",
-        aliases: &[
-            "Monster Hunter Wilds",
-        ],
+        aliases: &["Monster Hunter Wilds"],
         notes: "Known Fluffy Mod Manager support for Monster Hunter Wilds.",
     },
     SupportedGame {
         canonical_name: "Dragon's Dogma 2",
-        aliases: &[
-            "Dragon's Dogma 2",
-            "Dragons Dogma 2",
-            "Dragon's Dogma II",
-        ],
+        aliases: &["Dragon's Dogma 2", "Dragons Dogma 2", "Dragon's Dogma II"],
         notes: "Known Fluffy Mod Manager support for Dragon's Dogma 2.",
     },
     SupportedGame {
@@ -251,25 +222,17 @@ const SUPPORTED_GAMES: &[SupportedGame] = &[
     },
     SupportedGame {
         canonical_name: "PRAGMATA",
-        aliases: &[
-            "PRAGMATA",
-            "Pragmata",
-        ],
+        aliases: &["PRAGMATA", "Pragmata"],
         notes: "Known Fluffy Mod Manager support used by current PRAGMATA mods.",
     },
     SupportedGame {
         canonical_name: "Dino Crisis",
-        aliases: &[
-            "Dino Crisis",
-            "Dino Crisis 1",
-        ],
+        aliases: &["Dino Crisis", "Dino Crisis 1"],
         notes: "Known Fluffy Mod Manager support for Dino Crisis.",
     },
     SupportedGame {
         canonical_name: "Dino Crisis 2",
-        aliases: &[
-            "Dino Crisis 2",
-        ],
+        aliases: &["Dino Crisis 2"],
         notes: "Known Fluffy Mod Manager support for Dino Crisis 2.",
     },
     SupportedGame {
@@ -301,96 +264,46 @@ const SUPPORTED_GAMES: &[SupportedGame] = &[
     },
 ];
 
+fn normalize_game_name(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
 
-fn normalize_game_name(
-    value: &str,
-) -> String {
-    let mut output =
-        String::with_capacity(
-            value.len()
-        );
-
-    for character in
-        value.to_lowercase().chars()
-    {
+    for character in value.to_lowercase().chars() {
         match character {
-            '™'
-            | '®'
-            | '©'
-            | '℠' => {}
+            '™' | '®' | '©' | '℠' => {}
 
             '&' => {
-                output.push_str(
-                    " and "
-                );
+                output.push_str(" and ");
             }
 
-            character
-                if character.is_alphanumeric() =>
-            {
-                output.push(
-                    character
-                );
+            character if character.is_alphanumeric() => {
+                output.push(character);
             }
 
             _ => {
-                output.push(
-                    ' '
-                );
+                output.push(' ');
             }
         }
     }
 
-    output
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    output.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+fn remove_store_suffixes(value: &str) -> String {
+    let mut normalized = normalize_game_name(value);
 
-fn remove_store_suffixes(
-    value: &str,
-) -> String {
-    let mut normalized =
-        normalize_game_name(
-            value
-        );
+    for suffix in [" steam", " gog", " epic", " epic games", " windows", " pc"] {
+        if normalized.ends_with(suffix) {
+            let new_length = normalized.len() - suffix.len();
 
-    for suffix in [
-        " steam",
-        " gog",
-        " epic",
-        " epic games",
-        " windows",
-        " pc",
-    ] {
-        if normalized.ends_with(
-            suffix
-        ) {
-            let new_length =
-                normalized.len()
-                    - suffix.len();
-
-            normalized =
-                normalized[
-                    ..new_length
-                ]
-                .trim()
-                .to_string();
+            normalized = normalized[..new_length].trim().to_string();
         }
     }
 
     normalized
 }
 
-
-fn find_supported_game(
-    installed_name: &str,
-) -> Option<(&'static SupportedGame, i32)> {
-    let installed =
-        remove_store_suffixes(
-            installed_name
-        );
+fn find_supported_game(installed_name: &str) -> Option<(&'static SupportedGame, i32)> {
+    let installed = remove_store_suffixes(installed_name);
 
     if installed.is_empty() {
         return None;
@@ -398,18 +311,10 @@ fn find_supported_game(
 
     for game in SUPPORTED_GAMES {
         for alias in game.aliases {
-            let candidate =
-                remove_store_suffixes(
-                    alias
-                );
+            let candidate = remove_store_suffixes(alias);
 
             if installed == candidate {
-                return Some(
-                    (
-                        game,
-                        100,
-                    )
-                );
+                return Some((game, 100));
             }
         }
     }
@@ -422,57 +327,27 @@ fn find_supported_game(
      * such as "Gold Edition" while avoiding broad matches like
      * "Resident Evil".
      */
-    let mut best:
-        Option<(
-            &'static SupportedGame,
-            i32,
-        )> =
-        None;
+    let mut best: Option<(&'static SupportedGame, i32)> = None;
 
     for game in SUPPORTED_GAMES {
         for alias in game.aliases {
-            let candidate =
-                remove_store_suffixes(
-                    alias
-                );
+            let candidate = remove_store_suffixes(alias);
 
-            let shorter =
-                installed
-                    .len()
-                    .min(
-                        candidate.len()
-                    );
+            let shorter = installed.len().min(candidate.len());
 
             if shorter < 12 {
                 continue;
             }
 
-            if installed.contains(
-                &candidate
-            )
-                || candidate.contains(
-                    &installed
-                )
-            {
-                let score =
-                    85;
+            if installed.contains(&candidate) || candidate.contains(&installed) {
+                let score = 85;
 
                 if best
                     .as_ref()
-                    .map(
-                        |(_, current)| {
-                            score > *current
-                        }
-                    )
+                    .map(|(_, current)| score > *current)
                     .unwrap_or(true)
                 {
-                    best =
-                        Some(
-                            (
-                                game,
-                                score,
-                            )
-                        );
+                    best = Some((game, score));
                 }
             }
         }
@@ -481,113 +356,52 @@ fn find_supported_game(
     best
 }
 
-
 #[tauri::command]
-pub async fn get_fluffy_support(
-    name: String,
-) -> Result<FluffySupportStatus, String> {
+pub async fn get_fluffy_support(name: String) -> Result<FluffySupportStatus, String> {
     println!("");
-    println!(
-        "[FLUFFY] ========================================"
-    );
-    println!(
-        "[FLUFFY] Checking game: {:?}",
-        name
-    );
-    println!(
-        "[FLUFFY] Normalized: {:?}",
-        normalize_game_name(
-            &name
-        )
-    );
+    println!("[FLUFFY] ========================================");
+    println!("[FLUFFY] Checking game: {:?}", name);
+    println!("[FLUFFY] Normalized: {:?}", normalize_game_name(&name));
 
-    let Some(
-        (
-            game,
-            score,
-        )
-    ) =
-        find_supported_game(
-            &name
-        )
-    else {
-        println!(
-            "[FLUFFY] No known support match"
-        );
-        println!(
-            "[FLUFFY] ========================================"
-        );
+    let Some((game, score)) = find_supported_game(&name) else {
+        println!("[FLUFFY] No known support match");
+        println!("[FLUFFY] ========================================");
         println!("");
 
-        return Ok(
-            FluffySupportStatus {
-                supported:
-                    false,
+        return Ok(FluffySupportStatus {
+            supported: false,
 
-                matched_game_name:
-                    None,
+            matched_game_name: None,
 
-                manager_name:
-                    "Fluffy Mod Manager"
-                        .to_string(),
+            manager_name: "Fluffy Mod Manager".to_string(),
 
-                notes:
-                    Some(
-                        "No match was found in Game Manager's conservative Fluffy compatibility list."
-                            .to_string()
-                    ),
+            notes: Some(
+                "No match was found in Game Manager's conservative Fluffy compatibility list."
+                    .to_string(),
+            ),
 
-                page_url:
-                    FLUFFY_PAGE_URL
-                        .to_string(),
+            page_url: FLUFFY_PAGE_URL.to_string(),
 
-                match_score:
-                    0,
-            }
-        );
+            match_score: 0,
+        });
     };
 
-    println!(
-        "[FLUFFY] Match: {:?}",
-        game.canonical_name
-    );
-    println!(
-        "[FLUFFY] Score: {}",
-        score
-    );
-    println!(
-        "[FLUFFY] ========================================"
-    );
+    println!("[FLUFFY] Match: {:?}", game.canonical_name);
+    println!("[FLUFFY] Score: {}", score);
+    println!("[FLUFFY] ========================================");
     println!("");
 
-    Ok(
-        FluffySupportStatus {
-            supported:
-                true,
+    Ok(FluffySupportStatus {
+        supported: true,
 
-            matched_game_name:
-                Some(
-                    game
-                        .canonical_name
-                        .to_string()
-                ),
+        matched_game_name: Some(game.canonical_name.to_string()),
 
-            manager_name:
-                "Fluffy Mod Manager"
-                    .to_string(),
+        manager_name: "Fluffy Mod Manager".to_string(),
 
-            notes:
-                Some(
-                    game.notes
-                        .to_string()
-                ),
+        notes: Some(game.notes.to_string()),
 
-            page_url:
-                FLUFFY_PAGE_URL
-                    .to_string(),
+        page_url: FLUFFY_PAGE_URL.to_string(),
 
-            match_score:
-                score,
-        }
-    )
+        match_score: score,
+    })
 }

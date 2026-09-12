@@ -79,8 +79,10 @@ import {
 import {
   storeGameInsight,
 } from "../services/libraryInsights";
+import ProtonToolboxPanel from "./ProtonToolboxPanel";
 
 
+import RenoDxManagerPanel from "./RenoDxManagerPanel";
 function getGameCoverArt(game) {
   if (!game) {
     return null;
@@ -1204,6 +1206,12 @@ export default function GameDetails({
             }
           />
 
+          <RenoDxManagerPanel
+            game={
+              game
+            }
+          />
+
           <div className="mt-5">
             <ModChangeTimeline
               game={
@@ -1377,7 +1385,24 @@ export default function GameDetails({
             />
           </div>
         </CollapsibleSection>
-      </div>
+      
+        <CollapsibleSection
+          id="proton-toolbox"
+          title="Proton Toolbox"
+          description="Inspect this game's Proton prefix and the compatibility tools installed on this Linux system."
+          icon={Settings2}
+          defaultOpen={false}
+          summary="Prefix & Proton versions"
+        >
+          <ProtonToolboxPanel
+            game={
+              game
+            }
+          />
+        </CollapsibleSection>
+
+
+</div>
     </main>
   );
 }
