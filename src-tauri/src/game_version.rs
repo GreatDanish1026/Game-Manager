@@ -1,3 +1,9 @@
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -116,7 +122,8 @@ fn windows_version_info(path: &Path) -> (Option<String>, Option<String>) {
         );
 
     let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
 
     let Ok(output) = output else {

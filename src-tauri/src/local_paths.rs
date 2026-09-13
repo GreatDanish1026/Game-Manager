@@ -1,3 +1,9 @@
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 use std::{
     env,
     path::{Path, PathBuf},
@@ -219,6 +225,7 @@ fn steam_root_candidates() -> Vec<PathBuf> {
      * Prefer the per-user Steam registry value, then common defaults.
      */
     if let Ok(output) = Command::new("reg.exe")
+        .creation_flags(CREATE_NO_WINDOW)
         .args(["query", r"HKCU\Software\Valve\Steam", "/v", "SteamPath"])
         .output()
     {

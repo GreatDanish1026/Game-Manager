@@ -1,3 +1,9 @@
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -253,6 +259,7 @@ fn create_zip_archive(source: &Path, destination: &Path) -> Result<(), String> {
         .ok_or_else(|| "Save path does not have a file or folder name.".to_string())?;
 
     let status = Command::new("tar.exe")
+        .creation_flags(CREATE_NO_WINDOW)
         .arg("-a")
         .arg("-c")
         .arg("-f")
@@ -281,6 +288,7 @@ fn create_zip_archive(_source: &Path, _destination: &Path) -> Result<(), String>
 #[cfg(target_os = "windows")]
 fn extract_zip_archive(archive: &Path, destination: &Path) -> Result<(), String> {
     let status = Command::new("tar.exe")
+        .creation_flags(CREATE_NO_WINDOW)
         .arg("-x")
         .arg("-f")
         .arg(archive)

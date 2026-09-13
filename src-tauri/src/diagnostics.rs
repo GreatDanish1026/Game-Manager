@@ -1,3 +1,9 @@
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -219,6 +225,8 @@ pub fn create_diagnostics_support_bundle(
         );
 
         let status = Command::new("powershell.exe")
+            .creation_flags(CREATE_NO_WINDOW)
+            .args(["-WindowStyle", "Hidden"])
             .args([
                 "-NoProfile",
                 "-NonInteractive",
