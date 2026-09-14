@@ -207,11 +207,54 @@ fn windows_os_info() -> (Option<String>, Option<String>) {
 }
 
 #[cfg(target_os = "windows")]
+fn windows_nvidia_memory_map() -> std::collections::BTreeMap<String, u64> {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let output = Command::new("nvidia-smi.exe")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args([
+            "--query-gpu=name,memory.total",
+            "--format=csv,noheader,nounits",
+        ])
+        .output();
+
+    let Ok(output) = output else {
+        return std::collections::BTreeMap::new();
+    };
+
+    if !output.status.success() {
+        return std::collections::BTreeMap::new();
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(2, ',');
+
+            let name = parts.next()?.trim().to_ascii_lowercase();
+
+            let memory_mib = parts.next()?.trim().parse::<u64>().ok()?;
+
+            if name.is_empty() {
+                return None;
+            }
+
+            Some((name, memory_mib.saturating_mul(1024).saturating_mul(1024)))
+        })
+        .collect()
+}
+
+#[cfg(target_os = "windows")]
 fn windows_gpus() -> Vec<GpuInfo> {
     use std::os::windows::process::CommandExt;
     use std::process::Command;
 
     const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let nvidia_memory = windows_nvidia_memory_map();
 
     let output =
         Command::new(
@@ -255,9 +298,14 @@ fn windows_gpus() -> Vec<GpuInfo> {
                 return None;
             }
 
-            let dedicated_memory_bytes = parts
+            let cim_memory_bytes = parts
                 .next()
                 .and_then(|value| value.trim().parse::<u64>().ok());
+
+            let dedicated_memory_bytes = nvidia_memory
+                .get(&name.to_ascii_lowercase())
+                .copied()
+                .or(cim_memory_bytes);
 
             Some(GpuInfo {
                 vendor: normalized_vendor(&name),

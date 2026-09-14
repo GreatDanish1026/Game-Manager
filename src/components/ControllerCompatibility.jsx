@@ -7,6 +7,8 @@ import {
   Zap,
 } from "lucide-react";
 
+import ControllerConflictPanel from "./ControllerConflictPanel";
+
 
 function normalizeDisplayValue(value) {
   if (
@@ -503,18 +505,14 @@ export default function ControllerCompatibility({
   const controllers =
     game?.controllerCompatibility;
 
-  if (!controllers) {
-    return null;
-  }
-
   const xbox =
-    controllers.xbox ?? {};
+    controllers?.xbox ?? {};
 
   const playstation =
-    controllers.playstation ?? {};
+    controllers?.playstation ?? {};
 
   const nintendo =
-    controllers.nintendo ?? {};
+    controllers?.nintendo ?? {};
 
   const dualsense =
     playstation.dualsense ?? {};
@@ -560,6 +558,8 @@ export default function ControllerCompatibility({
         </p>
       </div>
 
+      {controllers ? (
+        <>
       <div
         className="
           grid
@@ -645,6 +645,25 @@ export default function ControllerCompatibility({
           />
         </ControllerCard>
       </div>
+
+
+        </>
+      ) : (
+        <div
+          className="
+            rounded-xl
+            border
+            border-white/[0.08]
+            bg-white/[0.025]
+            px-4
+            py-3
+            text-sm
+            text-white/35
+          "
+        >
+          No PCGamingWiki controller-support data is currently available for this game.
+        </div>
+      )}
 
 
       {hasDualSense ? (
@@ -815,12 +834,14 @@ export default function ControllerCompatibility({
               icon={Gamepad2}
               label="Controller Hotplug"
               value={
-                controllers.hotplug
+                controllers?.hotplug
               }
             />
           </div>
         </div>
       ) : null}
+
+      <ControllerConflictPanel />
     </section>
   );
 }

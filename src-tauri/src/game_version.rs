@@ -122,7 +122,14 @@ fn windows_version_info(path: &Path) -> (Option<String>, Option<String>) {
         );
 
     let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &script])
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            &script,
+        ])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
 

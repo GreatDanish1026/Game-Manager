@@ -81,6 +81,11 @@ import {
 } from "../services/libraryInsights";
 import ProtonToolboxPanel from "./ProtonToolboxPanel";
 import LinuxPerformancePanel from "./LinuxPerformancePanel";
+import WindowsPerformanceDiagnosticsPanel from "./WindowsPerformanceDiagnosticsPanel";
+import BackgroundConflictPanel from "./BackgroundConflictPanel";
+import CleanLaunchPanel from "./CleanLaunchPanel";
+import ShaderCachePanel from "./ShaderCachePanel";
+import GraphicsDriverDiagnosticsPanel from "./GraphicsDriverDiagnosticsPanel";
 
 
 import RenoDxManagerPanel from "./RenoDxManagerPanel";
@@ -1170,6 +1175,28 @@ export default function GameDetails({
               }
             />
           </div>
+
+          <WindowsPerformanceDiagnosticsPanel
+            game={
+              game
+            }
+          />
+
+          <BackgroundConflictPanel />
+
+          <CleanLaunchPanel
+            game={
+              game
+            }
+          />
+
+          <ShaderCachePanel
+            game={
+              game
+            }
+          />
+
+          <GraphicsDriverDiagnosticsPanel />
         </CollapsibleSection>
 
 

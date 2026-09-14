@@ -1,9 +1,13 @@
+mod background_conflicts;
+mod clean_launch;
+mod controller_conflicts;
 mod diagnostics;
 mod ea_games;
 mod fluffy;
 mod game_file_utilities;
 mod game_launcher;
 mod game_version;
+mod graphics_driver_diagnostics;
 mod heroic_games;
 mod installed_games;
 mod launch_profiles;
@@ -21,12 +25,14 @@ mod renodx;
 mod rhi;
 mod save_backups;
 mod save_browser;
+mod shader_cache;
 mod steam_keyvalues;
 mod steam_launch_options;
 mod steam_launch_store;
 mod steam_rating;
 mod system_hardware;
 mod vortex;
+mod windows_performance_diagnostics;
 mod xbox_games;
 
 mod proton_prefix_maintenance;
@@ -45,6 +51,15 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            background_conflicts::get_background_conflict_report,
+            clean_launch::get_clean_launch_status,
+            clean_launch::prepare_clean_launch,
+            clean_launch::restore_clean_launch_apps,
+            shader_cache::get_shader_cache_report,
+            shader_cache::clear_shader_cache_targets,
+            graphics_driver_diagnostics::get_graphics_driver_diagnostics,
+            controller_conflicts::get_controller_conflict_report,
+            windows_performance_diagnostics::get_windows_performance_diagnostics,
             reshade_windows::install_reshade_addons_windows,
             renodx_installer::get_renodx_package_info,
             renodx_installer::install_renodx_package_linux,
