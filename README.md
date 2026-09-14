@@ -1,167 +1,380 @@
 # GameAtlas
 
-**GameAtlas** is a cross-platform desktop app for managing, inspecting, and understanding your installed PC game library.
+GameAtlas is a cross-platform desktop companion for PC gaming on **Windows and Linux**.
 
-It brings games from multiple launchers into one library, enriches them with PCGamingWiki data, and adds local tools for launching, modding, storage, screenshots, saves, installation health, and system information.
+It combines game discovery, system information, compatibility resources, save management, modding integrations, performance diagnostics, controller information, and troubleshooting tools in one application.
 
-## Supported Game Sources
+Instead of jumping between launchers, PCGamingWiki, modding sites, save folders, driver tools, and system utilities, GameAtlas brings the most useful information together around the game you are actually playing.
 
-GameAtlas is not limited to Steam. Detection depends on the operating system.
-
-### Windows
-
-GameAtlas can automatically detect installed games from:
-
-- **Steam**
-- **Epic Games Launcher**
-- **GOG Galaxy**
-- **Ubisoft Connect**
-- **EA App**
-- **Xbox / Microsoft Store**
-
-Supported games can be launched directly from GameAtlas using the appropriate launcher or platform integration.
-
-### Linux
-
-GameAtlas can discover installed games from:
-
-- **Steam for Linux**
-- **Heroic Games Launcher** — including supported Epic and GOG installations managed through Heroic
-- **Lutris**
-
-Linux discovery results are merged into the same GameAtlas library, so games from different sources can be managed together.
-
-Games that cannot be detected automatically can also be added manually.
+---
 
 ## Features
 
 ### Unified Game Library
 
-- Multi-launcher game detection
-- Searchable library
-- Favorites and custom tags
-- Hidden games
-- Saved views and advanced filters
-- Manual game entries
-- Per-launcher rescans
+GameAtlas automatically detects installed games from supported launchers and combines them into one library.
 
-### PCGamingWiki Integration
+#### Windows
 
-For matched games, GameAtlas can surface useful PC-specific information such as:
+Supported sources include:
 
-- HDR, ray tracing, upscaling, and frame generation support
-- Controller and accessibility information
-- Engine and graphics API details
-- Save and configuration locations
-- Essential improvements
-- Known issues and fixes
-- Cover artwork and game metadata
+- Steam
+- Epic Games Launcher
+- GOG Galaxy
+- Ubisoft Connect
+- EA App
+- Xbox / Microsoft Store
+- Manually added games
 
-### Mods & Enhancements
+#### Linux
 
-GameAtlas combines enhancement and modding information into a single view, including support or local evidence for tools such as:
+Supported sources include:
 
-- **RenoDX**
-- **Luma Framework**
-- **Vortex Mod Manager**
-- **Fluffy Mod Manager**
-- **ReShade**
-- **Special K**
-- Cheat Engine tables and other detected local tools
+- Steam
+- Heroic Games Launcher
+- Lutris
+- Native Linux games
+- Proton/Wine games discovered through supported launchers
+- Manually added games
 
-### External Tools & Launch Hub
+GameAtlas supports multiple game libraries and secondary drives.
 
-Per-game actions can include:
+---
 
-- Play Game
-- Open Mod Manager
-- Open Install Folder
-- Open Config Folder
-- Open Save Folder
-- Open detected external tools
+## Game Information
 
-### Launch Profiles
+Selecting a game gives you a central view of useful local and external information.
 
-Games can use multiple launch profiles, including:
+Depending on the title, GameAtlas can show:
 
-- **Normal**
-- **Modded**
-- **Benchmark**
-- Custom profiles
+- Cover artwork
+- Install location
+- Main executable
+- Game version
+- Launcher / installation source
+- PCGamingWiki information
+- RenoDX support
+- Vortex support
+- Save locations
+- Configuration locations
+- Performance diagnostics
+- Hardware context
 
-Profiles can use the standard launcher or a direct executable with custom arguments and working directories. Any profile can be selected as the default launch method for a game.
+---
 
-### Local Technical Inspection
+## PCGamingWiki Integration
 
-GameAtlas can inspect installed files and report locally detected information such as:
+GameAtlas integrates PCGamingWiki information directly into the selected game experience.
 
-- Main executable and architecture
-- 32-bit / 64-bit information
-- Game engine evidence
-- Graphics API evidence
-- Anti-cheat evidence
-- DRM / platform integration
-- Graphics DLLs
-- ReShade and mod-manager evidence
+This can help surface:
 
-### Storage & Installation Details
+- Save locations
+- Configuration file locations
+- Known issues
+- Fixes and workarounds
+- Graphics information
+- Input information
+- Compatibility notes
 
-Per-game storage information can include:
+---
 
-- Installed size
-- Install drive
-- Free and total drive space
-- Executable size
-- Save-data size
-- Config-data size
-- Largest installed files
+## RenoDX Detection
 
-### Screenshot Browser
+GameAtlas can detect whether a game has a supported RenoDX implementation.
 
-GameAtlas can locate Steam screenshots and common local screenshot folders, showing information such as screenshot count, newest screenshot, date, and folder location.
+When support is found, GameAtlas provides direct access to the relevant RenoDX resource.
 
-### Save Backup & Restore
+This is especially useful for games with community improvements related to:
 
-GameAtlas can create and restore per-game save backups with:
+- HDR
+- Tonemapping
+- Color presentation
+- Rendering behavior
 
-- Timestamped backup history
-- Optional notes
-- Per-game backup retention
-- Restore safety backups
-- Optional automatic backup before launching a game
+---
 
-### Installation Health
+## Vortex Support Detection
 
-GameAtlas can summarize the local state of a game using information it can verify, including installation paths, executables, saves, configuration, PCGamingWiki data, and detected enhancements.
+GameAtlas can determine whether a game has a supported Vortex extension.
 
-### System Awareness
+This makes it easier to identify titles that can be managed through the Vortex / Nexus Mods ecosystem without manually searching for an extension.
 
-GameAtlas adapts to the system it is running on and can surface platform and hardware information, including operating system and GPU detection where available.
+---
 
-## Cross-Platform
+## Save Management
 
-GameAtlas is being developed for both **Windows** and **Linux**. Platform-specific integrations differ where the underlying launchers and game-installation systems differ.
+GameAtlas includes save-management tools for supported games.
 
-## Technology
+Features can include:
 
-GameAtlas is built with:
+- Save-location detection
+- Backup
+- Restore
+- Save snapshots
+- Configuration-file discovery
+- Access to related game data
 
-- **Rust**
-- **Tauri 2**
-- **React**
-- **Vite**
-- **Tailwind CSS**
+Save handling supports both conventional Windows locations and Linux environments such as Proton and Wine prefixes where available.
 
-## Project Status
+---
 
-GameAtlas is under active development. Features and supported integrations continue to expand as the application evolves.
+## Clean Launch
 
-## Data Sources & Third-Party Services
+Clean Launch helps identify background applications that may interfere with gameplay, benchmarking, or troubleshooting.
 
-GameAtlas uses information from third-party services such as [PCGamingWiki](https://www.pcgamingwiki.com/). Availability of individual fields varies by game.
+GameAtlas can surface software such as:
 
-GameAtlas is not affiliated with Valve, Epic Games, GOG, Ubisoft, Electronic Arts, Microsoft, PCGamingWiki, Nexus Mods, Vortex, RenoDX, or the developers of other detected third-party tools.
+- Overlays
+- Recording tools
+- Monitoring utilities
+- Communication applications
+- GPU overlays
+- Launcher-related background software
 
-## License
+A detected process is not automatically a problem. Clean Launch is designed to help narrow down possible conflicts.
 
-See the repository license for details.
+---
+
+## Shader Cache Management
+
+GameAtlas includes shader-cache tools for troubleshooting graphical and performance problems.
+
+Depending on the platform and hardware, GameAtlas can help surface relevant cache information for:
+
+- NVIDIA
+- AMD
+- Intel
+- DirectX
+- Steam
+- Mesa
+- Linux graphics runtimes
+
+Shader cache clearing is intended as a troubleshooting tool rather than routine maintenance.
+
+---
+
+## Performance Diagnostics
+
+GameAtlas can help identify likely causes of common PC gaming performance issues.
+
+Diagnostic areas include:
+
+- Shader compilation
+- CPU bottlenecks
+- GPU bottlenecks
+- VRAM pressure
+- Memory pressure
+- Storage bottlenecks
+- Overlay conflicts
+- Refresh-rate mismatches
+- V-Sync issues
+- Wrong-GPU usage
+- Driver-related problems
+
+The goal is to provide useful context and practical next steps rather than only displaying raw hardware information.
+
+---
+
+## Hardware Detection
+
+GameAtlas detects gaming-relevant system hardware, including:
+
+- CPU
+- GPU
+- Memory
+- Storage
+- Displays
+- Refresh rate
+- Connected controllers
+- Operating system
+
+Hardware information is used throughout performance diagnostics and platform-specific tools.
+
+---
+
+## Controller Detection
+
+GameAtlas can detect connected controllers and surface them as part of the system information experience.
+
+This helps determine whether a controller problem originates at the operating-system level or later in the input stack.
+
+Controller troubleshooting can involve:
+
+- Steam Input
+- XInput
+- DirectInput
+- SDL
+- Virtual controllers
+- Proton / Wine
+
+---
+
+# Windows
+
+GameAtlas includes Windows-specific support for:
+
+- Steam
+- Epic Games Launcher
+- GOG Galaxy
+- Ubisoft Connect
+- EA App
+- Xbox / Microsoft Store
+- Executable version detection
+- Windows hardware inspection
+- Save management
+- Shader cache management
+- Clean Launch
+- Performance diagnostics
+- Graphics driver diagnostics
+- Controller detection
+- Multi-GPU systems
+
+Windows-specific APIs and metadata are used where they provide useful information.
+
+---
+
+# Linux
+
+GameAtlas supports modern Linux gaming environments, including gaming-focused distributions such as **Bazzite**.
+
+Linux functionality includes:
+
+- Steam game detection
+- Proton game detection
+- Heroic Games Launcher
+- Lutris
+- Native Linux games
+- Manual game addition
+- Hardware detection
+- Controller detection
+- Save and configuration workflows
+- Performance diagnostics
+- Proton / Wine context
+- Linux gaming performance controls
+
+Linux performance work includes integration or surfacing of tools such as:
+
+- MangoHud
+- FPS limiting
+- Runtime performance controls
+- Proton-aware configuration
+
+GameAtlas aims for functional parity between Windows and Linux while using the tools that make sense on each platform.
+
+---
+
+## Manual Game Addition
+
+Games that are not discovered automatically can be added manually.
+
+Manual entries are useful for:
+
+- Standalone games
+- Portable games
+- Unsupported launchers
+- Source ports
+- Fan games
+- Custom installations
+- Unusual executable layouts
+
+---
+
+## Cross-Platform Design
+
+GameAtlas uses a shared user experience across Windows and Linux while keeping platform-specific implementations where necessary.
+
+For example:
+
+### Windows
+
+GameAtlas can use:
+
+- Registry information
+- Windows executable metadata
+- Windows process inspection
+- Windows driver information
+- Microsoft Store package data
+
+### Linux
+
+GameAtlas can use:
+
+- Proton / Wine context
+- Steam compatibility data
+- Heroic and Lutris configuration
+- Linux hardware information
+- Vulkan-related tooling
+- MangoHud and Linux performance utilities
+
+---
+
+# Documentation
+
+Detailed documentation is available in the GameAtlas Wiki.
+
+The wiki includes:
+
+- Getting Started
+- Windows installation
+- Linux installation
+- Game detection
+- Supported launchers
+- Feature documentation
+- PCGamingWiki integration
+- RenoDX
+- Vortex
+- Save management
+- Clean Launch
+- Shader cache management
+- Performance diagnostics
+- Controller detection
+- Hardware detection
+- Troubleshooting
+- FAQ
+- Roadmap
+- Contributing
+
+See the repository **Wiki** for full documentation.
+
+---
+
+# Current Development
+
+GameAtlas is under active development.
+
+Current work is focused on:
+
+- Windows diagnostics
+- Shader cache management
+- Graphics driver diagnostics
+- Linux feature parity
+- Linux performance tooling
+- Controller diagnostics
+- Save/configuration workflows
+- UI polish
+- Reliability improvements
+
+See the Wiki [[Roadmap]] page for more detail.
+
+---
+
+# Installation
+
+Installation packages and release information are available through the GitHub Releases page.
+
+Platform-specific installation instructions are documented in the Wiki.
+
+---
+
+# Development
+
+GameAtlas is built using:
+
+- Rust
+- Tauri
+- Web frontend technologies
+
+Clone the repository:
+
+```bash
+git clone https://github.com/GreatDanish1026/Game-Manager.git
