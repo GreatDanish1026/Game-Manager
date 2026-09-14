@@ -80,9 +80,21 @@ import {
   storeGameInsight,
 } from "../services/libraryInsights";
 import ProtonToolboxPanel from "./ProtonToolboxPanel";
+import LinuxPerformancePanel from "./LinuxPerformancePanel";
 
 
 import RenoDxManagerPanel from "./RenoDxManagerPanel";
+
+function runningOnLinux() {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+
+  return /linux/i.test(
+    navigator.userAgent
+    ?? ""
+  );
+}
 function getGameCoverArt(game) {
   if (!game) {
     return null;
@@ -723,6 +735,9 @@ export default function GameDetails({
     game.features
     ?? {};
 
+  const isLinux =
+    runningOnLinux();
+
 
   async function handleLaunchGame() {
     setLaunchingGame(
@@ -1233,7 +1248,7 @@ export default function GameDetails({
         <CollapsibleSection
           id="files-installation"
           title="Files & Installation"
-          description="Local executable details, storage usage, file utilities, and installation-change history."
+          description="Local game-binary details, storage usage, file utilities, and installation-change history."
           icon={HardDrive}
           defaultOpen={false}
           summary="Local files, storage, utilities & changes"
@@ -1387,20 +1402,39 @@ export default function GameDetails({
           </div>
         </CollapsibleSection>
       
-        <CollapsibleSection
-          id="proton-toolbox"
-          title="Proton Toolbox"
-          description="Inspect this game's Proton prefix and the compatibility tools installed on this Linux system."
-          icon={Settings2}
-          defaultOpen={false}
-          summary="Prefix & Proton versions"
-        >
-          <ProtonToolboxPanel
-            game={
-              game
-            }
-          />
-        </CollapsibleSection>
+        {isLinux ? (
+          <>
+            <CollapsibleSection
+              id="proton-toolbox"
+              title="Proton Toolbox"
+              description="Inspect this game's Proton prefix and the compatibility tools installed on this Linux system."
+              icon={Settings2}
+              defaultOpen={false}
+              summary="Prefix & Proton versions"
+            >
+              <ProtonToolboxPanel
+                game={
+                  game
+                }
+              />
+            </CollapsibleSection>
+
+            <CollapsibleSection
+              id="linux-performance"
+              title="Linux Performance"
+              description="Configure per-game MangoHud, FPS limiting, GameMode, Gamescope, HDR, and Wayland options."
+              icon={MonitorCog}
+              defaultOpen={false}
+              summary="MangoHud, FPS limits, Gamescope & HDR"
+            >
+              <LinuxPerformancePanel
+                game={
+                  game
+                }
+              />
+            </CollapsibleSection>
+          </>
+        ) : null}
 
 
 </div>

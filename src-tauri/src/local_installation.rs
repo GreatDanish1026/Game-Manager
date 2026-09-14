@@ -19,6 +19,7 @@ pub struct ExecutableInfo {
     pub path: Option<String>,
     pub architecture: Option<String>,
     pub size_bytes: Option<u64>,
+    pub binary_format: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -85,6 +86,8 @@ pub struct TechnicalDetailsInfo {
     pub engine_version: Option<String>,
     pub graphics_apis: Vec<String>,
     pub executable_architecture: Option<String>,
+    pub runtime: Option<String>,
+    pub translation_layers: Vec<String>,
     pub anti_cheat: Vec<String>,
     pub drm: Vec<String>,
     pub detection_notes: Vec<String>,
@@ -293,6 +296,140 @@ fn read_pe_architecture(path: &Path) -> Option<String> {
     }
 }
 
+fn read_elf_architecture(path: &Path) -> Option<String> {
+    let mut file = fs::File::open(path).ok()?;
+
+    let mut header = [0u8; 20];
+
+    file.read_exact(&mut header).ok()?;
+
+    if &header[0..4] != b"\x7FELF" {
+        return None;
+    }
+
+    let class = match header[4] {
+        1 => "32-bit",
+        2 => "64-bit",
+        _ => "Unknown class",
+    };
+
+    let little_endian = header[5] != 2;
+
+    let machine = if little_endian {
+        u16::from_le_bytes([header[18], header[19]])
+    } else {
+        u16::from_be_bytes([header[18], header[19]])
+    };
+
+    let architecture = match machine {
+        0x0003 => "x86",
+        0x003E => "x86_64",
+        0x0028 => "ARM",
+        0x00B7 => "ARM64",
+        0x00F3 => "RISC-V",
+        _ => "Unknown",
+    };
+
+    Some(format!("{} ({})", class, architecture))
+}
+
+fn has_shebang(path: &Path) -> bool {
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+
+    let mut prefix = [0u8; 2];
+
+    file.read_exact(&mut prefix).is_ok() && prefix == *b"#!"
+}
+
+#[cfg(unix)]
+fn has_executable_permission(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::metadata(path)
+        .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn has_executable_permission(_path: &Path) -> bool {
+    false
+}
+
+fn executable_binary_format(path: &Path) -> Option<&'static str> {
+    if read_pe_architecture(path).is_some() {
+        return Some("Windows PE");
+    }
+
+    if read_elf_architecture(path).is_some() {
+        return Some("Linux ELF");
+    }
+
+    if has_shebang(path) {
+        return Some("Script");
+    }
+
+    None
+}
+
+fn is_executable_candidate(path: &Path) -> bool {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    if extension == "exe" {
+        return true;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if matches!(
+            extension.as_str(),
+            "sh" | "run" | "bin" | "appimage" | "x86_64" | "x86"
+        ) {
+            return true;
+        }
+
+        if has_executable_permission(path) {
+            return executable_binary_format(path).is_some();
+        }
+    }
+
+    false
+}
+
+fn executable_architecture(path: &Path) -> Option<String> {
+    read_pe_architecture(path).or_else(|| read_elf_architecture(path))
+}
+
+fn runtime_from_executable(executable: &ExecutableInfo) -> Option<String> {
+    let format = executable.binary_format.as_deref()?;
+
+    #[cfg(target_os = "linux")]
+    {
+        return Some(match format {
+            "Windows PE" => "Windows game via Proton / Wine".to_string(),
+            "Linux ELF" => "Native Linux".to_string(),
+            "Script" => "Native Linux launcher/script".to_string(),
+            _ => format.to_string(),
+        });
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        return Some(match format {
+            "Windows PE" => "Native Windows".to_string(),
+            _ => format.to_string(),
+        });
+    }
+
+    #[allow(unreachable_code)]
+    Some(format.to_string())
+}
+
 fn executable_score(game_name: &str, root: &Path, file: &ScannedFile) -> i64 {
     let file_name = file
         .path
@@ -301,7 +438,7 @@ fn executable_score(game_name: &str, root: &Path, file: &ScannedFile) -> i64 {
         .unwrap_or("")
         .to_ascii_lowercase();
 
-    if !file_name.ends_with(".exe") {
+    if !is_executable_candidate(&file.path) {
         return i64::MIN;
     }
 
@@ -350,6 +487,33 @@ fn executable_score(game_name: &str, root: &Path, file: &ScannedFile) -> i64 {
         }
     }
 
+    let format = executable_binary_format(&file.path);
+
+    #[cfg(target_os = "linux")]
+    {
+        match format {
+            Some("Linux ELF") => {
+                score += 180;
+            }
+
+            Some("Windows PE") => {
+                // Windows games are valid primary candidates on Linux because
+                // Steam/Heroic/Lutris can launch them through Proton/Wine.
+                score += 140;
+            }
+
+            Some("Script") => {
+                score += 80;
+            }
+
+            _ => {}
+        }
+
+        if file_name.ends_with(".appimage") {
+            score += 160;
+        }
+    }
+
     /*
      * Real game executables are usually comparatively large and
      * usually near the game root or a bin/binaries folder.
@@ -391,13 +555,7 @@ fn executable_score(game_name: &str, root: &Path, file: &ScannedFile) -> i64 {
 fn detect_executable(game_name: &str, root: &Path, files: &[ScannedFile]) -> ExecutableInfo {
     let mut candidates = files
         .iter()
-        .filter(|file| {
-            file.path
-                .extension()
-                .and_then(|value| value.to_str())
-                .map(|value| value.eq_ignore_ascii_case("exe"))
-                .unwrap_or(false)
-        })
+        .filter(|file| is_executable_candidate(&file.path))
         .map(|file| (executable_score(game_name, root, file), file))
         .filter(|(score, _)| *score > -500)
         .collect::<Vec<_>>();
@@ -415,6 +573,8 @@ fn detect_executable(game_name: &str, root: &Path, files: &[ScannedFile]) -> Exe
             architecture: None,
 
             size_bytes: None,
+
+            binary_format: None,
         };
     };
 
@@ -428,9 +588,11 @@ fn detect_executable(game_name: &str, root: &Path, files: &[ScannedFile]) -> Exe
 
         path: Some(path_string(&best.path)),
 
-        architecture: read_pe_architecture(&best.path),
+        architecture: executable_architecture(&best.path),
 
         size_bytes: Some(best.size_bytes),
+
+        binary_format: executable_binary_format(&best.path).map(str::to_string),
     }
 }
 
@@ -1053,9 +1215,88 @@ fn detect_graphics_apis(
         notes.push("A Vulkan loader DLL was found in the installation.".to_string());
     }
 
+    #[cfg(target_os = "linux")]
+    {
+        let vulkan_native = files.iter().any(|file| {
+            let name = file
+                .path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+
+            name.starts_with("libvulkan.so") || name.contains("vulkan")
+        });
+
+        if vulkan_native && !apis.iter().any(|value| value == "Vulkan") {
+            apis.push("Vulkan".to_string());
+            notes.push("Linux Vulkan-related files were found in the installation.".to_string());
+        }
+
+        let opengl_native = files.iter().any(|file| {
+            let name = file
+                .path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+
+            name.starts_with("libgl.so") || name.starts_with("libopengl.so")
+        });
+
+        if opengl_native && !apis.iter().any(|value| value == "OpenGL") {
+            apis.push("OpenGL".to_string());
+            notes.push("Linux OpenGL library evidence was found in the installation.".to_string());
+        }
+    }
+
     apis.sort();
 
     (apis, notes)
+}
+
+fn detect_translation_layers(files: &[ScannedFile]) -> (Vec<String>, Vec<String>) {
+    let mut layers = Vec::new();
+    let mut notes = Vec::new();
+
+    let dxvk = files.iter().any(|file| {
+        let name = file
+            .path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+
+        name == "dxvk.conf"
+            || name.contains("dxvk")
+            || path_contains_ci(&file.path, "/dxvk/")
+            || path_contains_ci(&file.path, "\\dxvk\\")
+    });
+
+    if dxvk {
+        layers.push("DXVK".to_string());
+        notes.push("DXVK-related files were found in or below the installation path.".to_string());
+    }
+
+    let vkd3d = files.iter().any(|file| {
+        let name = file
+            .path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+
+        name.contains("vkd3d")
+            || path_contains_ci(&file.path, "/vkd3d/")
+            || path_contains_ci(&file.path, "\\vkd3d\\")
+    });
+
+    if vkd3d {
+        layers.push("VKD3D-Proton / VKD3D".to_string());
+        notes.push("VKD3D-related files were found in or below the installation path.".to_string());
+    }
+
+    (layers, notes)
 }
 
 fn detect_anti_cheat(files: &[ScannedFile]) -> Vec<String> {
@@ -1069,11 +1310,20 @@ fn detect_anti_cheat(files: &[ScannedFile]) -> Vec<String> {
                 "EasyAntiCheat_EOS.exe",
                 "EasyAntiCheat_x64.dll",
                 "EasyAntiCheat_x86.dll",
+                "libeasyanticheat.so",
+                "easyanticheat_x64.so",
+                "easyanticheat_x86.so",
             ][..],
         ),
         (
             "BattlEye",
-            &["BEService.exe", "BEClient_x64.dll", "BEClient.dll"][..],
+            &[
+                "BEService.exe",
+                "BEClient_x64.dll",
+                "BEClient.dll",
+                "beclient_x64.so",
+                "beclient.so",
+            ][..],
         ),
         ("XIGNCODE3", &["x3.xem", "xigncode3.dll"][..]),
         ("nProtect GameGuard", &["GameMon.des", "GameGuard.des"][..]),
@@ -1084,6 +1334,22 @@ fn detect_anti_cheat(files: &[ScannedFile]) -> Vec<String> {
         if find_named_file(files, names).is_some() {
             detected.push(label.to_string());
         }
+    }
+
+    if !detected.iter().any(|value| value == "Easy Anti-Cheat")
+        && files
+            .iter()
+            .any(|file| path_contains_ci(&file.path, "easyanticheat"))
+    {
+        detected.push("Easy Anti-Cheat".to_string());
+    }
+
+    if !detected.iter().any(|value| value == "BattlEye")
+        && files
+            .iter()
+            .any(|file| path_contains_ci(&file.path, "battleye"))
+    {
+        detected.push("BattlEye".to_string());
     }
 
     detected
@@ -1103,7 +1369,17 @@ fn detect_drm(
         notes.push("Denuvo text signatures were found in the selected executable.".to_string());
     }
 
-    if find_named_file(files, &["steam_api64.dll", "steam_api.dll"]).is_some() {
+    if find_named_file(
+        files,
+        &[
+            "steam_api64.dll",
+            "steam_api.dll",
+            "libsteam_api.so",
+            "steam_api.so",
+        ],
+    )
+    .is_some()
+    {
         detected.push("Steamworks integration".to_string());
 
         notes.push(
@@ -1118,7 +1394,11 @@ fn detect_drm(
 
     if find_named_file(
         files,
-        &["EOSSDK-Win64-Shipping.dll", "EOSSDK-Win32-Shipping.dll"],
+        &[
+            "EOSSDK-Win64-Shipping.dll",
+            "EOSSDK-Win32-Shipping.dll",
+            "libEOSSDK-Linux-Shipping.so",
+        ],
     )
     .is_some()
     {
@@ -1149,6 +1429,19 @@ fn detect_technical_details(
 
     detection_notes.extend(api_notes);
 
+    let runtime = runtime_from_executable(executable);
+
+    if let Some(runtime_name) = runtime.as_deref() {
+        detection_notes.push(format!(
+            "Primary executable runtime classification: {}.",
+            runtime_name
+        ));
+    }
+
+    let (translation_layers, translation_notes) = detect_translation_layers(files);
+
+    detection_notes.extend(translation_notes);
+
     let anti_cheat = detect_anti_cheat(files);
 
     let (drm, drm_notes) = detect_drm(files, signatures);
@@ -1161,6 +1454,9 @@ fn detect_technical_details(
         graphics_apis,
 
         executable_architecture: executable.architecture.clone(),
+
+        runtime,
+        translation_layers,
 
         anti_cheat,
         drm,
@@ -1487,7 +1783,33 @@ fn steam_roots() -> Vec<PathBuf> {
     roots
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn steam_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+
+    if let Ok(home) = env::var("HOME") {
+        let home = PathBuf::from(home);
+
+        roots.push(home.join(".local").join("share").join("Steam"));
+        roots.push(home.join(".steam").join("steam"));
+        roots.push(
+            home.join(".var")
+                .join("app")
+                .join("com.valvesoftware.Steam")
+                .join(".local")
+                .join("share")
+                .join("Steam"),
+        );
+    }
+
+    roots.retain(|path| path.is_dir());
+    roots.sort();
+    roots.dedup();
+
+    roots
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn steam_roots() -> Vec<PathBuf> {
     Vec::new()
 }
@@ -1552,7 +1874,12 @@ fn detect_common_screenshot_folder(game_name: &str, root: &Path) -> Option<Scree
         }
     }
 
-    let Ok(user_profile) = env::var("USERPROFILE") else {
+    let user_root = env::var("USERPROFILE")
+        .or_else(|_| env::var("HOME"))
+        .ok()
+        .map(PathBuf::from);
+
+    let Some(user_root) = user_root else {
         return None;
     };
 
@@ -1561,8 +1888,6 @@ fn detect_common_screenshot_folder(game_name: &str, root: &Path) -> Option<Scree
     if safe_game_name.is_empty() {
         return None;
     }
-
-    let user_root = PathBuf::from(user_profile);
 
     let candidates = [
         user_root.join("Pictures").join(safe_game_name),
@@ -1574,6 +1899,11 @@ fn detect_common_screenshot_folder(game_name: &str, root: &Path) -> Option<Scree
             .join("Documents")
             .join(safe_game_name)
             .join("Screenshots"),
+        user_root
+            .join(".local")
+            .join("share")
+            .join(safe_game_name)
+            .join("screenshots"),
     ];
 
     for candidate in candidates {

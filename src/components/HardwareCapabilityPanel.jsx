@@ -378,10 +378,7 @@ export default function HardwareCapabilityPanel({
               text-white/30
             "
           >
-            <Cpu
-              className="h-4 w-4"
-            />
-
+            <Cpu className="h-4 w-4" />
             CPU
           </div>
 
@@ -393,12 +390,9 @@ export default function HardwareCapabilityPanel({
               text-white/65
             "
           >
-            {hardware?.cpuName
-              ?? "Unknown"
-            }
+            {hardware?.cpuName ?? "Unknown"}
           </div>
         </div>
-
 
         <div
           className="
@@ -421,10 +415,7 @@ export default function HardwareCapabilityPanel({
               text-white/30
             "
           >
-            <MemoryStick
-              className="h-4 w-4"
-            />
-
+            <MemoryStick className="h-4 w-4" />
             Memory
           </div>
 
@@ -436,12 +427,9 @@ export default function HardwareCapabilityPanel({
               text-white/65
             "
           >
-            {formatBytes(
-              hardware?.ramBytes
-            )}
+            {formatBytes(hardware?.ramBytes)}
           </div>
         </div>
-
 
         <div
           className="
@@ -464,11 +452,8 @@ export default function HardwareCapabilityPanel({
               text-white/30
             "
           >
-            <MonitorCog
-              className="h-4 w-4"
-            />
-
-            Windows
+            <MonitorCog className="h-4 w-4" />
+            Operating System
           </div>
 
           <div
@@ -479,9 +464,7 @@ export default function HardwareCapabilityPanel({
               text-white/65
             "
           >
-            {hardware?.osName
-              ?? "Windows"
-            }
+            {hardware?.osName ?? "Unknown"}
           </div>
 
           {hardware?.osVersion ? (
@@ -498,25 +481,7 @@ export default function HardwareCapabilityPanel({
         </div>
       </div>
 
-
       <div
-        className="
-          overflow-hidden
-          rounded-xl
-          border
-          border-white/[0.08]
-          bg-black/10
-        "
-      >
-        <div
-          className="
-            border-b
-            border-white/[0.06]
-            px-4
-            py-3.5
-          "
-        >
-          <div
         className="
           overflow-hidden
           rounded-xl
@@ -545,12 +510,7 @@ export default function HardwareCapabilityPanel({
         </div>
 
         {displayedGpu ? (
-          <div
-            className="
-              px-4
-              py-3
-            "
-          >
+          <div className="px-4 py-3">
             <div
               className="
                 text-sm
@@ -571,8 +531,7 @@ export default function HardwareCapabilityPanel({
               {displayedGpu.vendor}
               {displayedGpu.dedicatedMemoryBytes
                 ? ` • ${formatBytes(displayedGpu.dedicatedMemoryBytes)} reported VRAM`
-                : ""
-              }
+                : ""}
             </div>
           </div>
         ) : (
@@ -589,8 +548,24 @@ export default function HardwareCapabilityPanel({
         )}
       </div>
 
-
       <div
+        className="
+          overflow-hidden
+          rounded-xl
+          border
+          border-white/[0.08]
+          bg-black/10
+        "
+      >
+        <div
+          className="
+            border-b
+            border-white/[0.06]
+            px-4
+            py-3.5
+          "
+        >
+          <div
             className="
               flex
               items-center
@@ -607,8 +582,7 @@ export default function HardwareCapabilityPanel({
                 text-cyan-300/75
               "
             />
-
-            Hardware-Aware Capability Checks
+            Hardware Capability Checks
           </div>
 
           <div
@@ -622,15 +596,10 @@ export default function HardwareCapabilityPanel({
           </div>
         </div>
 
-
         <CapabilityRow
           label="Ray Tracing"
-          gameSupport={
-            features.rayTracing
-          }
-          hardwareSupport={
-            capability.hasRtClass
-          }
+          gameSupport={features.rayTracing}
+          hardwareSupport={capability.hasRtClass}
           detail={
             features.rayTracing === false
               ? "PCGamingWiki reports that this game does not support ray tracing."
@@ -642,12 +611,8 @@ export default function HardwareCapabilityPanel({
 
         <CapabilityRow
           label="NVIDIA DLSS"
-          gameSupport={
-            features.upscaling
-          }
-          hardwareSupport={
-            capability.hasRtx
-          }
+          gameSupport={features.upscaling}
+          hardwareSupport={capability.hasRtx}
           detail={
             capability.hasRtx
               ? "An NVIDIA RTX GPU was detected, satisfying the basic hardware family requirement for DLSS."
@@ -657,12 +622,8 @@ export default function HardwareCapabilityPanel({
 
         <CapabilityRow
           label="NVIDIA DLSS Frame Generation"
-          gameSupport={
-            features.frameGeneration
-          }
-          hardwareSupport={
-            capability.hasNvidiaFg
-          }
+          gameSupport={features.frameGeneration}
+          hardwareSupport={capability.hasNvidiaFg}
           detail={
             capability.hasNvidiaFg
               ? "An NVIDIA RTX 40-series or newer GPU family was detected."
@@ -672,14 +633,8 @@ export default function HardwareCapabilityPanel({
 
         <CapabilityRow
           label="Intel XeSS"
-          gameSupport={
-            features.upscaling
-          }
-          hardwareSupport={
-            capability.hasArc
-              ? true
-              : null
-          }
+          gameSupport={features.upscaling}
+          hardwareSupport={capability.hasArc ? true : null}
           detail={
             capability.hasArc
               ? "An Intel Arc GPU was detected."
@@ -687,7 +642,6 @@ export default function HardwareCapabilityPanel({
           }
         />
       </div>
-
 
       <div
         className="

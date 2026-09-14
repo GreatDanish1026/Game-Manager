@@ -6,7 +6,8 @@ use std::{
 };
 
 const RELEASES_API: &str = "https://api.github.com/repos/clshortfuse/renodx/releases?per_page=20";
-const RENODX_MODS_RAW_URL: &str = "https://raw.githubusercontent.com/wiki/clshortfuse/renodx/Mods.md";
+const RENODX_MODS_RAW_URL: &str =
+    "https://raw.githubusercontent.com/wiki/clshortfuse/renodx/Mods.md";
 
 #[derive(Debug, Clone, Deserialize)]
 struct Release {
@@ -47,7 +48,6 @@ pub struct InstallResult {
     pub backup_path: Option<String>,
     pub message: String,
 }
-
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -94,7 +94,6 @@ pub struct RestoreResult {
     pub message: String,
 }
 
-
 fn home_dir() -> Result<PathBuf, String> {
     env::var_os("HOME")
         .map(PathBuf::from)
@@ -109,31 +108,23 @@ fn backup_root() -> Result<PathBuf, String> {
             .or_else(|| env::var_os("USERPROFILE"))
             .map(PathBuf::from)
             .ok_or_else(|| {
-                "Could not determine the Windows GameAtlas data directory."
-                    .to_string()
+                "Could not determine the Windows GameAtlas data directory.".to_string()
             })?;
 
-        return Ok(
-            base.join("GameAtlas")
-                .join("renodx-backups")
-        );
+        return Ok(base.join("GameAtlas").join("renodx-backups"));
     }
 
     #[cfg(not(target_os = "windows"))]
     {
         let home = env::var_os("HOME")
             .map(PathBuf::from)
-            .ok_or_else(|| {
-                "HOME is not available."
-                    .to_string()
-            })?;
+            .ok_or_else(|| "HOME is not available.".to_string())?;
 
-        Ok(
-            home.join(".local")
-                .join("share")
-                .join("GameAtlas")
-                .join("renodx-backups")
-        )
+        Ok(home
+            .join(".local")
+            .join("share")
+            .join("GameAtlas")
+            .join("renodx-backups"))
     }
 }
 
@@ -237,7 +228,6 @@ fn score_asset(asset_name: &str, titles: &[String]) -> Option<(i32, String)> {
     }
     None
 }
-
 
 fn markdown_urls(value: &str) -> Vec<String> {
     let mut urls = Vec::new();
@@ -365,12 +355,10 @@ fn official_package_from_wiki(
          * Only accept a direct architecture-specific addon URL here.
          * This avoids guessing asset names or downloading HTML pages.
          */
-        let direct_url = markdown_urls(&parts[2])
-            .into_iter()
-            .find(|url| {
-                let lower = url.to_ascii_lowercase();
-                lower.contains(suffix)
-            });
+        let direct_url = markdown_urls(&parts[2]).into_iter().find(|url| {
+            let lower = url.to_ascii_lowercase();
+            lower.contains(suffix)
+        });
 
         let Some(url) = direct_url else {
             continue;
@@ -385,9 +373,7 @@ fn official_package_from_wiki(
             .unwrap_or("")
             .to_string();
 
-        if asset_name.is_empty()
-            || !asset_name.to_ascii_lowercase().ends_with(suffix)
-        {
+        if asset_name.is_empty() || !asset_name.to_ascii_lowercase().ends_with(suffix) {
             continue;
         }
 
@@ -466,7 +452,6 @@ async fn releases() -> Result<Vec<Release>, String> {
         .map_err(|e| format!("Could not parse RenoDX release metadata: {}", e))
 }
 
-
 fn resolve(
     release: &Release,
     game_name: &str,
@@ -512,7 +497,6 @@ fn resolve(
     }
 }
 
-
 /*
  * RENODX_PHASE_6_2_OFFICIAL_SOURCE_AUTHORITY
  *
@@ -520,39 +504,27 @@ fn resolve(
  * A listed manual/Nexus/Discord source must never be replaced by a fuzzy
  * match to an unrelated generic nightly addon.
  */
-fn official_renodx_addon_filename(
-    url: &str,
-    architecture: &str,
-) -> Option<String> {
-    let without_fragment =
-        url.split('#').next().unwrap_or(url);
+fn official_renodx_addon_filename(url: &str, architecture: &str) -> Option<String> {
+    let without_fragment = url.split('#').next().unwrap_or(url);
 
-    let without_query =
-        without_fragment
-            .split('?')
-            .next()
-            .unwrap_or(without_fragment);
+    let without_query = without_fragment
+        .split('?')
+        .next()
+        .unwrap_or(without_fragment);
 
-    let filename =
-        without_query
-            .rsplit('/')
-            .next()
-            .unwrap_or("")
-            .trim();
+    let filename = without_query.rsplit('/').next().unwrap_or("").trim();
 
     if filename.is_empty() {
         return None;
     }
 
-    let lower =
-        filename.to_ascii_lowercase();
+    let lower = filename.to_ascii_lowercase();
 
-    let expected_suffix =
-        if architecture == "32-bit" {
-            ".addon32"
-        } else {
-            ".addon64"
-        };
+    let expected_suffix = if architecture == "32-bit" {
+        ".addon32"
+    } else {
+        ".addon64"
+    };
 
     if lower.ends_with(expected_suffix) {
         Some(filename.to_string())
@@ -561,15 +533,10 @@ fn official_renodx_addon_filename(
     }
 }
 
-
-fn official_renodx_manual_message(
-    matched_name: Option<&str>,
-    source_url: Option<&str>,
-) -> String {
-    let title =
-        matched_name
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or("This game");
+fn official_renodx_manual_message(matched_name: Option<&str>, source_url: Option<&str>) -> String {
+    let title = matched_name
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("This game");
 
     match source_url {
         Some(url) if !url.trim().is_empty() =>
@@ -586,7 +553,6 @@ fn official_renodx_manual_message(
             ),
     }
 }
-
 
 #[tauri::command]
 pub async fn get_renodx_package_info(
@@ -605,128 +571,66 @@ pub async fn get_renodx_package_info(
      * URL at all, return "manual required" here and DO NOT allow the resolver
      * below to substitute a fuzzy package.
      */
-    let official_lookup_name =
-        renodx_match_name
-            .clone()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| game_name.clone());
+    let official_lookup_name = renodx_match_name
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| game_name.clone());
 
     let official_status =
-        crate::renodx::get_renodx_mod_status(
-            official_lookup_name.clone()
-        )
-        .await?;
+        crate::renodx::get_renodx_mod_status(official_lookup_name.clone()).await?;
 
     if official_status.renodx.found {
-        let official_matched_name =
-            official_status
-                .renodx
-                .matched_name
-                .clone()
-                .or_else(|| {
-                    Some(official_lookup_name.clone())
-                });
+        let official_matched_name = official_status
+            .renodx
+            .matched_name
+            .clone()
+            .or_else(|| Some(official_lookup_name.clone()));
 
-        if let Some(official_url) =
-            official_status
-                .renodx
-                .download_url
-                .clone()
-        {
+        if let Some(official_url) = official_status.renodx.download_url.clone() {
             if let Some(official_asset_name) =
-                official_renodx_addon_filename(
-                    &official_url,
-                    &architecture,
-                )
+                official_renodx_addon_filename(&official_url, &architecture)
             {
-                return Ok(
-                    PackageInfo {
-                        found: true,
-                        release_tag:
-                            Some(
-                                "official-mods-list"
-                                    .to_string()
-                            ),
-                        release_name:
-                            official_matched_name,
-                        asset_name:
-                            Some(
-                                official_asset_name
-                                    .clone()
-                            ),
-                        asset_url:
-                            Some(official_url),
-                        asset_size_bytes:
-                            None,
-                        match_type:
-                            "official-direct"
-                                .to_string(),
-                        message:
-                            format!(
-                                "Matched {} from the official RenoDX Mods list.",
-                                official_asset_name
-                            ),
-                    }
-                );
+                return Ok(PackageInfo {
+                    found: true,
+                    release_tag: Some("official-mods-list".to_string()),
+                    release_name: official_matched_name,
+                    asset_name: Some(official_asset_name.clone()),
+                    asset_url: Some(official_url),
+                    asset_size_bytes: None,
+                    match_type: "official-direct".to_string(),
+                    message: format!(
+                        "Matched {} from the official RenoDX Mods list.",
+                        official_asset_name
+                    ),
+                });
             }
 
-            return Ok(
-                PackageInfo {
-                    found: false,
-                    release_tag:
-                        Some(
-                            "official-mods-list"
-                                .to_string()
-                        ),
-                    release_name:
-                        official_matched_name
-                            .clone(),
-                    asset_name: None,
-                    asset_url: None,
-                    asset_size_bytes: None,
-                    match_type:
-                        "official-manual"
-                            .to_string(),
-                    message:
-                        official_renodx_manual_message(
-                            official_matched_name
-                                .as_deref(),
-                            Some(
-                                official_url
-                                    .as_str()
-                            ),
-                        ),
-                }
-            );
-        }
-
-        return Ok(
-            PackageInfo {
+            return Ok(PackageInfo {
                 found: false,
-                release_tag:
-                    Some(
-                        "official-mods-list"
-                            .to_string()
-                    ),
-                release_name:
-                    official_matched_name
-                        .clone(),
+                release_tag: Some("official-mods-list".to_string()),
+                release_name: official_matched_name.clone(),
                 asset_name: None,
                 asset_url: None,
                 asset_size_bytes: None,
-                match_type:
-                    "official-manual"
-                        .to_string(),
-                message:
-                    official_renodx_manual_message(
-                        official_matched_name
-                            .as_deref(),
-                        None,
-                    ),
-            }
-        );
-    }
+                match_type: "official-manual".to_string(),
+                message: official_renodx_manual_message(
+                    official_matched_name.as_deref(),
+                    Some(official_url.as_str()),
+                ),
+            });
+        }
 
+        return Ok(PackageInfo {
+            found: false,
+            release_tag: Some("official-mods-list".to_string()),
+            release_name: official_matched_name.clone(),
+            asset_name: None,
+            asset_url: None,
+            asset_size_bytes: None,
+            match_type: "official-manual".to_string(),
+            message: official_renodx_manual_message(official_matched_name.as_deref(), None),
+        });
+    }
 
     /*
      * Primary source: the official RenoDX Mods list.
@@ -735,12 +639,8 @@ pub async fn get_renodx_package_info(
      * Many addons live in contributor repositories or GitHub Pages and
      * therefore do not exist in clshortfuse/renodx release assets.
      */
-    if let Some(package) = official_package(
-        &game_name,
-        renodx_match_name.as_deref(),
-        &architecture,
-    )
-    .await?
+    if let Some(package) =
+        official_package(&game_name, renodx_match_name.as_deref(), &architecture).await?
     {
         return Ok(package);
     }
@@ -814,98 +714,96 @@ pub async fn install_renodx_package_linux(
     binary_directory: String,
     game_key: String,
 ) -> Result<InstallResult, String> {
-    
-
     let package = get_renodx_package_info(game_name, renodx_match_name, architecture).await?;
-if !package.found {
-    return Err(package.message);
-}
-let asset_name = package
-    .asset_name
-    .clone()
-    .ok_or_else(|| "RenoDX asset name is missing.".to_string())?;
-let asset_url = package
-    .asset_url
-    .clone()
-    .ok_or_else(|| "RenoDX asset URL is missing.".to_string())?;
-let release_tag = package
-    .release_tag
-    .clone()
-    .ok_or_else(|| "RenoDX release tag is missing.".to_string())?;
-let expected = package.asset_size_bytes.unwrap_or(0);
-let target = PathBuf::from(binary_directory);
-if !target.is_dir() {
-    return Err(format!(
-        "RenoDX target directory does not exist: {}",
-        target.display()
-    ));
-}
+    if !package.found {
+        return Err(package.message);
+    }
+    let asset_name = package
+        .asset_name
+        .clone()
+        .ok_or_else(|| "RenoDX asset name is missing.".to_string())?;
+    let asset_url = package
+        .asset_url
+        .clone()
+        .ok_or_else(|| "RenoDX asset URL is missing.".to_string())?;
+    let release_tag = package
+        .release_tag
+        .clone()
+        .ok_or_else(|| "RenoDX release tag is missing.".to_string())?;
+    let expected = package.asset_size_bytes.unwrap_or(0);
+    let target = PathBuf::from(binary_directory);
+    if !target.is_dir() {
+        return Err(format!(
+            "RenoDX target directory does not exist: {}",
+            target.display()
+        ));
+    }
 
-let bytes = reqwest::Client::builder()
-    .user_agent("GameAtlas/2.1 RenoDX Manager")
-    .build()
-    .map_err(|e| e.to_string())?
-    .get(&asset_url)
-    .header("Accept", "application/octet-stream")
-    .send()
-    .await
-    .map_err(|e| format!("Could not download RenoDX: {}", e))?
-    .error_for_status()
-    .map_err(|e| format!("RenoDX download returned an error: {}", e))?
-    .bytes()
-    .await
-    .map_err(|e| e.to_string())?;
+    let bytes = reqwest::Client::builder()
+        .user_agent("GameAtlas/2.1 RenoDX Manager")
+        .build()
+        .map_err(|e| e.to_string())?
+        .get(&asset_url)
+        .header("Accept", "application/octet-stream")
+        .send()
+        .await
+        .map_err(|e| format!("Could not download RenoDX: {}", e))?
+        .error_for_status()
+        .map_err(|e| format!("RenoDX download returned an error: {}", e))?
+        .bytes()
+        .await
+        .map_err(|e| e.to_string())?;
 
-if bytes.len() < 100_000 {
-    return Err(format!(
-        "Downloaded RenoDX asset is unexpectedly small ({} bytes).",
-        bytes.len()
-    ));
-}
-if expected > 0 && bytes.len() as u64 != expected {
-    return Err(format!(
-        "RenoDX download size mismatch: expected {} bytes, downloaded {} bytes.",
-        expected,
-        bytes.len()
-    ));
-}
+    if bytes.len() < 100_000 {
+        return Err(format!(
+            "Downloaded RenoDX asset is unexpectedly small ({} bytes).",
+            bytes.len()
+        ));
+    }
+    if expected > 0 && bytes.len() as u64 != expected {
+        return Err(format!(
+            "RenoDX download size mismatch: expected {} bytes, downloaded {} bytes.",
+            expected,
+            bytes.len()
+        ));
+    }
 
-let destination = target.join(&asset_name);
-let backup = backup_existing(&destination, &game_key)?;
-let temporary = target.join(format!("{}.gameatlas-tmp", asset_name));
-fs::write(&temporary, &bytes)
-    .map_err(|e| format!("Could not write RenoDX temp file: {}", e))?;
-let temp_size = fs::metadata(&temporary).map_err(|e| e.to_string())?.len();
-if temp_size != bytes.len() as u64 {
-    let _ = fs::remove_file(&temporary);
-    return Err("RenoDX write verification failed before commit.".to_string());
-}
-if destination.exists() {
-    fs::remove_file(&destination)
-        .map_err(|e| format!("Could not replace existing RenoDX file: {}", e))?;
-}
-fs::rename(&temporary, &destination)
-    .map_err(|e| format!("Could not commit RenoDX file: {}", e))?;
-let final_size = fs::metadata(&destination)
-    .map_err(|e| format!("RenoDX final verification failed: {}", e))?
-    .len();
-if final_size != bytes.len() as u64 {
-    return Err(format!(
-        "RenoDX final size verification failed: expected {} bytes, found {} bytes.",
-        bytes.len(),
-        final_size
-    ));
-}
+    let destination = target.join(&asset_name);
+    let backup = backup_existing(&destination, &game_key)?;
+    let temporary = target.join(format!("{}.gameatlas-tmp", asset_name));
+    fs::write(&temporary, &bytes)
+        .map_err(|e| format!("Could not write RenoDX temp file: {}", e))?;
+    let temp_size = fs::metadata(&temporary).map_err(|e| e.to_string())?.len();
+    if temp_size != bytes.len() as u64 {
+        let _ = fs::remove_file(&temporary);
+        return Err("RenoDX write verification failed before commit.".to_string());
+    }
+    if destination.exists() {
+        fs::remove_file(&destination)
+            .map_err(|e| format!("Could not replace existing RenoDX file: {}", e))?;
+    }
+    fs::rename(&temporary, &destination)
+        .map_err(|e| format!("Could not commit RenoDX file: {}", e))?;
+    let final_size = fs::metadata(&destination)
+        .map_err(|e| format!("RenoDX final verification failed: {}", e))?
+        .len();
+    if final_size != bytes.len() as u64 {
+        return Err(format!(
+            "RenoDX final size verification failed: expected {} bytes, found {} bytes.",
+            bytes.len(),
+            final_size
+        ));
+    }
 
-Ok(InstallResult {
-    installed: true,
-    release_tag,
-    asset_name: asset_name.clone(),
-    installed_path: destination.to_string_lossy().to_string(),
-    installed_size_bytes: final_size,
-    backup_path: backup.map(|p| p.to_string_lossy().to_string()),
-    message: format!("RenoDX installed and verified: {}.", destination.display()),
-})
+    Ok(InstallResult {
+        installed: true,
+        release_tag,
+        asset_name: asset_name.clone(),
+        installed_path: destination.to_string_lossy().to_string(),
+        installed_size_bytes: final_size,
+        backup_path: backup.map(|p| p.to_string_lossy().to_string()),
+        message: format!("RenoDX installed and verified: {}.", destination.display()),
+    })
 }
 
 #[tauri::command]
@@ -914,72 +812,66 @@ pub async fn uninstall_renodx_package_linux(
     binary_directory: String,
     game_key: String,
 ) -> Result<UninstallResult, String> {
-    
-
     if asset_name.trim().is_empty() {
-    return Err("RenoDX asset name is missing.".to_string());
+        return Err("RenoDX asset name is missing.".to_string());
+    }
+
+    let file_name = Path::new(&asset_name)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "RenoDX asset name is invalid.".to_string())?;
+
+    if file_name != asset_name {
+        return Err("RenoDX uninstall refused a non-filename asset path.".to_string());
+    }
+
+    let lower = file_name.to_ascii_lowercase();
+    if !(lower.ends_with(".addon64") || lower.ends_with(".addon32")) {
+        return Err(format!(
+            "RenoDX uninstall refused unexpected file type: {}",
+            file_name
+        ));
+    }
+
+    let target = PathBuf::from(binary_directory);
+    if !target.is_dir() {
+        return Err(format!(
+            "RenoDX target directory does not exist: {}",
+            target.display()
+        ));
+    }
+
+    let destination = target.join(file_name);
+    if !destination.is_file() {
+        return Err(format!(
+            "RenoDX file is not installed at the expected path: {}",
+            destination.display()
+        ));
+    }
+
+    let backup = backup_existing(&destination, &game_key)?;
+    fs::remove_file(&destination).map_err(|e| format!("Could not remove RenoDX file: {}", e))?;
+
+    if destination.exists() {
+        return Err(format!(
+            "RenoDX uninstall verification failed; file still exists: {}",
+            destination.display()
+        ));
+    }
+
+    Ok(UninstallResult {
+        removed: true,
+        asset_name: file_name.to_string(),
+        removed_path: destination.to_string_lossy().to_string(),
+        backup_path: backup.map(|path| path.to_string_lossy().to_string()),
+        message: format!(
+            "RenoDX removed safely. Backup saved before removal: {}.",
+            file_name
+        ),
+    })
 }
 
-let file_name = Path::new(&asset_name)
-    .file_name()
-    .and_then(|value| value.to_str())
-    .ok_or_else(|| "RenoDX asset name is invalid.".to_string())?;
-
-if file_name != asset_name {
-    return Err("RenoDX uninstall refused a non-filename asset path.".to_string());
-}
-
-let lower = file_name.to_ascii_lowercase();
-if !(lower.ends_with(".addon64") || lower.ends_with(".addon32")) {
-    return Err(format!(
-        "RenoDX uninstall refused unexpected file type: {}",
-        file_name
-    ));
-}
-
-let target = PathBuf::from(binary_directory);
-if !target.is_dir() {
-    return Err(format!(
-        "RenoDX target directory does not exist: {}",
-        target.display()
-    ));
-}
-
-let destination = target.join(file_name);
-if !destination.is_file() {
-    return Err(format!(
-        "RenoDX file is not installed at the expected path: {}",
-        destination.display()
-    ));
-}
-
-let backup = backup_existing(&destination, &game_key)?;
-fs::remove_file(&destination)
-    .map_err(|e| format!("Could not remove RenoDX file: {}", e))?;
-
-if destination.exists() {
-    return Err(format!(
-        "RenoDX uninstall verification failed; file still exists: {}",
-        destination.display()
-    ));
-}
-
-Ok(UninstallResult {
-    removed: true,
-    asset_name: file_name.to_string(),
-    removed_path: destination.to_string_lossy().to_string(),
-    backup_path: backup.map(|path| path.to_string_lossy().to_string()),
-    message: format!(
-        "RenoDX removed safely. Backup saved before removal: {}.",
-        file_name
-    ),
-})
-}
-
-
-fn latest_renodx_backup(
-    game_key: &str,
-) -> Result<Option<(u64, PathBuf)>, String> {
+fn latest_renodx_backup(game_key: &str) -> Result<Option<(u64, PathBuf)>, String> {
     let game_root = backup_root()?.join(game_key);
 
     if !game_root.is_dir() {
@@ -1045,9 +937,7 @@ fn latest_renodx_backup(
     Ok(best)
 }
 
-fn validate_renodx_filename(
-    asset_name: &str,
-) -> Result<&str, String> {
+fn validate_renodx_filename(asset_name: &str) -> Result<&str, String> {
     if asset_name.trim().is_empty() {
         return Err("RenoDX filename is missing.".to_string());
     }
@@ -1058,9 +948,7 @@ fn validate_renodx_filename(
         .ok_or_else(|| "RenoDX filename is invalid.".to_string())?;
 
     if file_name != asset_name {
-        return Err(
-            "RenoDX restore refused a filename containing a path.".to_string()
-        );
+        return Err("RenoDX restore refused a filename containing a path.".to_string());
     }
 
     let lower = file_name.to_ascii_lowercase();
@@ -1076,12 +964,8 @@ fn validate_renodx_filename(
 }
 
 #[tauri::command]
-pub fn get_latest_renodx_backup(
-    game_key: String,
-) -> Result<RenoDxBackupInfo, String> {
-    let Some((created_unix, path)) =
-        latest_renodx_backup(&game_key)?
-    else {
+pub fn get_latest_renodx_backup(game_key: String) -> Result<RenoDxBackupInfo, String> {
+    let Some((created_unix, path)) = latest_renodx_backup(&game_key)? else {
         return Ok(RenoDxBackupInfo {
             found: false,
             asset_name: None,
@@ -1110,10 +994,7 @@ pub fn get_latest_renodx_backup(
         backup_path: Some(path.to_string_lossy().to_string()),
         created_unix: Some(created_unix),
         size_bytes: Some(size_bytes),
-        message: format!(
-            "Previous RenoDX backup is available: {}.",
-            asset_name
-        ),
+        message: format!("Previous RenoDX backup is available: {}.", asset_name),
     })
 }
 
@@ -1123,137 +1004,110 @@ pub fn restore_latest_renodx_backup_linux(
     binary_directory: String,
     current_asset_name: Option<String>,
 ) -> Result<RestoreResult, String> {
-    
+    let Some((_created_unix, backup_path)) = latest_renodx_backup(&game_key)? else {
+        return Err("No RenoDX backup is available for this game.".to_string());
+    };
 
-    let Some((_created_unix, backup_path)) =
-    latest_renodx_backup(&game_key)?
-else {
-    return Err(
-        "No RenoDX backup is available for this game.".to_string()
-    );
-};
+    if !backup_path.is_file() {
+        return Err(format!(
+            "RenoDX backup no longer exists: {}",
+            backup_path.display()
+        ));
+    }
 
-if !backup_path.is_file() {
-    return Err(format!(
-        "RenoDX backup no longer exists: {}",
-        backup_path.display()
-    ));
-}
+    let backup_name = backup_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "Could not determine RenoDX backup filename.".to_string())?
+        .to_string();
 
-let backup_name = backup_path
-    .file_name()
-    .and_then(|value| value.to_str())
-    .ok_or_else(|| {
-        "Could not determine RenoDX backup filename.".to_string()
-    })?
-    .to_string();
+    let backup_name = validate_renodx_filename(&backup_name)?.to_string();
 
-let backup_name = validate_renodx_filename(&backup_name)?.to_string();
+    let target = PathBuf::from(binary_directory);
 
-let target = PathBuf::from(binary_directory);
+    if !target.is_dir() {
+        return Err(format!(
+            "RenoDX target directory does not exist: {}",
+            target.display()
+        ));
+    }
 
-if !target.is_dir() {
-    return Err(format!(
-        "RenoDX target directory does not exist: {}",
-        target.display()
-    ));
-}
+    let destination = target.join(&backup_name);
+    let mut safety_backup: Option<PathBuf> = None;
 
-let destination = target.join(&backup_name);
-let mut safety_backup: Option<PathBuf> = None;
+    if let Some(current_name) = current_asset_name.as_deref() {
+        let current_name = validate_renodx_filename(current_name)?;
+        let current_path = target.join(current_name);
 
-if let Some(current_name) = current_asset_name.as_deref() {
-    let current_name = validate_renodx_filename(current_name)?;
-    let current_path = target.join(current_name);
+        if current_path.is_file() && current_path != destination {
+            safety_backup = backup_existing(&current_path, &game_key)?;
 
-    if current_path.is_file() && current_path != destination {
-        safety_backup = backup_existing(
-            &current_path,
-            &game_key,
-        )?;
-
-        fs::remove_file(&current_path)
-            .map_err(|e| {
-                format!(
-                    "Could not remove current RenoDX file before restore: {}",
-                    e
-                )
+            fs::remove_file(&current_path).map_err(|e| {
+                format!("Could not remove current RenoDX file before restore: {}", e)
             })?;
+        }
     }
-}
 
-if destination.is_file() {
-    let same_name_backup = backup_existing(
-        &destination,
-        &game_key,
-    )?;
+    if destination.is_file() {
+        let same_name_backup = backup_existing(&destination, &game_key)?;
 
-    if safety_backup.is_none() {
-        safety_backup = same_name_backup;
+        if safety_backup.is_none() {
+            safety_backup = same_name_backup;
+        }
     }
-}
 
-let backup_size = fs::metadata(&backup_path)
-    .map_err(|e| format!("Could not inspect RenoDX backup: {}", e))?
-    .len();
+    let backup_size = fs::metadata(&backup_path)
+        .map_err(|e| format!("Could not inspect RenoDX backup: {}", e))?
+        .len();
 
-let temporary = target.join(
-    format!("{}.gameatlas-restore-tmp", backup_name)
-);
+    let temporary = target.join(format!("{}.gameatlas-restore-tmp", backup_name));
 
-fs::copy(&backup_path, &temporary)
-    .map_err(|e| format!("Could not stage RenoDX restore: {}", e))?;
+    fs::copy(&backup_path, &temporary)
+        .map_err(|e| format!("Could not stage RenoDX restore: {}", e))?;
 
-let temporary_size = fs::metadata(&temporary)
-    .map_err(|e| format!("Could not verify staged RenoDX restore: {}", e))?
-    .len();
+    let temporary_size = fs::metadata(&temporary)
+        .map_err(|e| format!("Could not verify staged RenoDX restore: {}", e))?
+        .len();
 
-if temporary_size != backup_size {
-    let _ = fs::remove_file(&temporary);
+    if temporary_size != backup_size {
+        let _ = fs::remove_file(&temporary);
 
-    return Err(
-        "RenoDX restore verification failed before commit.".to_string()
-    );
-}
+        return Err("RenoDX restore verification failed before commit.".to_string());
+    }
 
-if destination.exists() {
-    fs::remove_file(&destination)
-        .map_err(|e| {
+    if destination.exists() {
+        fs::remove_file(&destination).map_err(|e| {
             format!(
                 "Could not replace current RenoDX file during restore: {}",
                 e
             )
         })?;
+    }
+
+    fs::rename(&temporary, &destination)
+        .map_err(|e| format!("Could not commit RenoDX restore: {}", e))?;
+
+    let final_size = fs::metadata(&destination)
+        .map_err(|e| format!("Could not verify restored RenoDX file: {}", e))?
+        .len();
+
+    if final_size != backup_size {
+        return Err("RenoDX restore verification failed after commit.".to_string());
+    }
+
+    Ok(RestoreResult {
+        restored: true,
+        asset_name: backup_name.clone(),
+        restored_path: destination.to_string_lossy().to_string(),
+        restored_size_bytes: final_size,
+        source_backup_path: backup_path.to_string_lossy().to_string(),
+        safety_backup_path: safety_backup.map(|path| path.to_string_lossy().to_string()),
+        message: format!(
+            "Previous RenoDX backup restored and verified: {}.",
+            backup_name
+        ),
+    })
 }
-
-fs::rename(&temporary, &destination)
-    .map_err(|e| format!("Could not commit RenoDX restore: {}", e))?;
-
-let final_size = fs::metadata(&destination)
-    .map_err(|e| format!("Could not verify restored RenoDX file: {}", e))?
-    .len();
-
-if final_size != backup_size {
-    return Err(
-        "RenoDX restore verification failed after commit.".to_string()
-    );
-}
-
-Ok(RestoreResult {
-    restored: true,
-    asset_name: backup_name.clone(),
-    restored_path: destination.to_string_lossy().to_string(),
-    restored_size_bytes: final_size,
-    source_backup_path: backup_path.to_string_lossy().to_string(),
-    safety_backup_path: safety_backup
-        .map(|path| path.to_string_lossy().to_string()),
-    message: format!(
-        "Previous RenoDX backup restored and verified: {}.",
-        backup_name
-    ),
-})
-}
-
 
 #[tauri::command]
 pub async fn get_renodx_update_status_linux(
@@ -1263,325 +1117,156 @@ pub async fn get_renodx_update_status_linux(
     binary_directory: String,
     installed_asset_name: Option<String>,
 ) -> Result<RenoDxUpdateStatus, String> {
-    
+    let target = PathBuf::from(binary_directory);
 
-    let target =
-    PathBuf::from(
-        binary_directory
-    );
-
-if !target.is_dir() {
-    return Err(
-        format!(
+    if !target.is_dir() {
+        return Err(format!(
             "RenoDX target directory does not exist: {}",
             target.display()
-        )
-    );
-}
+        ));
+    }
 
-/*
- * Resolve the official package FIRST.
- *
- * An update can change the addon filename. In that case an older
- * addon may still exist in the game directory and the readiness
- * scan can return that stale file first. The current official
- * filename is therefore authoritative when it is already present.
- */
-let package =
-    get_renodx_package_info(
-        game_name,
-        renodx_match_name,
-        architecture,
-    )
-    .await?;
+    /*
+     * Resolve the official package FIRST.
+     *
+     * An update can change the addon filename. In that case an older
+     * addon may still exist in the game directory and the readiness
+     * scan can return that stale file first. The current official
+     * filename is therefore authoritative when it is already present.
+     */
+    let package = get_renodx_package_info(game_name, renodx_match_name, architecture).await?;
 
-if !package.found {
-    return Ok(RenoDxUpdateStatus {
-        checked: false,
-        state: "unavailable".to_string(),
-        installed_asset_name,
-        available_asset_name: None,
-        installed_size_bytes: None,
-        available_size_bytes: None,
-        message:
-            package.message,
-    });
-}
+    if !package.found {
+        return Ok(RenoDxUpdateStatus {
+            checked: false,
+            state: "unavailable".to_string(),
+            installed_asset_name,
+            available_asset_name: None,
+            installed_size_bytes: None,
+            available_size_bytes: None,
+            message: package.message,
+        });
+    }
 
-let available_name =
-    package
+    let available_name = package
         .asset_name
         .clone()
-        .ok_or_else(
-            || {
-                "RenoDX package filename is missing."
-                    .to_string()
-            }
-        )?;
+        .ok_or_else(|| "RenoDX package filename is missing.".to_string())?;
 
-validate_renodx_filename(
-    &available_name
-)?;
+    validate_renodx_filename(&available_name)?;
 
-let official_local_path =
-    target.join(
-        &available_name
-    );
+    let official_local_path = target.join(&available_name);
 
-let comparison_name =
-    if official_local_path.is_file() {
+    let comparison_name = if official_local_path.is_file() {
         available_name.clone()
-    } else if let Some(
-        detected_name
-    ) = installed_asset_name
-    {
-        validate_renodx_filename(
-            &detected_name
-        )?
-        .to_string()
+    } else if let Some(detected_name) = installed_asset_name {
+        validate_renodx_filename(&detected_name)?.to_string()
     } else {
-        return Ok(
-            RenoDxUpdateStatus {
-                checked: true,
-                state:
-                    "not-installed"
-                        .to_string(),
-                installed_asset_name:
-                    None,
-                available_asset_name:
-                    Some(
-                        available_name
-                    ),
-                installed_size_bytes:
-                    None,
-                available_size_bytes:
-                    package
-                        .asset_size_bytes,
-                message:
-                    "RenoDX is not currently installed."
-                        .to_string(),
-            }
-        );
+        return Ok(RenoDxUpdateStatus {
+            checked: true,
+            state: "not-installed".to_string(),
+            installed_asset_name: None,
+            available_asset_name: Some(available_name),
+            installed_size_bytes: None,
+            available_size_bytes: package.asset_size_bytes,
+            message: "RenoDX is not currently installed.".to_string(),
+        });
     };
 
-let installed_path =
-    target.join(
-        &comparison_name
-    );
+    let installed_path = target.join(&comparison_name);
 
-if !installed_path.is_file() {
-    return Ok(
-        RenoDxUpdateStatus {
+    if !installed_path.is_file() {
+        return Ok(RenoDxUpdateStatus {
             checked: true,
-            state:
-                "not-installed"
-                    .to_string(),
-            installed_asset_name:
-                Some(
-                    comparison_name
-                ),
-            available_asset_name:
-                Some(
-                    available_name
-                ),
-            installed_size_bytes:
-                None,
-            available_size_bytes:
-                package
-                    .asset_size_bytes,
-            message:
-                "GameAtlas no longer finds the detected RenoDX addon."
-                    .to_string(),
-        }
-    );
-}
+            state: "not-installed".to_string(),
+            installed_asset_name: Some(comparison_name),
+            available_asset_name: Some(available_name),
+            installed_size_bytes: None,
+            available_size_bytes: package.asset_size_bytes,
+            message: "GameAtlas no longer finds the detected RenoDX addon.".to_string(),
+        });
+    }
 
-let installed_size =
-    fs::metadata(
-        &installed_path
-    )
-    .map_err(
-        |e| {
-            format!(
-                "Could not inspect installed RenoDX addon: {}",
-                e
-            )
-        }
-    )?
-    .len();
+    let installed_size = fs::metadata(&installed_path)
+        .map_err(|e| format!("Could not inspect installed RenoDX addon: {}", e))?
+        .len();
 
-let asset_url =
-    package
+    let asset_url = package
         .asset_url
         .clone()
-        .ok_or_else(
-            || {
-                "RenoDX package URL is missing."
-                    .to_string()
-            }
-        )?;
+        .ok_or_else(|| "RenoDX package URL is missing.".to_string())?;
 
-let expected_size =
-    package
-        .asset_size_bytes
-        .unwrap_or(0);
+    let expected_size = package.asset_size_bytes.unwrap_or(0);
 
-let available_bytes =
-    reqwest::Client::builder()
-        .user_agent(
-            "GameAtlas/2.1 RenoDX Manager"
-        )
+    let available_bytes = reqwest::Client::builder()
+        .user_agent("GameAtlas/2.1 RenoDX Manager")
         .build()
-        .map_err(
-            |e| e.to_string()
-        )?
-        .get(
-            &asset_url
-        )
-        .header(
-            "Accept",
-            "application/octet-stream",
-        )
+        .map_err(|e| e.to_string())?
+        .get(&asset_url)
+        .header("Accept", "application/octet-stream")
         .send()
         .await
-        .map_err(
-            |e| {
-                format!(
-                    "Could not download current RenoDX build for comparison: {}",
-                    e
-                )
-            }
-        )?
+        .map_err(|e| {
+            format!(
+                "Could not download current RenoDX build for comparison: {}",
+                e
+            )
+        })?
         .error_for_status()
-        .map_err(
-            |e| {
-                format!(
-                    "Current RenoDX build returned an error: {}",
-                    e
-                )
-            }
-        )?
+        .map_err(|e| format!("Current RenoDX build returned an error: {}", e))?
         .bytes()
         .await
-        .map_err(
-            |e| {
-                format!(
-                    "Could not read current RenoDX build: {}",
-                    e
-                )
-            }
-        )?;
+        .map_err(|e| format!("Could not read current RenoDX build: {}", e))?;
 
-if available_bytes.len()
-    < 100_000
-{
-    return Err(
-        format!(
+    if available_bytes.len() < 100_000 {
+        return Err(format!(
             "Current RenoDX addon is unexpectedly small ({} bytes).",
             available_bytes.len()
-        )
-    );
-}
+        ));
+    }
 
-if expected_size > 0
-    && available_bytes.len()
-        as u64
-        != expected_size
-{
-    return Err(
-        format!(
+    if expected_size > 0 && available_bytes.len() as u64 != expected_size {
+        return Err(format!(
             "RenoDX comparison download size mismatch: expected {} bytes, downloaded {} bytes.",
             expected_size,
             available_bytes.len()
-        )
-    );
-}
+        ));
+    }
 
-let available_size =
-    available_bytes.len()
-        as u64;
+    let available_size = available_bytes.len() as u64;
 
-let is_current =
-    if installed_size
-        != available_size
-    {
+    let is_current = if installed_size != available_size {
         false
     } else {
-        let installed_bytes =
-            fs::read(
-                &installed_path
+        let installed_bytes = fs::read(&installed_path).map_err(|e| {
+            format!(
+                "Could not read installed RenoDX addon for comparison: {}",
+                e
             )
-            .map_err(
-                |e| {
-                    format!(
-                        "Could not read installed RenoDX addon for comparison: {}",
-                        e
-                    )
-                }
-            )?;
+        })?;
 
-        installed_bytes
-            .as_slice()
-            == available_bytes
-                .as_ref()
+        installed_bytes.as_slice() == available_bytes.as_ref()
     };
 
-if is_current {
-    Ok(
-        RenoDxUpdateStatus {
+    if is_current {
+        Ok(RenoDxUpdateStatus {
             checked: true,
-            state:
-                "up-to-date"
-                    .to_string(),
-            installed_asset_name:
-                Some(
-                    comparison_name
-                ),
-            available_asset_name:
-                Some(
-                    available_name
-                ),
-            installed_size_bytes:
-                Some(
-                    installed_size
-                ),
-            available_size_bytes:
-                Some(
-                    available_size
-                ),
-            message:
-                "Installed RenoDX exactly matches the current official build."
-                    .to_string(),
-        }
-    )
-} else {
-    Ok(
-        RenoDxUpdateStatus {
+            state: "up-to-date".to_string(),
+            installed_asset_name: Some(comparison_name),
+            available_asset_name: Some(available_name),
+            installed_size_bytes: Some(installed_size),
+            available_size_bytes: Some(available_size),
+            message: "Installed RenoDX exactly matches the current official build.".to_string(),
+        })
+    } else {
+        Ok(RenoDxUpdateStatus {
             checked: true,
-            state:
-                "update-available"
-                    .to_string(),
-            installed_asset_name:
-                Some(
-                    comparison_name
-                ),
-            available_asset_name:
-                Some(
-                    available_name
-                ),
-            installed_size_bytes:
-                Some(
-                    installed_size
-                ),
-            available_size_bytes:
-                Some(
-                    available_size
-                ),
-            message:
-                "A newer or different official RenoDX build is available."
-                    .to_string(),
-        }
-    )
+            state: "update-available".to_string(),
+            installed_asset_name: Some(comparison_name),
+            available_asset_name: Some(available_name),
+            installed_size_bytes: Some(installed_size),
+            available_size_bytes: Some(available_size),
+            message: "A newer or different official RenoDX build is available.".to_string(),
+        })
+    }
 }
-}
-

@@ -7,6 +7,7 @@ mod game_version;
 mod heroic_games;
 mod installed_games;
 mod launch_profiles;
+mod linux_performance;
 mod linux_steam;
 mod local_installation;
 mod local_paths;
@@ -20,6 +21,9 @@ mod renodx;
 mod rhi;
 mod save_backups;
 mod save_browser;
+mod steam_keyvalues;
+mod steam_launch_options;
+mod steam_launch_store;
 mod steam_rating;
 mod system_hardware;
 mod vortex;
@@ -44,10 +48,10 @@ pub fn run() {
             reshade_windows::install_reshade_addons_windows,
             renodx_installer::get_renodx_package_info,
             renodx_installer::install_renodx_package_linux,
-                renodx_installer::uninstall_renodx_package_linux,
-                renodx_installer::get_latest_renodx_backup,
-                renodx_installer::restore_latest_renodx_backup_linux,
-                renodx_installer::get_renodx_update_status_linux,
+            renodx_installer::uninstall_renodx_package_linux,
+            renodx_installer::get_latest_renodx_backup,
+            renodx_installer::restore_latest_renodx_backup_linux,
+            renodx_installer::get_renodx_update_status_linux,
             reshade_manager::install_reshade_addons_direct_linux,
             reshade_manager::get_reshade_addon_installer_info,
             reshade_manager::download_reshade_addon_installer,
@@ -94,6 +98,9 @@ pub fn run() {
             game_launcher::get_launcher_status,
             local_installation::inspect_local_installation,
             platform::get_platform_info,
+            linux_performance::get_linux_performance_capabilities,
+            steam_launch_options::get_steam_launch_options,
+            steam_launch_options::set_steam_launch_options,
             linux_steam::get_linux_steam_games,
             heroic_games::get_heroic_installed_games,
             lutris_games::get_lutris_installed_games,

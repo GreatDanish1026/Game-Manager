@@ -2,16 +2,9 @@ use serde::Serialize;
 
 use std::{
     collections::HashMap,
-    sync::{
-        Mutex,
-        OnceLock,
-    },
-    time::{
-        Duration,
-        Instant,
-    },
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
 };
-
 
 const RENODX_RAW_URL: &str = "https://raw.githubusercontent.com/wiki/clshortfuse/renodx/Mods.md";
 
@@ -684,7 +677,6 @@ fn parse_luma_status(markdown: &str, game_name: &str) -> ModSourceStatus {
  * ============================================================
  */
 
-
 /*
  * RENODX_SOURCE_CACHE_PHASE1
  *
@@ -692,80 +684,29 @@ fn parse_luma_status(markdown: &str, game_name: &str) -> ModSourceStatus {
  * cached for five minutes so switching games does not repeatedly fetch the
  * same markdown documents.
  */
-static MOD_SOURCE_CACHE:
-    OnceLock<
-        Mutex<
-            HashMap<
-                String,
-                (
-                    Instant,
-                    String,
-                ),
-            >,
-        >,
-    > =
-    OnceLock::new();
+static MOD_SOURCE_CACHE: OnceLock<Mutex<HashMap<String, (Instant, String)>>> = OnceLock::new();
 
-const MOD_SOURCE_CACHE_TTL:
-    Duration =
-    Duration::from_secs(
-        5 * 60
-    );
+const MOD_SOURCE_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 
+async fn fetch_text_cached(client: &reqwest::Client, url: &str) -> Result<String, String> {
+    let cache = MOD_SOURCE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
-async fn fetch_text_cached(
-    client: &reqwest::Client,
-    url: &str,
-) -> Result<String, String> {
-    let cache =
-        MOD_SOURCE_CACHE
-            .get_or_init(|| {
-                Mutex::new(
-                    HashMap::new()
-                )
-            });
-
-    if let Ok(guard) =
-        cache.lock()
-    {
-        if let Some((
-            cached_at,
-            cached_text,
-        )) =
-            guard.get(url)
-        {
-            if cached_at.elapsed()
-                < MOD_SOURCE_CACHE_TTL
-            {
-                return Ok(
-                    cached_text.clone()
-                );
+    if let Ok(guard) = cache.lock() {
+        if let Some((cached_at, cached_text)) = guard.get(url) {
+            if cached_at.elapsed() < MOD_SOURCE_CACHE_TTL {
+                return Ok(cached_text.clone());
             }
         }
     }
 
-    let text =
-        fetch_text(
-            client,
-            url,
-        )
-        .await?;
+    let text = fetch_text(client, url).await?;
 
-    if let Ok(mut guard) =
-        cache.lock()
-    {
-        guard.insert(
-            url.to_string(),
-            (
-                Instant::now(),
-                text.clone(),
-            ),
-        );
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(url.to_string(), (Instant::now(), text.clone()));
     }
 
     Ok(text)
 }
-
 
 async fn fetch_text(client: &reqwest::Client, url: &str) -> Result<String, String> {
     let response = client

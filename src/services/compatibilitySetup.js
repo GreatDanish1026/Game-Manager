@@ -445,6 +445,64 @@ function gb(
 }
 
 
+function gpuPerformanceClass(
+  gpu
+) {
+  const name =
+    String(
+      gpu?.name
+      ?? ""
+    )
+      .toUpperCase();
+
+  if (!name) {
+    return "unknown";
+  }
+
+  // Keep this intentionally conservative. These are broad hardware classes,
+  // not FPS predictions.
+  const highEndPatterns = [
+    /\bRTX\s*50(80|90)\b/,
+    /\bRTX\s*40(80|90)(\s*TI)?\b/,
+    /\bRTX\s*3090(\s*TI)?\b/,
+    /\bRX\s*79(00|50)\b/,
+  ];
+
+  if (
+    highEndPatterns.some(
+      (pattern) =>
+        pattern.test(
+          name
+        )
+    )
+  ) {
+    return "high-end";
+  }
+
+  const strongPatterns = [
+    /\bRTX\s*50(60|70)(\s*TI)?\b/,
+    /\bRTX\s*40(60|70)(\s*TI|\s*SUPER)?\b/,
+    /\bRTX\s*30(70|80)(\s*TI)?\b/,
+    /\bRX\s*78(00|50)\b/,
+    /\bRX\s*77(00|50)\b/,
+    /\bARC\s*B580\b/,
+  ];
+
+  if (
+    strongPatterns.some(
+      (pattern) =>
+        pattern.test(
+          name
+        )
+    )
+  ) {
+    return "strong";
+  }
+
+  return "standard";
+}
+
+
 function scoreSystem(
   game,
   hardware
@@ -467,6 +525,11 @@ function scoreSystem(
   const vramGb =
     gb(
       gpu?.dedicatedMemoryBytes
+    );
+
+  const gpuClass =
+    gpuPerformanceClass(
+      gpu
     );
 
   let score = 0;
@@ -494,6 +557,24 @@ function scoreSystem(
 
     positives.push(
       "Modern graphics-feature hardware class detected."
+    );
+  }
+
+  if (
+    gpuClass === "high-end"
+  ) {
+    score += 3;
+
+    positives.push(
+      "High-end GPU class detected, providing substantial graphics headroom."
+    );
+  } else if (
+    gpuClass === "strong"
+  ) {
+    score += 2;
+
+    positives.push(
+      "Strong modern GPU class detected, providing additional graphics headroom."
     );
   }
 
@@ -613,11 +694,19 @@ function scoreSystem(
       positives.push(
         "4K support is listed and detected VRAM is favorable for high-resolution play."
       );
-    } else {
-      cautions.push(
-        "4K support is listed, but GameAtlas does not have enough evidence to call 4K performance strong."
+    } else if (
+      gpuClass === "high-end"
+      || gpuClass === "strong"
+    ) {
+      score += 1;
+
+      positives.push(
+        "4K support is listed and the detected GPU class provides strong high-resolution headroom."
       );
     }
+    // Missing VRAM or benchmark evidence is intentionally neutral here.
+    // GameAtlas estimates hardware capability fit; it does not predict a
+    // specific 4K frame rate without benchmark evidence.
   }
 
   let tier =

@@ -26,7 +26,11 @@ param(
 
     [switch]$SkipBuild,
 
-    [switch]$SkipAudits
+    [switch]$SkipAudits,
+
+    [string]$LinuxAsset = "",
+
+    [string]$LinuxSig = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -437,7 +441,9 @@ function Invoke-Prepare {
         [string]$ResolvedVersion,
         [string]$OutputDirectory,
         [bool]$BuildFirst,
-        [string]$NotesPath = ""
+        [string]$NotesPath = "",
+        [string]$LinuxAsset = "",
+        [string]$LinuxSig = ""
     )
 
     if ($BuildFirst) {
@@ -542,43 +548,132 @@ function Invoke-Prepare {
         }
     }
 
-    $Latest = [ordered]@{
-        version =
-            $ResolvedVersion
+    $MergeScript =
+        Join-Path $Root "scripts\merge-updater-manifest.mjs"
 
-        notes =
-            $UpdaterNotes
+    $ValidateManifestScript =
+        Join-Path $Root "scripts\validate-updater-manifest.mjs"
 
-        pub_date =
-            [DateTime]::UtcNow.ToString(
-                "yyyy-MM-ddTHH:mm:ssZ"
-            )
-
-        platforms = [ordered]@{
-            "windows-x86_64" = [ordered]@{
-                signature =
-                    $SignatureText
-
-                url =
-                    $DownloadUrl
-            }
-        }
+    if (-not (Test-Path -LiteralPath $MergeScript)) {
+        Fail "Updater manifest merge script is missing: $MergeScript"
     }
 
-    $LatestJson =
-        $Latest |
-        ConvertTo-Json -Depth 8
+    if (-not (Test-Path -LiteralPath $ValidateManifestScript)) {
+        Fail "Updater manifest validation script is missing: $ValidateManifestScript"
+    }
+
+    $ResolvedLinuxAsset = ""
+    $ResolvedLinuxSig = ""
+
+    if ($LinuxAsset -or $LinuxSig) {
+        if (-not $LinuxAsset -or -not $LinuxSig) {
+            Fail "Linux updater requires both -LinuxAsset and -LinuxSig."
+        }
+
+        $ResolvedLinuxAsset =
+            [System.IO.Path]::GetFullPath($LinuxAsset)
+
+        $ResolvedLinuxSig =
+            [System.IO.Path]::GetFullPath($LinuxSig)
+
+        if (-not (Test-Path -LiteralPath $ResolvedLinuxAsset)) {
+            Fail "Linux AppImage not found: $ResolvedLinuxAsset"
+        }
+
+        if (-not (Test-Path -LiteralPath $ResolvedLinuxSig)) {
+            Fail "Linux AppImage signature not found: $ResolvedLinuxSig"
+        }
+
+        $LinuxImageName =
+            "GameAtlas_${ResolvedVersion}_x86_64.AppImage"
+
+        $StagedLinuxImage =
+            Join-Path $OutputDirectory $LinuxImageName
+
+        $StagedLinuxSig =
+            "$StagedLinuxImage.sig"
+
+        Copy-Item `
+            -LiteralPath $ResolvedLinuxAsset `
+            -Destination $StagedLinuxImage `
+            -Force
+
+        Copy-Item `
+            -LiteralPath $ResolvedLinuxSig `
+            -Destination $StagedLinuxSig `
+            -Force
+
+        $ResolvedLinuxAsset = $StagedLinuxImage
+        $ResolvedLinuxSig = $StagedLinuxSig
+    }
 
     $LatestPath =
         Join-Path $OutputDirectory "latest.json"
 
-    Write-Utf8NoBom `
-        -Path $LatestPath `
-        -Content $LatestJson
+    $MergeArguments = @(
+        $MergeScript,
+        "--version",
+        $ResolvedVersion,
+        "--repo",
+        $Repository,
+        "--windows-asset",
+        $ReleaseInstaller,
+        "--windows-sig",
+        $ReleaseSig,
+        "--out",
+        $LatestPath,
+        "--require-windows"
+    )
+
+    if ($NotesPath) {
+        $MergeArguments += @(
+            "--notes-file",
+            $ResolvedNotesPath
+        )
+    }
+
+    if ($ResolvedLinuxAsset) {
+        $MergeArguments += @(
+            "--linux-asset",
+            $ResolvedLinuxAsset,
+            "--linux-sig",
+            $ResolvedLinuxSig,
+            "--require-linux"
+        )
+    }
+
+    Invoke-Checked `
+        -FilePath "node" `
+        -Arguments $MergeArguments `
+        -WorkingDirectory $Root
+
+    $ValidateArguments = @(
+        $ValidateManifestScript,
+        "--manifest",
+        $LatestPath,
+        "--version",
+        $ResolvedVersion,
+        "--require-windows"
+    )
+
+    if ($ResolvedLinuxAsset) {
+        $ValidateArguments += "--require-linux"
+    }
+
+    Invoke-Checked `
+        -FilePath "node" `
+        -Arguments $ValidateArguments `
+        -WorkingDirectory $Root
 
     Write-Pass "Prepared release assets:"
     Write-Host "  $ReleaseInstallerName"
     Write-Host "  $ReleaseSigName"
+
+    if ($ResolvedLinuxAsset) {
+        Write-Host "  $(Split-Path -Leaf $ResolvedLinuxAsset)"
+        Write-Host "  $(Split-Path -Leaf $ResolvedLinuxSig)"
+    }
+
     Write-Host "  latest.json"
     Write-Host ""
     Write-Host "Release directory:"
@@ -853,6 +948,8 @@ Useful switches:
   -Draft         Publish GitHub release as a draft.
   -Prerelease    Mark the GitHub release as a prerelease.
   -ReleaseDir    Override the default release\v<version> output folder.
+  -LinuxAsset    Signed Linux AppImage to include in the combined updater manifest.
+  -LinuxSig      AppImage .sig file. Use together with -LinuxAsset.
 
 Permanent scripts expected after consolidation:
   release.ps1
@@ -898,7 +995,9 @@ switch ($Action) {
             -ResolvedVersion $ResolvedVersion `
             -OutputDirectory $OutputDirectory `
             -BuildFirst (-not $SkipBuild) `
-            -NotesPath $ReleaseNotes
+            -NotesPath $ReleaseNotes `
+            -LinuxAsset $LinuxAsset `
+            -LinuxSig $LinuxSig
     }
 
     "validate" {
@@ -929,7 +1028,9 @@ switch ($Action) {
             -ResolvedVersion $ResolvedVersion `
             -OutputDirectory $OutputDirectory `
             -BuildFirst (-not $SkipBuild) `
-            -NotesPath $ReleaseNotes
+            -NotesPath $ReleaseNotes `
+            -LinuxAsset $LinuxAsset `
+            -LinuxSig $LinuxSig
 
         Invoke-Validate `
             -ResolvedVersion $ResolvedVersion `

@@ -67,8 +67,7 @@ pub fn install_reshade_addons_windows(
     {
         let _ = (installer_path, executable_path, graphics_api);
         return Err(
-            "The Windows ReShade installer command is only available on Windows."
-                .to_string(),
+            "The Windows ReShade installer command is only available on Windows.".to_string(),
         );
     }
 
@@ -104,10 +103,7 @@ pub fn install_reshade_addons_windows(
 
         let binary_directory = executable
             .parent()
-            .ok_or_else(|| {
-                "Could not determine the game executable directory."
-                    .to_string()
-            })?
+            .ok_or_else(|| "Could not determine the game executable directory.".to_string())?
             .to_path_buf();
 
         if !binary_directory.is_dir() {
@@ -133,20 +129,13 @@ pub fn install_reshade_addons_windows(
 
         command.arg("--headless");
 
-        let output = command
-            .output()
-            .map_err(|error| {
-                format!(
-                    "Could not start the official ReShade installer: {}",
-                    error
-                )
-            })?;
+        let output = command.output().map_err(|error| {
+            format!("Could not start the official ReShade installer: {}", error)
+        })?;
 
         if !output.status.success() {
-            let stdout =
-                String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let stderr =
-                String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
 
             let details = if !stderr.is_empty() {
                 stderr

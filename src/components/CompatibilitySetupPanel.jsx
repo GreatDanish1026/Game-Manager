@@ -142,7 +142,8 @@ function ToggleField({
           rounded-lg
           border
           border-white/[0.08]
-          bg-black/20
+          bg-[#101722]
+          [color-scheme:dark]
           px-3
           py-2
           text-sm

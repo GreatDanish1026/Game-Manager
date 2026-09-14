@@ -346,11 +346,13 @@ fn linux_cpu_name() -> Option<String> {
     let text = fs::read_to_string("/proc/cpuinfo").ok()?;
 
     for line in text.lines() {
-        if let Some(value) = line.strip_prefix("model name") {
-            let value = value.trim_start_matches(':').trim();
+        if let Some((key, raw_value)) = line.split_once(':') {
+            if key.trim() == "model name" {
+                let value = raw_value.trim();
 
-            if !value.is_empty() {
-                return Some(value.to_string());
+                if !value.is_empty() {
+                    return Some(value.to_string());
+                }
             }
         }
     }

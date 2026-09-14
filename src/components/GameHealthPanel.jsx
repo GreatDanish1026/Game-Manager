@@ -475,12 +475,12 @@ export default function GameHealthPanel({
         list.push(
           {
             label:
-              "Primary executable detected",
+              "Primary game binary detected",
 
             detail:
               local?.executable
                 ?.fileName
-                ?? "No likely primary executable identified.",
+                ?? "No likely primary game binary or launcher identified.",
 
             state:
               local?.executable
@@ -500,6 +500,26 @@ export default function GameHealthPanel({
                       game.installPath
                     )
                 : null,
+          }
+        );
+
+        list.push(
+          {
+            label:
+              "Runtime path identified",
+
+            detail:
+              local?.technicalDetails
+                ?.runtime
+                ?? "GameAtlas could not classify the selected game binary runtime.",
+
+            state:
+              local?.technicalDetails
+                ?.runtime
+                ? "pass"
+                : local
+                  ? "neutral"
+                  : "neutral",
           }
         );
 
@@ -681,10 +701,30 @@ export default function GameHealthPanel({
                   .filter(
                     Boolean
                   )
+                  .concat(
+                    local.technicalDetails
+                      ?.graphicsApis
+                      ?? []
+                  )
+                  .concat(
+                    local.technicalDetails
+                      ?.translationLayers
+                      ?? []
+                  )
+                  .filter(
+                    (
+                      value,
+                      index,
+                      values
+                    ) =>
+                      values.indexOf(
+                        value
+                      ) === index
+                  )
                   .join(
                     ", "
                   )
-                  || "No recognized upscaling DLLs detected."
+                  || "No recognized local graphics technologies were detected."
                 : "Local installation has not been inspected.",
 
             state:

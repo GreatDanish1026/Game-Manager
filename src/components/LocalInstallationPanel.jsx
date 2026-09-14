@@ -8,6 +8,7 @@ import {
   Loader2,
   MonitorUp,
   Puzzle,
+  TerminalSquare,
   RefreshCcw,
   ShieldCheck,
   Sparkles,
@@ -178,7 +179,10 @@ function TechnologyRow({
                   text-cyan-200/70
                 "
               >
-                v{version}
+                {String(version).startsWith("v")
+                  ? version
+                  : `v${version}`
+                }
               </span>
             ) : null}
           </div>
@@ -619,8 +623,8 @@ export default function LocalInstallationPanel({
             icon={
               Cpu
             }
-            title="Primary Executable"
-            description="GameAtlas scores local executables to identify the most likely primary game binary."
+            title="Primary Game Binary"
+            description="GameAtlas scores local binaries and launchers to identify the most likely primary game entry point."
           >
             {data.executable
               ?.found ? (
@@ -707,6 +711,19 @@ export default function LocalInstallationPanel({
                           )}
                         </span>
                       </div>
+
+                      <div>
+                        Format:{" "}
+                        <span
+                          className="
+                            text-white/55
+                          "
+                        >
+                          {data.executable.binaryFormat
+                            ?? "Unknown"
+                          }
+                        </span>
+                      </div>
                     </div>
 
                     <div
@@ -766,9 +783,82 @@ export default function LocalInstallationPanel({
                   text-white/30
                 "
               >
-                A likely primary executable was not identified.
+                A likely primary game binary or launcher was not identified.
               </div>
             )}
+          </Group>
+
+
+          <Group
+            icon={
+              TerminalSquare
+            }
+            title="Runtime & Translation"
+            description="GameAtlas classifies the selected executable and reports local Proton/Wine translation-layer evidence without assuming a specific FPS or compatibility outcome."
+          >
+            <TechnologyRow
+              label="Detected runtime"
+              active={
+                Boolean(
+                  data.technicalDetails
+                    ?.runtime
+                )
+              }
+              detail={
+                data.technicalDetails
+                  ?.runtime
+                  ?? "Runtime could not be classified from the selected executable."
+              }
+              onOpen={
+                handleOpen
+              }
+            />
+
+            <TechnologyRow
+              label="DXVK"
+              active={
+                data.technicalDetails
+                  ?.translationLayers
+                  ?.includes(
+                    "DXVK"
+                  )
+              }
+              detail={
+                data.technicalDetails
+                  ?.translationLayers
+                  ?.includes(
+                    "DXVK"
+                  )
+                  ? "DXVK-related local files were detected."
+                  : "No local DXVK-specific files were detected in the installation tree."
+              }
+              onOpen={
+                handleOpen
+              }
+            />
+
+            <TechnologyRow
+              label="VKD3D-Proton / VKD3D"
+              active={
+                data.technicalDetails
+                  ?.translationLayers
+                  ?.includes(
+                    "VKD3D-Proton / VKD3D"
+                  )
+              }
+              detail={
+                data.technicalDetails
+                  ?.translationLayers
+                  ?.includes(
+                    "VKD3D-Proton / VKD3D"
+                  )
+                  ? "VKD3D-related local files were detected."
+                  : "No local VKD3D-specific files were detected in the installation tree."
+              }
+              onOpen={
+                handleOpen
+              }
+            />
           </Group>
 
 
@@ -777,7 +867,7 @@ export default function LocalInstallationPanel({
               MonitorUp
             }
             title="Graphics Technologies"
-            description="Detected from technology-specific DLLs and files in the installed game."
+            description="Detected from technology-specific libraries and files in the installed game on Windows or Linux."
           >
             <TechnologyRow
               label="NVIDIA DLSS Super Resolution"
@@ -878,7 +968,7 @@ export default function LocalInstallationPanel({
               Sparkles
             }
             title="ReShade"
-            description="A ReShade installation is reported only when ReShade.ini is found; generic proxy DLLs alone are not treated as proof."
+            description="A ReShade installation is reported only when ReShade.ini is found; generic proxy libraries alone are not treated as proof."
           >
             <div
               className="
