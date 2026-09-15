@@ -6,6 +6,10 @@ import {
   relaunch,
 } from "@tauri-apps/plugin-process";
 
+import {
+  invoke,
+} from "@tauri-apps/api/core";
+
 
 const SKIPPED_UPDATE_STORAGE_KEY =
   "game-manager-updater-skipped-version-v1";
@@ -89,12 +93,32 @@ export async function checkForUpdates({
     "[Updater] Checking for updates..."
   );
 
-  const update =
-    await check();
+  let versionStatus =
+    null;
 
-  if (!update) {
+  try {
+    versionStatus =
+      await invoke(
+        "get_updater_version_status"
+      );
+  } catch (metadataError) {
+    // Keep the signed Tauri updater as a fallback if the metadata preflight
+    // cannot run. This preserves update checks during transient service or
+    // compatibility failures while avoiding false "latest" claims below.
+    console.warn(
+      "[Updater] Version metadata preflight failed:",
+      metadataError
+    );
+  }
+
+  if (
+    versionStatus
+    && versionStatus.relation
+      !== "update_available"
+  ) {
     console.log(
-      "[Updater] Application is current"
+      "[Updater] No newer published release",
+      versionStatus
     );
 
     return {
@@ -109,6 +133,66 @@ export async function checkForUpdates({
 
       skippedVersion:
         getSkippedUpdateVersion(),
+
+      ...versionStatus,
+    };
+  }
+
+  if (
+    versionStatus
+    && !versionStatus
+      .platformAvailable
+  ) {
+    throw new Error(
+      `GameAtlas ${versionStatus.latestVersion} is published, but no signed update is available for ${versionStatus.target}.`
+    );
+  }
+
+  const update =
+    await check();
+
+  if (!update) {
+    console.log(
+      "[Updater] Application is current"
+    );
+
+    if (
+      versionStatus
+      ?.relation
+      === "update_available"
+    ) {
+      throw new Error(
+        `GameAtlas ${versionStatus.latestVersion} is published, but the signed updater could not load it for ${versionStatus.target}.`
+      );
+    }
+
+    return {
+      available:
+        false,
+
+      update:
+        null,
+
+      skipped:
+        false,
+
+      skippedVersion:
+        getSkippedUpdateVersion(),
+
+      relation:
+        versionStatus
+          ?.relation
+        ?? "unknown",
+
+      currentVersion:
+        versionStatus
+          ?.currentVersion
+        ?? null,
+
+      latestVersion:
+        versionStatus
+          ?.latestVersion
+        ?? null,
     };
   }
 
@@ -166,6 +250,21 @@ export async function checkForUpdates({
     skipped,
 
     skippedVersion,
+
+    relation:
+      versionStatus
+        ?.relation
+      ?? "update_available",
+
+    currentVersion:
+      versionStatus
+        ?.currentVersion
+      ?? null,
+
+    latestVersion:
+      versionStatus
+        ?.latestVersion
+      ?? update.version,
   };
 }
 

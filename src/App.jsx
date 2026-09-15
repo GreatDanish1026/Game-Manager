@@ -3441,7 +3441,13 @@ export default function App() {
                 : `GameAtlas ${update.version} is available.`
               : result?.skipped
                 ? `GameAtlas ${result.skippedVersion} is available but is currently skipped.`
-                : "You are running the latest available version.",
+                : result?.relation
+                    === "ahead"
+                  ? `This GameAtlas ${result.currentVersion} build is newer than the latest published release (${result.latestVersion}).`
+                  : result?.relation
+                      === "current"
+                    ? `You are running the latest published version (GameAtlas ${result.currentVersion}).`
+                    : "No newer signed GameAtlas update was found.",
         });
       }
     } catch (error) {

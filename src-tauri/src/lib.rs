@@ -31,6 +31,7 @@ mod steam_launch_options;
 mod steam_launch_store;
 mod steam_rating;
 mod system_hardware;
+mod updater_metadata;
 mod vortex;
 mod windows_performance_diagnostics;
 mod xbox_games;
@@ -120,6 +121,7 @@ pub fn run() {
             heroic_games::get_heroic_installed_games,
             lutris_games::get_lutris_installed_games,
             system_hardware::get_system_hardware,
+            updater_metadata::get_updater_version_status,
             pcgw_issues::get_pcgw_known_issues,
             diagnostics::export_diagnostics_text,
             diagnostics::create_diagnostics_support_bundle
