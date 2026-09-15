@@ -1,1048 +1,331 @@
+<#
+.SYNOPSIS
+Builds a signed GameAtlas Windows installer and updater manifest.
+
+.EXAMPLE
+.\scripts\release.ps1
+
+.EXAMPLE
+.\scripts\release.ps1 -SigningKey C:\secure\gameatlas.key -ReleaseNotes .\RELEASE_NOTES.md
+
+.DESCRIPTION
+Prompts securely for the updater signing-key password, builds the NSIS
+installer and .sig, and writes a BOM-free latest.json to release\v<version>.
+Run Get-Help .\scripts\release.ps1 -Full for all parameters.
+#>
+[CmdletBinding()]
 param(
-    [Parameter(Position = 0)]
-    [ValidateSet(
-        "preflight",
-        "prepare",
-        "validate",
-        "publish",
-        "all",
-        "help"
-    )]
-    [string]$Action = "help",
-
+    [string]$SigningKey = "",
     [string]$Version = "",
-
-    [string]$ProjectRoot = ".",
-
-    [string]$ReleaseDir = "",
-
-    [string]$Repository = "GreatDanish1026/Game-Manager",
-
     [string]$ReleaseNotes = "",
-
-    [switch]$Draft,
-
-    [switch]$Prerelease,
-
-    [switch]$SkipBuild,
-
-    [switch]$SkipAudits,
-
-    [string]$LinuxAsset = "",
-
-    [string]$LinuxSig = ""
+    [string]$ProjectRoot = "",
+    [string]$ReleaseDir = "",
+    [string]$Repository = "GreatDanish1026/Game-Manager",
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-
-# ============================================================
-# Helpers
-# ============================================================
+function Fail {
+    param([string]$Message)
+    throw $Message
+}
 
 function Write-Step {
-    param(
-        [string]$Message
-    )
-
+    param([string]$Message)
     Write-Host ""
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
-
 function Write-Pass {
-    param(
-        [string]$Message
-    )
-
+    param([string]$Message)
     Write-Host "[PASS] $Message" -ForegroundColor Green
 }
-
-
-function Write-WarnMessage {
-    param(
-        [string]$Message
-    )
-
-    Write-Host "[WARN] $Message" -ForegroundColor Yellow
-}
-
-
-function Fail {
-    param(
-        [string]$Message
-    )
-
-    throw $Message
-}
-
 
 function Invoke-Checked {
     param(
         [string]$FilePath,
-        [string[]]$Arguments = @(),
-        [string]$WorkingDirectory = ""
+        [string[]]$Arguments,
+        [string]$WorkingDirectory
     )
 
-    $OldLocation = Get-Location
-
+    Push-Location -LiteralPath $WorkingDirectory
     try {
-        if ($WorkingDirectory) {
-            Set-Location -LiteralPath $WorkingDirectory
-        }
-
         & $FilePath @Arguments
-
         if ($LASTEXITCODE -ne 0) {
             Fail "$FilePath exited with code $LASTEXITCODE."
         }
     }
     finally {
-        Set-Location $OldLocation
+        Pop-Location
     }
 }
-
-
-function Get-JsonFile {
-    param(
-        [string]$Path
-    )
-
-    if (-not (Test-Path -LiteralPath $Path)) {
-        Fail "Required JSON file not found: $Path"
-    }
-
-    $Raw =
-        [System.IO.File]::ReadAllText(
-            $Path
-        )
-
-    if ($Raw.Length -gt 0 -and $Raw[0] -eq [char]0xFEFF) {
-        $Raw =
-            $Raw.Substring(1)
-    }
-
-    try {
-        return $Raw | ConvertFrom-Json
-    }
-    catch {
-        Fail "Invalid JSON in $Path`n$($_.Exception.Message)"
-    }
-}
-
-
-function Write-Utf8NoBom {
-    param(
-        [string]$Path,
-        [string]$Content
-    )
-
-    $Encoding =
-        New-Object System.Text.UTF8Encoding($false)
-
-    [System.IO.File]::WriteAllText(
-        $Path,
-        $Content,
-        $Encoding
-    )
-}
-
 
 function Normalize-Version {
-    param(
-        [string]$Value
-    )
+    param([string]$Value)
 
-    $Clean =
-        $Value.Trim()
-
-    if ($Clean.StartsWith("v")) {
-        $Clean =
-            $Clean.Substring(1)
+    $Normalized = $Value.Trim() -replace '^v', ''
+    if ($Normalized -notmatch '^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$') {
+        Fail "Invalid semantic version: $Value"
     }
 
-    if (
-        $Clean -notmatch
-        '^\d+\.\d+\.\d+([\-+][0-9A-Za-z\.-]+)?$'
-    ) {
-        Fail "Version must look like 1.3.0 (or v1.3.0). Received: $Value"
-    }
-
-    return $Clean
+    return $Normalized
 }
 
-
-function Resolve-Version {
+function Read-Notes {
     param(
-        [string]$RequestedVersion,
-        [string]$Root
-    )
-
-    if ($RequestedVersion) {
-        return Normalize-Version $RequestedVersion
-    }
-
-    $TauriConfig =
-        Join-Path $Root "src-tauri\tauri.conf.json"
-
-    $Config =
-        Get-JsonFile $TauriConfig
-
-    if (-not $Config.version) {
-        Fail "No version found in src-tauri\tauri.conf.json. Pass -Version explicitly."
-    }
-
-    return Normalize-Version ([string]$Config.version)
-}
-
-
-function Get-ReleaseDirectory {
-    param(
-        [string]$Root,
-        [string]$RequestedDirectory,
+        [string]$Path,
         [string]$ResolvedVersion
     )
 
-    if ($RequestedDirectory) {
-        return [System.IO.Path]::GetFullPath(
-            $RequestedDirectory
-        )
+    if (-not $Path) {
+        return "GameAtlas v$ResolvedVersion"
     }
 
-    return Join-Path $Root "release\v$ResolvedVersion"
+    $ResolvedPath = Resolve-Path -LiteralPath $Path -ErrorAction Stop
+    $Notes = [System.IO.File]::ReadAllText($ResolvedPath.Path).Trim()
+    if (-not $Notes) {
+        Fail "Release notes file is empty: $($ResolvedPath.Path)"
+    }
+
+    return $Notes
 }
 
-
-function Get-InstallerCandidates {
+function Write-JsonWithoutBom {
     param(
-        [string]$Root
+        [string]$Path,
+        [object]$Value
     )
 
-    $Nsis =
-        Join-Path $Root "src-tauri\target\release\bundle\nsis"
-
-    if (-not (Test-Path -LiteralPath $Nsis)) {
-        return @()
-    }
-
-    return @(
-        Get-ChildItem -LiteralPath $Nsis -File |
-            Where-Object {
-                $_.Extension -ieq ".exe"
-            } |
-            Sort-Object LastWriteTime -Descending
-    )
+    $Json = $Value | ConvertTo-Json -Depth 12
+    $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($Path, "$Json`n", $Utf8NoBom)
 }
 
-
-function Get-SignatureForInstaller {
-    param(
-        [System.IO.FileInfo]$Installer
-    )
-
-    $Direct =
-        "$($Installer.FullName).sig"
-
-    if (Test-Path -LiteralPath $Direct) {
-        return Get-Item -LiteralPath $Direct
-    }
-
-    $Sibling =
-        Join-Path $Installer.DirectoryName (
-            "$($Installer.Name).sig"
-        )
-
-    if (Test-Path -LiteralPath $Sibling) {
-        return Get-Item -LiteralPath $Sibling
-    }
-
-    return $null
+if (-not $ProjectRoot) {
+    $ProjectRoot = Join-Path $PSScriptRoot ".."
 }
 
+$Root = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $ProjectRoot).Path)
+$TauriConfigPath = Join-Path $Root "src-tauri\tauri.conf.json"
+$PackagePath = Join-Path $Root "package.json"
+$CargoPath = Join-Path $Root "src-tauri\Cargo.toml"
 
-function Test-GitClean {
-    param(
-        [string]$Root
-    )
-
-    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        Write-WarnMessage "git was not found; skipping working-tree check."
-        return
-    }
-
-    $Status =
-        & git -C $Root status --porcelain
-
-    if ($LASTEXITCODE -ne 0) {
-        Fail "git status failed."
-    }
-
-    if ($Status) {
-        Write-WarnMessage "Git working tree has uncommitted changes."
-        $Status | ForEach-Object {
-            Write-Host "  $_"
-        }
-    }
-    else {
-        Write-Pass "Git working tree is clean."
+foreach ($RequiredPath in @($TauriConfigPath, $PackagePath, $CargoPath)) {
+    if (-not (Test-Path -LiteralPath $RequiredPath -PathType Leaf)) {
+        Fail "Required project file not found: $RequiredPath"
     }
 }
 
-
-function Invoke-OptionalAudit {
-    param(
-        [string]$ScriptPath,
-        [string]$Label,
-        [string]$Root
-    )
-
-    if (-not (Test-Path -LiteralPath $ScriptPath)) {
-        Write-WarnMessage "$Label audit script not present; skipping."
-        return
-    }
-
-    Write-Step $Label
-
-    & powershell `
-        -NoProfile `
-        -ExecutionPolicy Bypass `
-        -File $ScriptPath `
-        -ProjectRoot $Root
-
-    if ($LASTEXITCODE -ne 0) {
-        Fail "$Label audit failed."
-    }
-
-    Write-Pass "$Label audit passed."
+$TauriConfig = Get-Content -LiteralPath $TauriConfigPath -Raw | ConvertFrom-Json
+$Package = Get-Content -LiteralPath $PackagePath -Raw | ConvertFrom-Json
+$ResolvedVersion = if ($Version) {
+    Normalize-Version $Version
+}
+else {
+    Normalize-Version ([string]$TauriConfig.version)
 }
 
+if ((Normalize-Version ([string]$TauriConfig.version)) -ne $ResolvedVersion) {
+    Fail "tauri.conf.json version does not match $ResolvedVersion."
+}
 
-# ============================================================
-# Preflight
-# ============================================================
+if ((Normalize-Version ([string]$Package.version)) -ne $ResolvedVersion) {
+    Fail "package.json version does not match $ResolvedVersion."
+}
 
-function Invoke-Preflight {
-    param(
-        [string]$Root,
-        [string]$ResolvedVersion,
-        [bool]$RunAudits
-    )
+$CargoText = [System.IO.File]::ReadAllText($CargoPath)
+if ($CargoText -notmatch '(?m)^version\s*=\s*"([^\"]+)"') {
+    Fail "Could not read the package version from Cargo.toml."
+}
 
-    Write-Step "Release preflight for GameAtlas v$ResolvedVersion"
+if ((Normalize-Version $Matches[1]) -ne $ResolvedVersion) {
+    Fail "Cargo.toml version does not match $ResolvedVersion."
+}
 
-    $RequiredPaths = @(
-        "package.json",
-        "src",
-        "src-tauri",
-        "src-tauri\tauri.conf.json",
-        "src-tauri\Cargo.toml"
-    )
+$OutputDirectory = if ($ReleaseDir) {
+    [System.IO.Path]::GetFullPath($ReleaseDir)
+}
+else {
+    Join-Path $Root "release\v$ResolvedVersion"
+}
 
-    foreach ($Relative in $RequiredPaths) {
-        $Path =
-            Join-Path $Root $Relative
+$Notes = Read-Notes -Path $ReleaseNotes -ResolvedVersion $ResolvedVersion
 
-        if (-not (Test-Path -LiteralPath $Path)) {
-            Fail "Required project path missing: $Relative"
-        }
-    }
+Write-Step "GameAtlas v$ResolvedVersion Windows release"
 
-    Write-Pass "Required project files are present."
-
+if (-not $SkipBuild) {
     foreach ($Command in @("node", "npm", "cargo")) {
         if (-not (Get-Command $Command -ErrorAction SilentlyContinue)) {
-            Fail "Required command is not available: $Command"
+            Fail "Required command is not installed or not on PATH: $Command"
         }
     }
 
-    Write-Pass "Node, npm, and Cargo are available."
-
-    $TauriConfig =
-        Get-JsonFile (
-            Join-Path $Root "src-tauri\tauri.conf.json"
-        )
-
-    $ConfigVersion =
-        Normalize-Version ([string]$TauriConfig.version)
-
-    if ($ConfigVersion -ne $ResolvedVersion) {
-        Fail "tauri.conf.json version is $ConfigVersion but requested release is $ResolvedVersion."
+    $KeyValue = $SigningKey
+    if (-not $KeyValue) {
+        $KeyValue = $env:TAURI_SIGNING_PRIVATE_KEY
+    }
+    if (-not $KeyValue) {
+        $KeyValue = $env:TAURI_SIGNING_PRIVATE_KEY_PATH
+    }
+    if (-not $KeyValue) {
+        $KeyValue = Read-Host "Path to your Tauri updater private key"
+    }
+    if (-not $KeyValue) {
+        Fail "A Tauri updater private key is required."
     }
 
-    Write-Pass "Tauri version matches v$ResolvedVersion."
-
-    if (
-        $TauriConfig.identifier -ne
-        "com.greatdanish.gamemanager"
-    ) {
-        Fail "Tauri identifier changed. Expected com.greatdanish.gamemanager for upgrade continuity."
+    if (Test-Path -LiteralPath $KeyValue -PathType Leaf) {
+        $KeyValue = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $KeyValue).Path)
     }
 
-    Write-Pass "Tauri identifier continuity preserved."
+    $SecurePassword = Read-Host `
+        "Signing-key password (press Enter only if the key has no password)" `
+        -AsSecureString
+    $PasswordPointer = [IntPtr]::Zero
+    $PlainPassword = $null
+    $PreviousKey = $env:TAURI_SIGNING_PRIVATE_KEY
+    $PreviousKeyPath = $env:TAURI_SIGNING_PRIVATE_KEY_PATH
+    $PreviousPassword = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 
-    $TauriConfigPath =
-        Join-Path $Root "src-tauri\tauri.conf.json"
+    try {
+        $PasswordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePassword)
+        $PlainPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($PasswordPointer)
 
-    $TauriText =
-        [System.IO.File]::ReadAllText(
-            $TauriConfigPath
-        )
+        $env:TAURI_SIGNING_PRIVATE_KEY = $KeyValue
+        Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY_PATH -ErrorAction SilentlyContinue
+        $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $PlainPassword
 
-    if (
-        $TauriText -notmatch
-        'GreatDanish1026/Game-Manager/releases/latest/download/latest\.json'
-    ) {
-        Write-WarnMessage "Expected GitHub latest.json updater endpoint was not found verbatim in tauri.conf.json."
-    }
-    else {
-        Write-Pass "Updater endpoint looks correct."
-    }
+        Write-Step "Install locked dependencies"
+        Invoke-Checked -FilePath "npm" -Arguments @("ci") -WorkingDirectory $Root
 
-    Test-GitClean $Root
-
-    if ($RunAudits) {
-        Invoke-OptionalAudit `
-            -ScriptPath (Join-Path $Root "scripts\logging-audit.ps1") `
-            -Label "Logging audit" `
-            -Root $Root
-
-        Invoke-OptionalAudit `
-            -ScriptPath (Join-Path $Root "scripts\ux-branding-audit.ps1") `
-            -Label "UX / branding audit" `
-            -Root $Root
-    }
-
-    Write-Step "Frontend build"
-    Invoke-Checked `
-        -FilePath "npm" `
-        -Arguments @("run", "build") `
-        -WorkingDirectory $Root
-    Write-Pass "Frontend build passed."
-
-    Write-Step "Rust cargo check"
-    Invoke-Checked `
-        -FilePath "cargo" `
-        -Arguments @("check") `
-        -WorkingDirectory (Join-Path $Root "src-tauri")
-    Write-Pass "cargo check passed."
-
-    Write-Pass "Preflight completed."
-}
-
-
-# ============================================================
-# Prepare release assets
-# ============================================================
-
-function Invoke-Prepare {
-    param(
-        [string]$Root,
-        [string]$ResolvedVersion,
-        [string]$OutputDirectory,
-        [bool]$BuildFirst,
-        [string]$NotesPath = "",
-        [string]$LinuxAsset = "",
-        [string]$LinuxSig = ""
-    )
-
-    if ($BuildFirst) {
-        Write-Step "Signed Tauri release build"
-
-        if (
-            -not $env:TAURI_SIGNING_PRIVATE_KEY
-        ) {
-            Write-WarnMessage "TAURI_SIGNING_PRIVATE_KEY is not set in this shell."
-            Write-WarnMessage "A signed updater build requires your existing private key environment variable."
-            Fail "Release build stopped before npm run tauri:build."
-        }
-
+        Write-Step "Build and sign NSIS installer"
         Invoke-Checked `
             -FilePath "npm" `
-            -Arguments @("run", "tauri:build") `
+            -Arguments @("run", "tauri:build", "--", "--bundles", "nsis") `
             -WorkingDirectory $Root
     }
-
-    $Installers =
-        Get-InstallerCandidates $Root
-
-    if ($Installers.Count -eq 0) {
-        Fail "No NSIS installer found under src-tauri\target\release\bundle\nsis."
-    }
-
-    $Installer =
-        $Installers[0]
-
-    $Signature =
-        Get-SignatureForInstaller $Installer
-
-    if (-not $Signature) {
-        Fail "Updater signature not found for installer: $($Installer.Name)"
-    }
-
-    New-Item `
-        -ItemType Directory `
-        -Force `
-        -Path $OutputDirectory |
-        Out-Null
-
-    $ReleaseInstallerName =
-        "GameAtlas_${ResolvedVersion}_x64-setup.exe"
-
-    $ReleaseSigName =
-        "$ReleaseInstallerName.sig"
-
-    $ReleaseInstaller =
-        Join-Path $OutputDirectory $ReleaseInstallerName
-
-    $ReleaseSig =
-        Join-Path $OutputDirectory $ReleaseSigName
-
-    Copy-Item `
-        -LiteralPath $Installer.FullName `
-        -Destination $ReleaseInstaller `
-        -Force
-
-    Copy-Item `
-        -LiteralPath $Signature.FullName `
-        -Destination $ReleaseSig `
-        -Force
-
-    $SignatureText =
-        [System.IO.File]::ReadAllText(
-            $ReleaseSig
-        ).Trim()
-
-    if (-not $SignatureText) {
-        Fail "Signature file is empty."
-    }
-
-    $DownloadUrl =
-        "https://github.com/$Repository/releases/download/v$ResolvedVersion/$ReleaseInstallerName"
-
-    $UpdaterNotes =
-        "GameAtlas v$ResolvedVersion"
-
-    if ($NotesPath) {
-        $ResolvedNotesPath =
-            [System.IO.Path]::GetFullPath(
-                [string](
-                    Resolve-Path `
-                        -LiteralPath $NotesPath
-                ).Path
-            )
-
-        if (-not (Test-Path -LiteralPath $ResolvedNotesPath)) {
-            Fail "Release notes file was not found: $NotesPath"
+    finally {
+        $PlainPassword = $null
+        if ($PasswordPointer -ne [IntPtr]::Zero) {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($PasswordPointer)
         }
 
-        $UpdaterNotes =
-            [System.IO.File]::ReadAllText(
-                $ResolvedNotesPath
-            ).Trim()
-
-        if (-not $UpdaterNotes) {
-            Write-WarnMessage "Release notes file is empty. latest.json will use the fallback updater note."
-            $UpdaterNotes =
-                "GameAtlas v$ResolvedVersion"
+        if ($null -eq $PreviousKey) {
+            Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
         }
-    }
-
-    $MergeScript =
-        Join-Path $Root "scripts\merge-updater-manifest.mjs"
-
-    $ValidateManifestScript =
-        Join-Path $Root "scripts\validate-updater-manifest.mjs"
-
-    if (-not (Test-Path -LiteralPath $MergeScript)) {
-        Fail "Updater manifest merge script is missing: $MergeScript"
-    }
-
-    if (-not (Test-Path -LiteralPath $ValidateManifestScript)) {
-        Fail "Updater manifest validation script is missing: $ValidateManifestScript"
-    }
-
-    $ResolvedLinuxAsset = ""
-    $ResolvedLinuxSig = ""
-
-    if ($LinuxAsset -or $LinuxSig) {
-        if (-not $LinuxAsset -or -not $LinuxSig) {
-            Fail "Linux updater requires both -LinuxAsset and -LinuxSig."
+        else {
+            $env:TAURI_SIGNING_PRIVATE_KEY = $PreviousKey
         }
 
-        $ResolvedLinuxAsset =
-            [System.IO.Path]::GetFullPath($LinuxAsset)
-
-        $ResolvedLinuxSig =
-            [System.IO.Path]::GetFullPath($LinuxSig)
-
-        if (-not (Test-Path -LiteralPath $ResolvedLinuxAsset)) {
-            Fail "Linux AppImage not found: $ResolvedLinuxAsset"
+        if ($null -eq $PreviousKeyPath) {
+            Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY_PATH -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:TAURI_SIGNING_PRIVATE_KEY_PATH = $PreviousKeyPath
         }
 
-        if (-not (Test-Path -LiteralPath $ResolvedLinuxSig)) {
-            Fail "Linux AppImage signature not found: $ResolvedLinuxSig"
+        if ($null -eq $PreviousPassword) {
+            Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
         }
-
-        $LinuxImageName =
-            "GameAtlas_${ResolvedVersion}_x86_64.AppImage"
-
-        $StagedLinuxImage =
-            Join-Path $OutputDirectory $LinuxImageName
-
-        $StagedLinuxSig =
-            "$StagedLinuxImage.sig"
-
-        Copy-Item `
-            -LiteralPath $ResolvedLinuxAsset `
-            -Destination $StagedLinuxImage `
-            -Force
-
-        Copy-Item `
-            -LiteralPath $ResolvedLinuxSig `
-            -Destination $StagedLinuxSig `
-            -Force
-
-        $ResolvedLinuxAsset = $StagedLinuxImage
-        $ResolvedLinuxSig = $StagedLinuxSig
+        else {
+            $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $PreviousPassword
+        }
     }
-
-    $LatestPath =
-        Join-Path $OutputDirectory "latest.json"
-
-    $MergeArguments = @(
-        $MergeScript,
-        "--version",
-        $ResolvedVersion,
-        "--repo",
-        $Repository,
-        "--windows-asset",
-        $ReleaseInstaller,
-        "--windows-sig",
-        $ReleaseSig,
-        "--out",
-        $LatestPath,
-        "--require-windows"
-    )
-
-    if ($NotesPath) {
-        $MergeArguments += @(
-            "--notes-file",
-            $ResolvedNotesPath
-        )
-    }
-
-    if ($ResolvedLinuxAsset) {
-        $MergeArguments += @(
-            "--linux-asset",
-            $ResolvedLinuxAsset,
-            "--linux-sig",
-            $ResolvedLinuxSig,
-            "--require-linux"
-        )
-    }
-
-    Invoke-Checked `
-        -FilePath "node" `
-        -Arguments $MergeArguments `
-        -WorkingDirectory $Root
-
-    $ValidateArguments = @(
-        $ValidateManifestScript,
-        "--manifest",
-        $LatestPath,
-        "--version",
-        $ResolvedVersion,
-        "--require-windows"
-    )
-
-    if ($ResolvedLinuxAsset) {
-        $ValidateArguments += "--require-linux"
-    }
-
-    Invoke-Checked `
-        -FilePath "node" `
-        -Arguments $ValidateArguments `
-        -WorkingDirectory $Root
-
-    Write-Pass "Prepared release assets:"
-    Write-Host "  $ReleaseInstallerName"
-    Write-Host "  $ReleaseSigName"
-
-    if ($ResolvedLinuxAsset) {
-        Write-Host "  $(Split-Path -Leaf $ResolvedLinuxAsset)"
-        Write-Host "  $(Split-Path -Leaf $ResolvedLinuxSig)"
-    }
-
-    Write-Host "  latest.json"
-    Write-Host ""
-    Write-Host "Release directory:"
-    Write-Host "  $OutputDirectory"
 }
 
+$BundleDirectory = Join-Path $Root "src-tauri\target\release\bundle\nsis"
+$InstallerName = "GameAtlas_${ResolvedVersion}_x64-setup.exe"
+$BuiltInstaller = Join-Path $BundleDirectory $InstallerName
+$BuiltSignature = "$BuiltInstaller.sig"
 
-# ============================================================
-# Validate release assets
-# ============================================================
-
-function Invoke-Validate {
-    param(
-        [string]$ResolvedVersion,
-        [string]$OutputDirectory,
-        [string]$ExpectedRepository
-    )
-
-    Write-Step "Validate release assets"
-
-    $InstallerName =
-        "GameAtlas_${ResolvedVersion}_x64-setup.exe"
-
-    $Required = @(
-        $InstallerName,
-        "$InstallerName.sig",
-        "latest.json"
-    )
-
-    foreach ($File in $Required) {
-        $Path =
-            Join-Path $OutputDirectory $File
-
-        if (-not (Test-Path -LiteralPath $Path)) {
-            Fail "Missing release asset: $File"
-        }
-
-        $Info =
-            Get-Item -LiteralPath $Path
-
-        if ($Info.Length -le 0) {
-            Fail "Release asset is empty: $File"
-        }
-
-        Write-Pass "$File exists and is non-empty."
+foreach ($Artifact in @($BuiltInstaller, $BuiltSignature)) {
+    if (-not (Test-Path -LiteralPath $Artifact -PathType Leaf)) {
+        Fail "Signed build artifact not found: $Artifact"
     }
-
-    $LatestPath =
-        Join-Path $OutputDirectory "latest.json"
-
-    $Raw =
-        [System.IO.File]::ReadAllText(
-            $LatestPath
-        )
-
-    if (
-        $Raw.Length -gt 0 -and
-        $Raw[0] -eq [char]0xFEFF
-    ) {
-        Fail "latest.json contains a UTF-8 BOM."
+    if ((Get-Item -LiteralPath $Artifact).Length -le 0) {
+        Fail "Signed build artifact is empty: $Artifact"
     }
-
-    $Latest =
-        Get-JsonFile $LatestPath
-
-    $LatestVersion =
-        Normalize-Version ([string]$Latest.version)
-
-    if ($LatestVersion -ne $ResolvedVersion) {
-        Fail "latest.json version does not match v$ResolvedVersion."
-    }
-
-    if (
-        -not ([string]$Latest.notes).Trim()
-    ) {
-        Fail "latest.json notes field is empty."
-    }
-
-    $Platform =
-        $Latest.platforms."windows-x86_64"
-
-    if (-not $Platform) {
-        Fail "latest.json is missing platforms.windows-x86_64."
-    }
-
-    if (
-        -not ([string]$Platform.signature)
-    ) {
-        Fail "latest.json signature is missing."
-    }
-
-    $ExpectedUrl =
-        "https://github.com/$ExpectedRepository/releases/download/v$ResolvedVersion/$InstallerName"
-
-    if (
-        ([string]$Platform.url) -ne
-        $ExpectedUrl
-    ) {
-        Fail "latest.json URL mismatch.`nExpected: $ExpectedUrl`nActual:   $($Platform.url)"
-    }
-
-    Write-Pass "latest.json schema, version, signature, URL, and UTF-8 encoding are valid."
-
-    $SigPath =
-        Join-Path $OutputDirectory "$InstallerName.sig"
-
-    $SigFile =
-        [System.IO.File]::ReadAllText(
-            $SigPath
-        ).Trim()
-
-    if (
-        $SigFile -ne
-        ([string]$Platform.signature).Trim()
-    ) {
-        Fail "latest.json signature does not exactly match the .sig file."
-    }
-
-    Write-Pass "latest.json signature matches the detached .sig file."
-    Write-Pass "Release asset validation completed."
 }
 
+New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
+$ReleaseInstaller = Join-Path $OutputDirectory $InstallerName
+$ReleaseSignature = "$ReleaseInstaller.sig"
+Copy-Item -LiteralPath $BuiltInstaller -Destination $ReleaseInstaller -Force
+Copy-Item -LiteralPath $BuiltSignature -Destination $ReleaseSignature -Force
 
-# ============================================================
-# Publish
-# ============================================================
+$SignatureText = [System.IO.File]::ReadAllText($ReleaseSignature).Trim()
+if (-not $SignatureText) {
+    Fail "The generated updater signature is empty."
+}
 
-function Invoke-Publish {
-    param(
-        [string]$ResolvedVersion,
-        [string]$OutputDirectory,
-        [string]$Repo,
-        [string]$NotesPath,
-        [bool]$IsDraft,
-        [bool]$IsPrerelease
-    )
+$ManifestPath = Join-Path $OutputDirectory "latest.json"
+$Platforms = [ordered]@{}
 
-    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-        Fail "GitHub CLI (gh) is required for publish."
-    }
-
-    Invoke-Validate `
-        -ResolvedVersion $ResolvedVersion `
-        -OutputDirectory $OutputDirectory `
-        -ExpectedRepository $Repo
-
-    Write-Step "Publish GitHub release v$ResolvedVersion"
-
-    $Tag =
-        "v$ResolvedVersion"
-
-    $InstallerName =
-        "GameAtlas_${ResolvedVersion}_x64-setup.exe"
-
-    $Assets = @(
-        (Join-Path $OutputDirectory $InstallerName)
-        (Join-Path $OutputDirectory "$InstallerName.sig")
-        (Join-Path $OutputDirectory "latest.json")
-    )
-
-    $Existing =
-        & gh release view $Tag `
-            --repo $Repo `
-            --json tagName `
-            2>$null
-
-    if ($LASTEXITCODE -eq 0 -and $Existing) {
-        Fail "GitHub release $Tag already exists. This script will not overwrite an existing release."
-    }
-
-    $Arguments = @(
-        "release",
-        "create",
-        $Tag
-    )
-
-    $Arguments += $Assets
-
-    $Arguments += @(
-        "--repo",
-        $Repo,
-        "--title",
-        "GameAtlas v$ResolvedVersion"
-    )
-
-    if (
-        $NotesPath -and
-        (Test-Path -LiteralPath $NotesPath)
-    ) {
-        $Arguments += @(
-            "--notes-file",
-            $NotesPath
-        )
-    }
-    else {
-        $Arguments += @(
-            "--notes",
-            "GameAtlas v$ResolvedVersion"
-        )
-    }
-
-    if ($IsDraft) {
-        $Arguments += "--draft"
-    }
-
-    if ($IsPrerelease) {
-        $Arguments += "--prerelease"
-    }
-
-    & gh @Arguments
-
-    if ($LASTEXITCODE -ne 0) {
-        Fail "GitHub release creation failed."
-    }
-
-    Write-Pass "GitHub release v$ResolvedVersion published."
-
-    Write-Step "Verify public release assets"
-
-    foreach ($Name in @(
-        $InstallerName,
-        "$InstallerName.sig",
-        "latest.json"
-    )) {
-        $Url =
-            "https://github.com/$Repo/releases/download/v$ResolvedVersion/$Name"
-
-        try {
-            $Response =
-                Invoke-WebRequest `
-                    -Uri $Url `
-                    -Method Head `
-                    -UseBasicParsing
-
-            if (
-                $Response.StatusCode -lt 200 -or
-                $Response.StatusCode -ge 400
-            ) {
-                Fail "Public asset returned HTTP $($Response.StatusCode): $Name"
+if (Test-Path -LiteralPath $ManifestPath -PathType Leaf) {
+    $ExistingText = [System.IO.File]::ReadAllText($ManifestPath).TrimStart([char]0xFEFF)
+    try {
+        $Existing = $ExistingText | ConvertFrom-Json
+        if ((Normalize-Version ([string]$Existing.version)) -eq $ResolvedVersion) {
+            foreach ($Property in $Existing.platforms.PSObject.Properties) {
+                $Platforms[$Property.Name] = $Property.Value
             }
-
-            Write-Pass "Public asset reachable: $Name"
-        }
-        catch {
-            Fail "Public release verification failed for $Name`n$($_.Exception.Message)"
         }
     }
-
-    Write-Pass "Public release verification completed."
-}
-
-
-# ============================================================
-# Main
-# ============================================================
-
-if ($Action -eq "help") {
-    Write-Host @"
-
-GameAtlas release tool
-
-Usage:
-  .\scripts\release.ps1 preflight
-  .\scripts\release.ps1 prepare  -Version 1.3.0 -ReleaseNotes .\RELEASE_NOTES.md
-  .\scripts\release.ps1 validate -Version 1.3.0
-  .\scripts\release.ps1 publish  -Version 1.3.0 -ReleaseNotes .\RELEASE_NOTES.md
-  .\scripts\release.ps1 all      -Version 1.3.0 -ReleaseNotes .\RELEASE_NOTES.md
-
-Useful switches:
-  -SkipBuild     Reuse an existing signed Tauri build during prepare/all.
-  -SkipAudits    Skip logging-audit.ps1 and ux-branding-audit.ps1.
-  -Draft         Publish GitHub release as a draft.
-  -Prerelease    Mark the GitHub release as a prerelease.
-  -ReleaseDir    Override the default release\v<version> output folder.
-  -LinuxAsset    Signed Linux AppImage to include in the combined updater manifest.
-  -LinuxSig      AppImage .sig file. Use together with -LinuxAsset.
-
-Permanent scripts expected after consolidation:
-  release.ps1
-  logging-audit.ps1
-  ux-branding-audit.ps1
-
-"@
-    exit 0
-}
-
-
-$ResolvedRoot =
-    Resolve-Path -LiteralPath $ProjectRoot
-
-$Root =
-    [System.IO.Path]::GetFullPath(
-        ([string]$ResolvedRoot.Path)
-    )
-
-$ResolvedVersion =
-    Resolve-Version `
-        -RequestedVersion $Version `
-        -Root $Root
-
-$OutputDirectory =
-    Get-ReleaseDirectory `
-        -Root $Root `
-        -RequestedDirectory $ReleaseDir `
-        -ResolvedVersion $ResolvedVersion
-
-
-switch ($Action) {
-    "preflight" {
-        Invoke-Preflight `
-            -Root $Root `
-            -ResolvedVersion $ResolvedVersion `
-            -RunAudits (-not $SkipAudits)
-    }
-
-    "prepare" {
-        Invoke-Prepare `
-            -Root $Root `
-            -ResolvedVersion $ResolvedVersion `
-            -OutputDirectory $OutputDirectory `
-            -BuildFirst (-not $SkipBuild) `
-            -NotesPath $ReleaseNotes `
-            -LinuxAsset $LinuxAsset `
-            -LinuxSig $LinuxSig
-    }
-
-    "validate" {
-        Invoke-Validate `
-            -ResolvedVersion $ResolvedVersion `
-            -OutputDirectory $OutputDirectory `
-            -ExpectedRepository $Repository
-    }
-
-    "publish" {
-        Invoke-Publish `
-            -ResolvedVersion $ResolvedVersion `
-            -OutputDirectory $OutputDirectory `
-            -Repo $Repository `
-            -NotesPath $ReleaseNotes `
-            -IsDraft $Draft `
-            -IsPrerelease $Prerelease
-    }
-
-    "all" {
-        Invoke-Preflight `
-            -Root $Root `
-            -ResolvedVersion $ResolvedVersion `
-            -RunAudits (-not $SkipAudits)
-
-        Invoke-Prepare `
-            -Root $Root `
-            -ResolvedVersion $ResolvedVersion `
-            -OutputDirectory $OutputDirectory `
-            -BuildFirst (-not $SkipBuild) `
-            -NotesPath $ReleaseNotes `
-            -LinuxAsset $LinuxAsset `
-            -LinuxSig $LinuxSig
-
-        Invoke-Validate `
-            -ResolvedVersion $ResolvedVersion `
-            -OutputDirectory $OutputDirectory `
-            -ExpectedRepository $Repository
-
-        Invoke-Publish `
-            -ResolvedVersion $ResolvedVersion `
-            -OutputDirectory $OutputDirectory `
-            -Repo $Repository `
-            -NotesPath $ReleaseNotes `
-            -IsDraft $Draft `
-            -IsPrerelease $Prerelease
+    catch {
+        Fail "Existing latest.json is invalid and cannot be merged: $($_.Exception.Message)"
     }
 }
+
+$DownloadUrl =
+    "https://github.com/$Repository/releases/download/v$ResolvedVersion/$InstallerName"
+$Platforms["windows-x86_64"] = [ordered]@{
+    signature = $SignatureText
+    url = $DownloadUrl
+}
+
+$Manifest = [ordered]@{
+    version = $ResolvedVersion
+    notes = $Notes
+    pub_date = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+    platforms = $Platforms
+}
+
+Write-JsonWithoutBom -Path $ManifestPath -Value $Manifest
+
+$ManifestBytes = [System.IO.File]::ReadAllBytes($ManifestPath)
+if (
+    $ManifestBytes.Length -ge 3 -and
+    $ManifestBytes[0] -eq 0xEF -and
+    $ManifestBytes[1] -eq 0xBB -and
+    $ManifestBytes[2] -eq 0xBF
+) {
+    Fail "latest.json contains a UTF-8 BOM."
+}
+
+$Validated = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+$ValidatedEntry = $Validated.platforms."windows-x86_64"
+if (
+    (Normalize-Version ([string]$Validated.version)) -ne $ResolvedVersion -or
+    ([string]$ValidatedEntry.signature).Trim() -ne $SignatureText -or
+    ([string]$ValidatedEntry.url) -ne $DownloadUrl
+) {
+    Fail "latest.json validation failed."
+}
+
+$ChecksumPath = Join-Path $OutputDirectory "SHA256SUMS-WINDOWS.txt"
+$Hash = (Get-FileHash -LiteralPath $ReleaseInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+[System.IO.File]::WriteAllText(
+    $ChecksumPath,
+    "$Hash  $InstallerName`n",
+    [System.Text.UTF8Encoding]::new($false)
+)
+
+Write-Pass "Signed Windows release created and validated."
+Write-Host "  $ReleaseInstaller"
+Write-Host "  $ReleaseSignature"
+Write-Host "  $ManifestPath"
+Write-Host "  $ChecksumPath"
+Write-Host ""
+Write-Host "If the Linux script has already written the same release directory, its platform entries were preserved."
