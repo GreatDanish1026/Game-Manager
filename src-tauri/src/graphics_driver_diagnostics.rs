@@ -564,8 +564,7 @@ fn build_findings(
     findings
 }
 
-#[tauri::command]
-pub fn get_graphics_driver_diagnostics() -> GraphicsDriverReport {
+fn build_graphics_driver_diagnostics() -> GraphicsDriverReport {
     #[cfg(target_os = "windows")]
     {
         let adapters = adapters();
@@ -616,4 +615,11 @@ pub fn get_graphics_driver_diagnostics() -> GraphicsDriverReport {
             summary: "Graphics Driver Diagnostics is currently available on Windows.".to_string(),
         }
     }
+}
+
+#[tauri::command]
+pub async fn get_graphics_driver_diagnostics() -> Result<GraphicsDriverReport, String> {
+    tauri::async_runtime::spawn_blocking(build_graphics_driver_diagnostics)
+        .await
+        .map_err(|error| format!("Graphics driver diagnostics worker failed: {error}"))
 }

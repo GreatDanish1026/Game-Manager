@@ -1,11 +1,11 @@
 import {
-  invoke,
-} from "@tauri-apps/api/core";
-
-import {
   displayGameVersion,
   getGameVersionState,
 } from "./gameVersions";
+
+import {
+  getSystemHardware,
+} from "./systemHardware";
 
 
 const STORAGE_KEY =
@@ -771,9 +771,7 @@ export async function getSystemCompatibilityEstimate(
   game
 ) {
   const hardware =
-    await invoke(
-      "get_system_hardware"
-    );
+    await getSystemHardware();
 
   return scoreSystem(
     game,

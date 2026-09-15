@@ -8,7 +8,6 @@ import {
   Puzzle,
   RefreshCcw,
   Star,
-  Store,
   TriangleAlert,
   Wifi,
   WifiOff,
@@ -43,6 +42,7 @@ import {
 } from "../services/installationHealth";
 
 import AboutCard from "./AboutCard";
+import CollapsibleSection from "./CollapsibleSection";
 import ExternalServiceStatusPanel from "./ExternalServiceStatusPanel";
 import LauncherStatusPanel from "./LauncherStatusPanel";
 import LibraryHealthCenter from "./LibraryHealthCenter";
@@ -496,51 +496,93 @@ export default function LibraryDashboard({
         <div
           className="
             flex
-            items-center
-            gap-3
+            flex-col
+            gap-4
+            sm:flex-row
+            sm:items-center
+            sm:justify-between
           "
         >
           <div
             className="
               flex
-              h-11
-              w-11
               items-center
-              justify-center
-              rounded-xl
-              bg-cyan-500/10
-              text-cyan-300
+              gap-3
             "
           >
-            <Gamepad2
-              className="h-6 w-6"
-            />
+            <div
+              className="
+                flex
+                h-11
+                w-11
+                items-center
+                justify-center
+                rounded-xl
+                bg-cyan-500/10
+                text-cyan-300
+              "
+            >
+              <Gamepad2
+                className="h-6 w-6"
+              />
+            </div>
+
+            <div>
+              <h1
+                className="
+                  text-2xl
+                  font-semibold
+                  text-white
+                "
+              >
+                Your Library
+              </h1>
+
+              <p
+                className="
+                  mt-1
+                  text-sm
+                  text-white/35
+                "
+              >
+                Select a game from the sidebar or review items that need attention.
+              </p>
+            </div>
           </div>
 
-          <div>
-            <h1
-              className="
-                text-2xl
-                font-semibold
-                text-white
-              "
-            >
-              Library Overview
-            </h1>
+          <div
+            className={`
+              inline-flex
+              w-fit
+              items-center
+              gap-2
+              rounded-full
+              border
+              px-3
+              py-1.5
+              text-xs
+              font-semibold
+              ${
+                networkOnline
+                  ? "border-emerald-500/15 bg-emerald-500/[0.05] text-emerald-200/65"
+                  : "border-amber-500/20 bg-amber-500/[0.07] text-amber-200/80"
+              }
+            `}
+          >
+            {networkOnline ? (
+              <Wifi className="h-3.5 w-3.5" />
+            ) : (
+              <WifiOff className="h-3.5 w-3.5" />
+            )}
 
-            <p
-              className="
-                mt-1
-                text-sm
-                text-white/35
-              "
-            >
-              Review library coverage, capabilities, and analysis freshness.
-            </p>
+            {networkOnline
+              ? "Online"
+              : "Offline Mode"}
           </div>
         </div>
 
 
+        {!networkOnline ? (
         <div
           className={`
             mt-5
@@ -551,43 +593,24 @@ export default function LibraryDashboard({
             border
             px-4
             py-3
-            ${
-              networkOnline
-                ? "border-emerald-500/10 bg-emerald-500/[0.025]"
-                : "border-amber-500/20 bg-amber-500/[0.05]"
-            }
+            border-amber-500/20
+            bg-amber-500/[0.05]
           `}
         >
-          {networkOnline ? (
-            <Wifi className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300/65" />
-          ) : (
-            <WifiOff className="mt-0.5 h-4 w-4 shrink-0 text-amber-300/80" />
-          )}
+          <WifiOff className="mt-0.5 h-4 w-4 shrink-0 text-amber-300/80" />
 
           <div>
-            <div
-              className={`
-                text-xs
-                font-semibold
-                ${
-                  networkOnline
-                    ? "text-emerald-100/60"
-                    : "text-amber-100/75"
-                }
-              `}
-            >
-              {networkOnline
-                ? "Online"
-                : "Offline Mode"}
+            <div className="text-xs font-semibold text-amber-100/75">
+              Remote features are paused
             </div>
 
             <div className="mt-0.5 text-[11px] leading-relaxed text-white/30">
-              {networkOnline
-                ? "Remote analysis and update checks are available."
-                : "Remote lookups are paused. Installed games, cached analysis, Installation Health, backups, local inspection, filters, and launcher actions remain available."}
+              Installed games, cached analysis, health checks, backups, local inspection,
+              filters, and launcher actions remain available.
             </div>
           </div>
         </div>
+        ) : null}
 
 
         <div
@@ -607,18 +630,29 @@ export default function LibraryDashboard({
             value={
               data.total
             }
-            detail={`${data.indexed} currently indexed`}
+            detail={`${storeRows.length} storefront${storeRows.length === 1 ? "" : "s"}`}
           />
 
           <StatCard
             icon={
               Activity
             }
-            label="Fully Analyzed"
+            label="Fresh Analysis"
             value={
-              data.analysis.full
+              `${data.analysis.coverage}%`
             }
-            detail={`${data.analysis.coverage}% fresh coverage`}
+            detail={`${data.analysis.full} of ${data.analysis.total} games`}
+          />
+
+          <StatCard
+            icon={
+              TriangleAlert
+            }
+            label="Needs Attention"
+            value={
+              data.health["needs-attention"]
+            }
+            detail={`${data.health.unassessed} not assessed`}
           />
 
           <StatCard
@@ -628,16 +662,6 @@ export default function LibraryDashboard({
             label="Favorites"
             value={
               data.favorites
-            }
-          />
-
-          <StatCard
-            icon={
-              Store
-            }
-            label="Stores"
-            value={
-              storeRows.length
             }
           />
         </div>
@@ -1005,9 +1029,36 @@ export default function LibraryDashboard({
         </section>
 
 
+        <CollapsibleSection
+          id="dashboard-health-scan"
+          title="Library Health Scan"
+          description="Run a local, library-wide check of install paths and executable detection."
+          icon={HeartPulse}
+          defaultOpen={false}
+          summary="Advanced local scan"
+          className="mt-6"
+        >
+          <LibraryHealthCenter
+            games={
+              games
+            }
+            onSelectGame={
+              onSelectGame
+            }
+          />
+        </CollapsibleSection>
+
+
+        <CollapsibleSection
+          id="dashboard-library-insights"
+          title="Library Insights"
+          description="Storefront distribution, graphics capabilities, and enhancement support."
+          icon={MonitorUp}
+          defaultOpen={false}
+          summary={`${storeRows.length} storefront${storeRows.length === 1 ? "" : "s"} · ${data.analyzed} analyzed`}
+        >
         <div
           className="
-            mt-6
             grid
             grid-cols-1
             gap-4
@@ -1186,11 +1237,38 @@ export default function LibraryDashboard({
           </div>
         </div>
 
+          <div
+            className="
+              mt-4
+              rounded-xl
+              border
+              border-cyan-500/10
+              bg-cyan-500/[0.025]
+              p-4
+              text-xs
+              leading-relaxed
+              text-white/30
+            "
+          >
+            Capability counts use analyzed library data. Background analysis tracks
+            PCGamingWiki, RenoDX/Luma, and Vortex independently so a failed source
+            can be shown as partial instead of making the whole game appear unanalyzed.
+          </div>
+        </CollapsibleSection>
 
-        <div
-          className="
-            mt-5
-          "
+
+        <CollapsibleSection
+          id="dashboard-system-services"
+          title="System & Services"
+          description="Remote provider availability, detected launchers, updates, and application information."
+          icon={Wifi}
+          defaultOpen={false}
+          summary={
+            networkOnline
+              ? "Services, launchers & app info"
+              : "Remote services unavailable"
+          }
+          className="mb-10"
         >
           <ExternalServiceStatusPanel
             onCheckForUpdates={
@@ -1200,66 +1278,22 @@ export default function LibraryDashboard({
               updateCheckStatus
             }
           />
-        </div>
 
+          <div className="mt-5">
+            <LauncherStatusPanel />
+          </div>
 
-        <div
-          className="
-            mt-5
-          "
-        >
-                  <div
-          className="
-            mt-6
-          "
-        >
-          <LibraryHealthCenter
-            games={
-              games
-            }
-            onSelectGame={
-              onSelectGame
-            }
-          />
-        </div>
-
-<LauncherStatusPanel />
-        </div>
-
-
-        <div
-          className="
-            mt-5
-          "
-        >
-          <AboutCard
-            onCheckForUpdates={
-              onCheckForUpdates
-            }
-            updateCheckStatus={
-              updateCheckStatus
-            }
-          />
-        </div>
-
-
-        <div
-          className="
-            mt-4
-            rounded-xl
-            border
-            border-cyan-500/10
-            bg-cyan-500/[0.025]
-            p-4
-            text-xs
-            leading-relaxed
-            text-white/30
-          "
-        >
-          Capability counts use analyzed library data. Background analysis tracks
-          PCGamingWiki, RenoDX/Luma, and Vortex independently so a failed source
-          can be shown as partial instead of making the whole game appear unanalyzed.
-        </div>
+          <div className="mt-5">
+            <AboutCard
+              onCheckForUpdates={
+                onCheckForUpdates
+              }
+              updateCheckStatus={
+                updateCheckStatus
+              }
+            />
+          </div>
+        </CollapsibleSection>
       </div>
     </main>
   );

@@ -1948,8 +1948,7 @@ fn detect_screenshots(
     }
 }
 
-#[tauri::command]
-pub fn inspect_local_installation(
+fn inspect_local_installation_blocking(
     game_name: String,
     install_path: String,
     save_path: Option<String>,
@@ -2052,4 +2051,32 @@ pub fn inspect_local_installation(
 
         scan_truncated: scan.truncated,
     })
+}
+
+#[tauri::command]
+pub async fn inspect_local_installation(
+    game_name: String,
+    install_path: String,
+    save_path: Option<String>,
+    config_path: Option<String>,
+    store: Option<String>,
+    launcher_id: Option<String>,
+) -> Result<LocalInstallationInfo, String> {
+    /*
+     * Recursive directory walking, binary signature reads, and screenshot
+     * discovery are blocking filesystem operations. Keep them away from the
+     * command/UI runtime so expanding a panel cannot temporarily freeze IPC.
+     */
+    tauri::async_runtime::spawn_blocking(move || {
+        inspect_local_installation_blocking(
+            game_name,
+            install_path,
+            save_path,
+            config_path,
+            store,
+            launcher_id,
+        )
+    })
+    .await
+    .map_err(|error| format!("Local installation worker failed: {error}"))?
 }

@@ -1,7 +1,6 @@
 import {
   Cpu,
   FolderOpen,
-  Gamepad2,
   HardDrive,
   Info,
   MonitorCog,
@@ -10,75 +9,159 @@ import {
   UserRoundCog,
 } from "lucide-react";
 
-
-
-
-const GAMEATLAS_IS_LINUX =
-  typeof navigator !== "undefined"
-  && /linux/i.test(
-    [
-      navigator.userAgent,
-      navigator.platform,
-    ]
-      .filter(Boolean)
-      .join(" ")
-  );
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 
 const SECTIONS = [
   {
-  id: "overview",
-  label: "Overview",
-  icon: Info,
+    id: "overview",
+    label: "Overview",
+    icon: Info,
+    group: "Game",
   },
   {
-  id: "compatibility-performance",
-  label: "Performance",
-  icon: MonitorCog,
+    id: "my-game",
+    label: "My Game",
+    icon: UserRoundCog,
+    group: "Game",
   },
   {
-  id: "pc-features",
-  label: "PC Features",
-  icon: Cpu,
+    id: "compatibility-performance",
+    label: "Performance",
+    icon: MonitorCog,
+    group: "Play",
   },
   {
-  id: "mods",
-  label: "Mods",
-  icon: Puzzle,
+    id: "pc-features",
+    label: "PC Features",
+    icon: Cpu,
+    group: "Play",
   },
   {
-  id: "files-installation",
-  label: "Files",
-  icon: FolderOpen,
+    id: "mods",
+    label: "Mods",
+    icon: Puzzle,
+    group: "Manage",
   },
   {
-  id: "saves-screenshots",
-  label: "Saves",
-  icon: HardDrive,
+    id: "files-installation",
+    label: "Files",
+    icon: FolderOpen,
+    group: "Manage",
   },
   {
-  id: "technical-troubleshooting",
-  label: "Technical",
-  icon: Settings2,
+    id: "saves-screenshots",
+    label: "Saves",
+    icon: HardDrive,
+    group: "Manage",
   },
   {
-  id: "my-game",
-  label: "My Game",
-  icon: UserRoundCog,
+    id: "technical-troubleshooting",
+    label: "Help & Tools",
+    icon: Settings2,
+    group: "Support",
   },
-  {
-  id: "proton-toolbox",
-  label: "Proton Toolbox",
-  icon: Settings2,
-  linuxOnly: true,
-  }
 ];
 
 
 export default function GameSectionNavigator() {
+  const [
+    activeId,
+    setActiveId,
+  ] = useState(
+    "overview"
+  );
+
+  const groups =
+    useMemo(
+      () =>
+        Array.from(
+          new Set(
+            SECTIONS.map(
+              (section) =>
+                section.group
+            )
+          )
+        ),
+      []
+    );
+
+
+  useEffect(
+    () => {
+      const elements =
+        SECTIONS
+          .map(
+            (section) =>
+              document.getElementById(
+                `game-section-${section.id}`
+              )
+          )
+          .filter(Boolean);
+
+      const observer =
+        new IntersectionObserver(
+          (entries) => {
+            const visible =
+              entries
+                .filter(
+                  (entry) =>
+                    entry.isIntersecting
+                )
+                .sort(
+                  (left, right) =>
+                    left.boundingClientRect.top
+                    - right.boundingClientRect.top
+                );
+
+            const id =
+              visible[0]
+                ?.target
+                ?.id
+                ?.replace(
+                  "game-section-",
+                  ""
+                );
+
+            if (id) {
+              setActiveId(
+                id
+              );
+            }
+          },
+          {
+            rootMargin:
+              "-15% 0px -70% 0px",
+            threshold:
+              0,
+          }
+        );
+
+      elements.forEach(
+        (element) =>
+          observer.observe(
+            element
+          )
+      );
+
+      return () =>
+        observer.disconnect();
+    },
+    []
+  );
+
+
   function jumpTo(
     id
   ) {
+    setActiveId(
+      id
+    );
+
     window.dispatchEvent(
       new CustomEvent(
         "game-manager-open-section",
@@ -115,7 +198,6 @@ export default function GameSectionNavigator() {
         z-20
         mb-5
         -mx-2
-        overflow-x-auto
         border-y
         border-white/[0.06]
         bg-[#0b0f17]/95
@@ -126,24 +208,21 @@ export default function GameSectionNavigator() {
     >
       <div
         className="
-          flex
-          min-w-max
+          hidden
+          flex-wrap
           items-center
           gap-2
+          xl:flex
         "
       >
-        {SECTIONS
-          .filter(
-            (item) =>
-              !item.linuxOnly
-              || GAMEATLAS_IS_LINUX
-          )
-          .map(
-          (
-            section
-          ) => {
+        {SECTIONS.map(
+          (section) => {
             const Icon =
               section.icon;
+
+            const active =
+              activeId ===
+              section.id;
 
             return (
               <button
@@ -151,30 +230,37 @@ export default function GameSectionNavigator() {
                   section.id
                 }
                 type="button"
+                aria-current={
+                  active
+                    ? "location"
+                    : undefined
+                }
                 onClick={
                   () =>
                     jumpTo(
                       section.id
                     )
                 }
-                className="
+                className={`
                   inline-flex
                   items-center
                   gap-1.5
                   rounded-lg
                   border
-                  border-white/[0.07]
-                  bg-white/[0.025]
                   px-3
                   py-2
                   text-xs
                   font-semibold
-                  text-white/45
                   transition
                   hover:border-cyan-400/20
                   hover:bg-cyan-400/[0.06]
                   hover:text-cyan-100/80
-                "
+                  ${
+                    active
+                      ? "border-cyan-400/25 bg-cyan-400/[0.08] text-cyan-100/90"
+                      : "border-white/[0.07] bg-white/[0.025] text-white/45"
+                  }
+                `}
               >
                 <Icon
                   className="
@@ -189,6 +275,87 @@ export default function GameSectionNavigator() {
           }
         )}
       </div>
+
+      <label
+        className="
+          flex
+          items-center
+          gap-3
+          xl:hidden
+        "
+      >
+        <span
+          className="
+            shrink-0
+            text-xs
+            font-semibold
+            text-white/40
+          "
+        >
+          Jump to
+        </span>
+
+        <select
+          value={
+            activeId
+          }
+          onChange={
+            (event) =>
+              jumpTo(
+                event.target.value
+              )
+          }
+          className="
+            min-w-0
+            flex-1
+            rounded-lg
+            border
+            border-white/[0.09]
+            bg-white/[0.04]
+            px-3
+            py-2
+            text-sm
+            font-medium
+            text-white/80
+            outline-none
+            focus:border-cyan-400/30
+          "
+        >
+          {groups.map(
+            (group) => (
+              <optgroup
+                key={
+                  group
+                }
+                label={
+                  group
+                }
+              >
+                {SECTIONS
+                  .filter(
+                    (section) =>
+                      section.group ===
+                      group
+                  )
+                  .map(
+                    (section) => (
+                      <option
+                        key={
+                          section.id
+                        }
+                        value={
+                          section.id
+                        }
+                      >
+                        {section.label}
+                      </option>
+                    )
+                  )}
+              </optgroup>
+            )
+          )}
+        </select>
+      </label>
     </nav>
   );
 }

@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 
 import {
-  useEffect,
   useState,
 } from "react";
 
@@ -73,7 +72,7 @@ export default function GraphicsDriverDiagnosticsPanel() {
     loading,
     setLoading,
   ] =
-    useState(true);
+    useState(false);
 
   const [
     error,
@@ -110,14 +109,6 @@ export default function GraphicsDriverDiagnosticsPanel() {
       );
     }
   }
-
-
-  useEffect(
-    () => {
-      refresh();
-    },
-    []
-  );
 
 
   if (
@@ -254,7 +245,9 @@ export default function GraphicsDriverDiagnosticsPanel() {
             `}
           />
 
-          Rescan
+          {report
+            ? "Rescan"
+            : "Run Scan"}
         </button>
       </div>
 

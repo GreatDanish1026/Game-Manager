@@ -1,10 +1,7 @@
 use serde::Serialize;
 
 #[cfg(target_os = "windows")]
-use std::{collections::BTreeMap, sync::OnceLock, time::Instant};
-
-#[cfg(target_os = "windows")]
-use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
+use std::{sync::OnceLock, time::Instant};
 
 #[cfg(target_os = "linux")]
 use std::{collections::BTreeSet, fs, process::Command};
@@ -328,20 +325,52 @@ fn windows_gpus() -> Vec<GpuInfo> {
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
-pub fn get_system_hardware() -> Result<SystemHardwareInfo, String> {
-    let (os_name, os_version) = windows_os_info();
+pub async fn get_system_hardware() -> Result<SystemHardwareInfo, String> {
+    static CACHE: OnceLock<SystemHardwareInfo> = OnceLock::new();
 
-    Ok(SystemHardwareInfo {
-        cpu_name: windows_cpu_name(),
+    tauri::async_runtime::spawn_blocking(|| {
+        CACHE
+            .get_or_init(|| {
+                let started = Instant::now();
 
-        ram_bytes: windows_ram_bytes(),
+                /*
+                 * CPU, memory, OS, and GPU inventory are independent and stable for
+                 * the lifetime of the app. Query them concurrently once, then share
+                 * the result across every compatibility panel and game page.
+                 */
+                let (cpu_name, ram_bytes, os_info, gpus) = std::thread::scope(|scope| {
+                    let cpu = scope.spawn(windows_cpu_name);
+                    let ram = scope.spawn(windows_ram_bytes);
+                    let os = scope.spawn(windows_os_info);
+                    let gpu = scope.spawn(windows_gpus);
 
-        os_name,
+                    (
+                        cpu.join().unwrap_or(None),
+                        ram.join().unwrap_or(None),
+                        os.join().unwrap_or((None, None)),
+                        gpu.join().unwrap_or_default(),
+                    )
+                });
 
-        os_version,
+                let result = SystemHardwareInfo {
+                    cpu_name,
+                    ram_bytes,
+                    os_name: os_info.0,
+                    os_version: os_info.1,
+                    gpus,
+                };
 
-        gpus: windows_gpus(),
+                println!(
+                    "[PERFORMANCE] System hardware inventory: {} ms",
+                    started.elapsed().as_millis()
+                );
+
+                result
+            })
+            .clone()
     })
+    .await
+    .map_err(|error| format!("System hardware worker failed: {error}"))
 }
 
 // ============================================================

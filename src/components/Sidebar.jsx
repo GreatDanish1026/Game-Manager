@@ -2333,7 +2333,8 @@ export default function Sidebar({
           <button
             type="button"
             onClick={
-              onRescan
+              () =>
+                onRescan()
             }
             disabled={
               loading
@@ -3828,7 +3829,20 @@ export default function Sidebar({
             }
           </span>
 
-          {showHiddenGames
+          {loading
+            && games.length > 0 ? (
+            <span
+              className="
+                inline-flex
+                items-center
+                gap-1.5
+                text-cyan-200/45
+              "
+            >
+              <RefreshCcw className="h-3 w-3 animate-spin" />
+              Refreshing
+            </span>
+          ) : showHiddenGames
             && hiddenGameCount > 0 ? (
             <button
               type="button"

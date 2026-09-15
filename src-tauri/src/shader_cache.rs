@@ -325,8 +325,7 @@ fn clear_directory_contents(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-pub fn get_shader_cache_report(install_path: Option<String>) -> ShaderCacheReport {
+fn build_shader_cache_report(install_path: Option<String>) -> ShaderCacheReport {
     #[cfg(target_os = "windows")]
     {
         let targets = resolve_targets(install_path.as_deref());
@@ -367,6 +366,15 @@ pub fn get_shader_cache_report(install_path: Option<String>) -> ShaderCacheRepor
             warning: "Shader Cache Management is currently available on Windows.".to_string(),
         }
     }
+}
+
+#[tauri::command]
+pub async fn get_shader_cache_report(
+    install_path: Option<String>,
+) -> Result<ShaderCacheReport, String> {
+    tauri::async_runtime::spawn_blocking(move || build_shader_cache_report(install_path))
+        .await
+        .map_err(|error| format!("Shader cache worker failed: {error}"))
 }
 
 #[tauri::command]

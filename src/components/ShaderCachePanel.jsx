@@ -9,7 +9,6 @@ import {
 } from "lucide-react";
 
 import {
-  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -95,7 +94,7 @@ export default function ShaderCachePanel({
     loading,
     setLoading,
   ] =
-    useState(true);
+    useState(false);
 
   const [
     clearing,
@@ -185,17 +184,6 @@ export default function ShaderCachePanel({
       );
     }
   }
-
-
-  useEffect(
-    () => {
-      refresh();
-    },
-    [
-      game?.id,
-      game?.installPath,
-    ]
-  );
 
 
   const selectedBytes =
@@ -481,7 +469,9 @@ export default function ShaderCachePanel({
             `}
           />
 
-          Rescan
+          {report
+            ? "Rescan"
+            : "Inspect Caches"}
         </button>
       </div>
 

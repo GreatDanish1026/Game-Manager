@@ -647,8 +647,7 @@ fn multi_gpu_check() -> PerformanceDiagnosticCheck {
     }
 }
 
-#[tauri::command]
-pub fn get_windows_performance_diagnostics(
+fn build_windows_performance_diagnostics(
     install_path: Option<String>,
 ) -> WindowsPerformanceDiagnosticReport {
     #[cfg(target_os = "windows")]
@@ -703,4 +702,15 @@ pub fn get_windows_performance_diagnostics(
             summary: "Windows performance diagnostics are available only on Windows.".to_string(),
         }
     }
+}
+
+#[tauri::command]
+pub async fn get_windows_performance_diagnostics(
+    install_path: Option<String>,
+) -> Result<WindowsPerformanceDiagnosticReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        build_windows_performance_diagnostics(install_path)
+    })
+    .await
+    .map_err(|error| format!("Windows performance diagnostics worker failed: {error}"))
 }

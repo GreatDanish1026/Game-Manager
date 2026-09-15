@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 
 import {
-  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -45,7 +44,7 @@ export default function CleanLaunchPanel({
     loading,
     setLoading,
   ] =
-    useState(true);
+    useState(false);
 
   const [
     launching,
@@ -137,16 +136,6 @@ export default function CleanLaunchPanel({
       );
     }
   }
-
-
-  useEffect(
-    () => {
-      refresh();
-    },
-    [
-      game?.id,
-    ]
-  );
 
 
   const selectedCount =
@@ -461,7 +450,9 @@ export default function CleanLaunchPanel({
             `}
           />
 
-          Rescan
+          {status
+            ? "Rescan"
+            : "Load Options"}
         </button>
       </div>
 

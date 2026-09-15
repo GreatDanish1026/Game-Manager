@@ -197,10 +197,28 @@ export function saveLibrarySnapshot(
       launcherId:
         game.launcherId
         ?? null,
+
+      installPath:
+        game.installPath
+        ?? "",
+
+      source:
+        game.source
+        ?? null,
+
+      coverImageUrl:
+        game.coverImageUrl
+        ?? game.coverArtUrl
+        ?? game.coverUrl
+        ?? game.imageUrl
+        ?? null,
     };
   }
 
   const snapshot = {
+    schemaVersion:
+      2,
+
     updatedAt:
       new Date()
         .toISOString(),
@@ -270,6 +288,7 @@ export function getLibrarySnapshot() {
   return parseStored(
     SNAPSHOT_KEY,
     {
+      schemaVersion: 0,
       totalGames: 0,
       games: {},
     }

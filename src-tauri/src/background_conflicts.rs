@@ -578,8 +578,7 @@ fn build_findings(apps: &[BackgroundAppInfo]) -> Vec<BackgroundConflictFinding> 
     findings
 }
 
-#[tauri::command]
-pub fn get_background_conflict_report() -> BackgroundConflictReport {
+fn build_background_conflict_report() -> BackgroundConflictReport {
     #[cfg(target_os = "windows")]
     {
         let processes = process_names();
@@ -646,4 +645,11 @@ pub fn get_background_conflict_report() -> BackgroundConflictReport {
                 .to_string(),
         }
     }
+}
+
+#[tauri::command]
+pub async fn get_background_conflict_report() -> Result<BackgroundConflictReport, String> {
+    tauri::async_runtime::spawn_blocking(build_background_conflict_report)
+        .await
+        .map_err(|error| format!("Background conflict worker failed: {error}"))
 }

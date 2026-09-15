@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 
 import {
-  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -185,7 +184,7 @@ export default function BackgroundConflictPanel() {
     loading,
     setLoading,
   ] =
-    useState(true);
+    useState(false);
 
   const [
     error,
@@ -222,14 +221,6 @@ export default function BackgroundConflictPanel() {
       );
     }
   }
-
-
-  useEffect(
-    () => {
-      refresh();
-    },
-    []
-  );
 
 
   const warningCount =
@@ -389,7 +380,9 @@ export default function BackgroundConflictPanel() {
             />
           )}
 
-          Rescan
+          {report
+            ? "Rescan"
+            : "Run Scan"}
         </button>
       </div>
 

@@ -3,6 +3,7 @@ use std::{
     collections::HashSet,
     env, fs,
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -19,34 +20,56 @@ pub struct InstalledGame {
 pub fn get_installed_games() -> Result<Vec<InstalledGame>, String> {
     #[cfg(target_os = "windows")]
     {
-        println!("========================================");
-        println!("Game Manager: starting installed-game scan");
-        println!("========================================");
+        let started = Instant::now();
 
-        let mut games = Vec::new();
+        /*
+         * Each launcher owns independent manifests or registry keys. Running
+         * these scans concurrently makes startup wait for the slowest source
+         * instead of the sum of all four sources.
+         */
+        let (steam_games, epic_games, gog_games, ubisoft_games) = std::thread::scope(|scope| {
+            let steam = scope.spawn(scan_steam);
+            let epic = scope.spawn(scan_epic);
+            let gog = scope.spawn(scan_gog);
+            let ubisoft = scope.spawn(scan_ubisoft);
 
-        let steam_games = scan_steam();
-        println!("Steam games found: {}", steam_games.len());
+            (
+                steam.join().unwrap_or_else(|_| Vec::new()),
+                epic.join().unwrap_or_else(|_| Vec::new()),
+                gog.join().unwrap_or_else(|_| Vec::new()),
+                ubisoft.join().unwrap_or_else(|_| Vec::new()),
+            )
+        });
+
+        let source_counts = (
+            steam_games.len(),
+            epic_games.len(),
+            gog_games.len(),
+            ubisoft_games.len(),
+        );
+
+        let mut games = Vec::with_capacity(
+            source_counts.0 + source_counts.1 + source_counts.2 + source_counts.3,
+        );
+
         games.extend(steam_games);
-
-        let epic_games = scan_epic();
-        println!("Epic games found: {}", epic_games.len());
         games.extend(epic_games);
-
-        let gog_games = scan_gog();
-        println!("GOG games found: {}", gog_games.len());
         games.extend(gog_games);
-
-        let ubisoft_games = scan_ubisoft();
-        println!("Ubisoft games found: {}", ubisoft_games.len());
         games.extend(ubisoft_games);
 
         remove_duplicates(&mut games);
 
         games.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
-        println!("Total installed games found: {}", games.len());
-        println!("========================================");
+        println!(
+            "Installed-game scan completed in {} ms: Steam {}, Epic {}, GOG {}, Ubisoft {}, total {}.",
+            started.elapsed().as_millis(),
+            source_counts.0,
+            source_counts.1,
+            source_counts.2,
+            source_counts.3,
+            games.len()
+        );
 
         Ok(games)
     }
@@ -153,11 +176,7 @@ fn scan_steam() -> Vec<InstalledGame> {
 
             let game_path = steamapps.join("common").join(&install_dir);
 
-            println!("[Steam] Manifest: {} -> {}", name, game_path.display());
-
             if !game_path.exists() {
-                println!("[Steam] Install directory missing, skipping.");
-
                 continue;
             }
 
@@ -360,8 +379,6 @@ fn scan_epic() -> Vec<InstalledGame> {
                 continue;
             }
 
-            println!("[Epic] Found {} at {}", name, install_location);
-
             games.push(InstalledGame {
                 id: format!("epic-{app_name}"),
                 name,
@@ -399,8 +416,6 @@ fn scan_epic() -> Vec<InstalledGame> {
                 if is_epic_non_game(&app_name, &app_name) {
                     continue;
                 }
-
-                println!("[Epic] Installed-list entry: {}", app_name);
 
                 games.push(InstalledGame {
                     id: format!("epic-{app_name}"),
@@ -468,8 +483,6 @@ fn scan_gog() -> Vec<InstalledGame> {
                 continue;
             };
 
-            println!("[GOG] {} -> {}", name, install_path);
-
             if !Path::new(&install_path).exists() {
                 continue;
             }
@@ -531,8 +544,6 @@ fn scan_ubisoft() -> Vec<InstalledGame> {
             let Some(install_dir) = install_dir else {
                 continue;
             };
-
-            println!("[Ubisoft] ID {} -> {}", game_id, install_dir);
 
             if !Path::new(&install_dir).exists() {
                 continue;

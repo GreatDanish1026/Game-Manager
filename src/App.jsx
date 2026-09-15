@@ -40,6 +40,7 @@ import {
 
 import {
   saveLibrarySnapshot,
+  getLibrarySnapshot,
   storeGameInsight,
   getGameInsight,
   insightMatchesFilter,
@@ -83,6 +84,9 @@ const HIDDEN_GAMES_STORAGE_KEY =
 
 const ANALYSIS_TIMESTAMPS_STORAGE_KEY =
   "game-manager-analysis-timestamps-v1";
+
+const STARTUP_LIBRARY_SCAN_FRESH_MS =
+  5 * 60 * 1000;
 
 function loadAnalysisTimestamps() {
   try {
@@ -923,6 +927,76 @@ function prepareGameForUiWithCachedInsight(
   };
 }
 
+
+function loadCachedLibraryForStartup() {
+  const snapshot =
+    getLibrarySnapshot();
+
+  const cachedGames =
+    Number(
+      snapshot.schemaVersion
+    ) >= 2
+      ? Object.values(
+          snapshot.games
+          ?? {}
+        )
+      : [];
+
+  const manualGames =
+    getManualGames();
+
+  const uniqueGames =
+    Array.from(
+      new Map(
+        [
+          ...cachedGames,
+          ...manualGames,
+        ]
+          .filter(
+            (game) =>
+              game?.id
+              && game?.name
+          )
+          .map(
+            (game) => [
+              game.id,
+              game,
+            ]
+          )
+      ).values()
+    );
+
+  return uniqueGames.map(
+    prepareGameForUiWithCachedInsight
+  );
+}
+
+
+function startupLibraryNeedsRefresh() {
+  const snapshot =
+    getLibrarySnapshot();
+
+  if (
+    Number(
+      snapshot.schemaVersion
+    ) < 2
+  ) {
+    return true;
+  }
+
+  const updatedAt =
+    Date.parse(
+      snapshot.updatedAt
+      ?? ""
+    );
+
+  return !Number.isFinite(
+    updatedAt
+  )
+    || Date.now() - updatedAt
+      >= STARTUP_LIBRARY_SCAN_FRESH_MS;
+}
+
 function selectPcgwPlatformPath(
   game,
   data,
@@ -1757,7 +1831,9 @@ export default function App() {
     games,
     setGames,
   ] =
-    useState([]);
+    useState(
+      loadCachedLibraryForStartup
+    );
 
 
   const [
@@ -2893,7 +2969,9 @@ export default function App() {
   );
 
 
-  async function scanGames() {
+  async function scanGames(
+    resetSelection = true
+  ) {
     setLoading(
       true
     );
@@ -2929,15 +3007,65 @@ export default function App() {
         );
 
 
-      setGames(
+      try {
+        saveLibrarySnapshot(
+          uniqueGames,
+          uniqueGames.length
+        );
+      } catch (cacheError) {
+        logWarn(
+          "[GameAtlas] Could not cache the installed-game scan:",
+          cacheError
+        );
+      }
+
+
+      const preparedGames =
         uniqueGames.map(
           prepareGameForUiWithCachedInsight
-        )
+        );
+
+      setGames(
+        preparedGames
       );
 
 
       setSelectedGame(
-        null
+        (current) => {
+          if (
+            resetSelection
+            || !current
+          ) {
+            return null;
+          }
+
+          const refreshed =
+            preparedGames.find(
+              (game) =>
+                game.id === current.id
+            );
+
+          return refreshed
+            ? {
+                ...current,
+                id:
+                  refreshed.id,
+                name:
+                  refreshed.name,
+                store:
+                  refreshed.store,
+                installPath:
+                  refreshed.installPath,
+                launcherId:
+                  refreshed.launcherId,
+                source:
+                  refreshed.source,
+                coverImageUrl:
+                  current.coverImageUrl
+                  ?? refreshed.coverImageUrl,
+              }
+            : null;
+        }
       );
     } catch (error) {
       logError(
@@ -2952,14 +3080,19 @@ export default function App() {
 
 
       setGames(
-        getManualGames().map(
-          prepareGameForUiWithCachedInsight
-        )
+        (current) =>
+          current.length > 0
+            ? current
+            : getManualGames().map(
+                prepareGameForUiWithCachedInsight
+              )
       );
 
-      setSelectedGame(
-        null
-      );
+      if (resetSelection) {
+        setSelectedGame(
+          null
+        );
+      }
     } finally {
       setLoading(
         false
@@ -3190,7 +3323,13 @@ export default function App() {
 
   useEffect(
     () => {
-      scanGames();
+      if (
+        startupLibraryNeedsRefresh()
+      ) {
+        scanGames(
+          false
+        );
+      }
     },
     []
   );

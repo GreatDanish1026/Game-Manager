@@ -1,11 +1,26 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::{
+    collections::hash_map::DefaultHasher,
+    fs,
+    hash::{Hash, Hasher},
+    path::{Path, PathBuf},
+    sync::OnceLock,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+use tauri::Manager;
 
 const PCGW_BASE_URL: &str = "https://www.pcgamingwiki.com";
 
 const PCGW_API_URL: &str = "https://www.pcgamingwiki.com/w/api.php";
 
-#[derive(Debug, Clone, Serialize)]
+const PCGW_CACHE_SCHEMA: u32 = 1;
+const PCGW_CACHE_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+const PCGW_NOT_FOUND_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+
+static PCGW_CLIENT: OnceLock<Result<Client, String>> = OnceLock::new();
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PcgwGameData {
     pub found: bool,
@@ -122,6 +137,119 @@ pub struct PcgwGameData {
     pub controller_hotplug: Option<String>,
 
     pub raw_wikitext_available: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CachedPcgwGameData {
+    schema: u32,
+    saved_at: u64,
+    data: PcgwGameData,
+}
+
+fn pcgw_client() -> Result<&'static Client, String> {
+    PCGW_CLIENT
+        .get_or_init(|| {
+            Client::builder()
+                .user_agent(
+                    "GameAtlas/2.3.0 (https://github.com/GreatDanish1026/Game-Manager) PCGamingWiki integration",
+                )
+                .redirect(reqwest::redirect::Policy::limited(10))
+                .connect_timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(12))
+                .pool_idle_timeout(Duration::from_secs(90))
+                .pool_max_idle_per_host(4)
+                .build()
+                .map_err(|error| format!("Failed to create HTTP client: {}", error))
+        })
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn pcgw_cache_key(name: &str, store: &str, launcher_id: Option<&str>) -> String {
+    let mut hasher = DefaultHasher::new();
+
+    store.trim().to_ascii_lowercase().hash(&mut hasher);
+    launcher_id.unwrap_or_default().trim().hash(&mut hasher);
+    name.trim().to_ascii_lowercase().hash(&mut hasher);
+
+    format!("{:016x}", hasher.finish())
+}
+
+fn pcgw_cache_path(
+    app: &tauri::AppHandle,
+    name: &str,
+    store: &str,
+    launcher_id: Option<&str>,
+) -> Result<PathBuf, String> {
+    let root = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| format!("Failed to resolve PCGamingWiki cache directory: {}", error))?;
+
+    Ok(root
+        .join("pcgamingwiki")
+        .join(format!("{}.json", pcgw_cache_key(name, store, launcher_id))))
+}
+
+fn load_cached_pcgw(path: &Path) -> Option<PcgwGameData> {
+    let text = fs::read_to_string(path).ok()?;
+    let cached: CachedPcgwGameData = serde_json::from_str(&text).ok()?;
+
+    if !cached_pcgw_is_fresh(&cached, unix_now()) {
+        return None;
+    }
+
+    Some(cached.data)
+}
+
+fn cached_pcgw_ttl(data: &PcgwGameData) -> Duration {
+    if data.found {
+        PCGW_CACHE_TTL
+    } else {
+        PCGW_NOT_FOUND_CACHE_TTL
+    }
+}
+
+fn cached_pcgw_is_fresh(cached: &CachedPcgwGameData, now: u64) -> bool {
+    cached.schema == PCGW_CACHE_SCHEMA
+        && now.saturating_sub(cached.saved_at) <= cached_pcgw_ttl(&cached.data).as_secs()
+}
+
+fn store_cached_pcgw(path: &Path, data: &PcgwGameData) {
+    let Some(parent) = path.parent() else {
+        return;
+    };
+
+    if let Err(error) = fs::create_dir_all(parent) {
+        println!("[PCGW] Failed to create cache directory: {}", error);
+        return;
+    }
+
+    let cached = CachedPcgwGameData {
+        schema: PCGW_CACHE_SCHEMA,
+        saved_at: unix_now(),
+        data: data.clone(),
+    };
+
+    let text = match serde_json::to_string(&cached) {
+        Ok(text) => text,
+        Err(error) => {
+            println!("[PCGW] Failed to serialize cache entry: {}", error);
+            return;
+        }
+    };
+
+    if let Err(error) = fs::write(path, text) {
+        println!("[PCGW] Failed to write cache entry: {}", error);
+    }
 }
 
 // ================================================================
@@ -1863,10 +1991,13 @@ async fn resolve_page_name(
 
 #[tauri::command]
 pub async fn get_pcgw_game_data(
+    app: tauri::AppHandle,
     name: String,
     store: String,
     launcher_id: Option<String>,
 ) -> Result<PcgwGameData, String> {
+    let lookup_started = Instant::now();
+
     println!("");
     println!("[PCGW] ==========================================");
 
@@ -1879,40 +2010,65 @@ pub async fn get_pcgw_game_data(
 
     println!("[PCGW] Store: {}", store);
 
-    let client =
-        Client::builder()
-            .user_agent(
-                "GameManager/0.3.0 (https://github.com/GreatDanish1026/GameManager) PCGamingWiki integration"
-            )
-            .redirect(
-                reqwest::redirect::Policy::limited(
-                    10
-                )
-            )
-            .build()
-            .map_err(
-                |error| {
-                    format!(
-                        "Failed to create HTTP client: {}",
-                        error
-                    )
-                }
-            )?;
+    let cache_path = match pcgw_cache_path(&app, &name, &store, launcher_id.as_deref()) {
+        Ok(path) => Some(path),
+        Err(error) => {
+            println!("[PCGW] Cache unavailable: {}", error);
+            None
+        }
+    };
 
-    let page_name = resolve_page_name(&client, &name, &store, launcher_id.as_deref()).await?;
+    if let Some(path) = cache_path.as_deref() {
+        if let Some(cached) = load_cached_pcgw(path) {
+            println!(
+                "[PCGW] Cache hit in {} ms",
+                lookup_started.elapsed().as_millis()
+            );
+            return Ok(cached);
+        }
+    }
+
+    println!("[PCGW] Cache miss");
+
+    let client_started = Instant::now();
+    let client = pcgw_client()?;
+    println!(
+        "[PCGW] HTTP client ready in {} ms",
+        client_started.elapsed().as_millis()
+    );
+
+    let resolve_started = Instant::now();
+    let page_name = resolve_page_name(client, &name, &store, launcher_id.as_deref()).await?;
+    println!(
+        "[PCGW] Page resolution completed in {} ms",
+        resolve_started.elapsed().as_millis()
+    );
 
     let Some(page_name) = page_name else {
         println!("[PCGW] No matching page found");
 
-        return Ok(empty_result());
+        let result = empty_result();
+        if let Some(path) = cache_path.as_deref() {
+            store_cached_pcgw(path, &result);
+        }
+        return Ok(result);
     };
 
     println!("[PCGW] Resolved page: {}", page_name);
 
-    let page_data = get_page_data(&client, &page_name).await?;
+    let page_started = Instant::now();
+    let page_data = get_page_data(client, &page_name).await?;
+    println!(
+        "[PCGW] Main page request completed in {} ms",
+        page_started.elapsed().as_millis()
+    );
 
     let Some((resolved_page_name, wikitext, essential_section_index)) = page_data else {
-        return Ok(empty_result());
+        let result = empty_result();
+        if let Some(path) = cache_path.as_deref() {
+            store_cached_pcgw(path, &result);
+        }
+        return Ok(result);
     };
 
     /*
@@ -1925,35 +2081,62 @@ pub async fn get_pcgw_game_data(
 
     let mut result = parse_game_data(resolved_page_name.clone(), wikitext);
 
-    if let Some(cover_filename) = cover_filename {
-        match get_cover_image_url(&client, &cover_filename).await {
-            Ok(url) => {
+    /*
+     * Cover metadata and Essential Improvements are independent after the
+     * main page has been parsed. Start both together so network latency is
+     * paid once rather than serially.
+     */
+    let optional_started = Instant::now();
+
+    let cover_task = cover_filename.map(|cover_filename| {
+        let client = client.clone();
+        tauri::async_runtime::spawn(
+            async move { get_cover_image_url(&client, &cover_filename).await },
+        )
+    });
+
+    let section_task = essential_section_index.map(|section_index| {
+        let client = client.clone();
+        let page_name = resolved_page_name.clone();
+        tauri::async_runtime::spawn(async move {
+            get_section_html(&client, &page_name, &section_index).await
+        })
+    });
+
+    if let Some(task) = cover_task {
+        match task.await {
+            Ok(Ok(url)) => {
                 result.cover_image_url = url;
             }
-
-            Err(error) => {
-                /*
-                 * A missing/broken cover must never break the rest
-                 * of the PCGamingWiki lookup.
-                 */
+            Ok(Err(error)) => {
                 println!("[PCGW] Cover lookup failed: {}", error);
+            }
+            Err(error) => {
+                println!("[PCGW] Cover lookup task failed: {}", error);
             }
         }
     }
 
     println!("[PCGW] Cover image URL: {:?}", result.cover_image_url);
 
-    if let Some(section_index) = essential_section_index {
-        match get_section_html(&client, &resolved_page_name, &section_index).await {
-            Ok(html) => {
+    if let Some(task) = section_task {
+        match task.await {
+            Ok(Ok(html)) => {
                 result.essential_improvements_html = html;
             }
-
-            Err(error) => {
+            Ok(Err(error)) => {
                 println!("[PCGW] Essential improvements lookup failed: {}", error);
+            }
+            Err(error) => {
+                println!("[PCGW] Essential improvements task failed: {}", error);
             }
         }
     }
+
+    println!(
+        "[PCGW] Optional requests completed in {} ms",
+        optional_started.elapsed().as_millis()
+    );
 
     println!(
         "[PCGW] Essential improvements present: {}",
@@ -1964,5 +2147,64 @@ pub async fn get_pcgw_game_data(
 
     println!("");
 
+    if let Some(path) = cache_path.as_deref() {
+        store_cached_pcgw(path, &result);
+    }
+    println!(
+        "[PCGW] Total uncached lookup completed in {} ms",
+        lookup_started.elapsed().as_millis()
+    );
+
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_key_normalizes_store_and_name() {
+        assert_eq!(
+            pcgw_cache_key("  Cyberpunk 2077 ", " Steam ", Some("1091500")),
+            pcgw_cache_key("cyberpunk 2077", "steam", Some("1091500"))
+        );
+
+        assert_ne!(
+            pcgw_cache_key("Cyberpunk 2077", "Steam", Some("1091500")),
+            pcgw_cache_key("Cyberpunk 2077", "Steam", Some("123"))
+        );
+    }
+
+    #[test]
+    fn cache_uses_shorter_ttl_for_missing_matches() {
+        let now = 2_000_000;
+        let mut found = empty_result();
+        found.found = true;
+
+        let found_entry = CachedPcgwGameData {
+            schema: PCGW_CACHE_SCHEMA,
+            saved_at: now - (2 * 24 * 60 * 60),
+            data: found,
+        };
+
+        let missing_entry = CachedPcgwGameData {
+            schema: PCGW_CACHE_SCHEMA,
+            saved_at: now - (2 * 24 * 60 * 60),
+            data: empty_result(),
+        };
+
+        assert!(cached_pcgw_is_fresh(&found_entry, now));
+        assert!(!cached_pcgw_is_fresh(&missing_entry, now));
+    }
+
+    #[test]
+    fn cache_schema_invalidates_old_entries() {
+        let entry = CachedPcgwGameData {
+            schema: PCGW_CACHE_SCHEMA + 1,
+            saved_at: 100,
+            data: empty_result(),
+        };
+
+        assert!(!cached_pcgw_is_fresh(&entry, 100));
+    }
 }

@@ -376,7 +376,7 @@ export default function GameLoadingOverlay({
       aria-live="polite"
       aria-busy="true"
       className={
-        `fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/60 p-6 backdrop-blur-[4px] transition-opacity duration-200 ease-out ${
+        `pointer-events-none fixed bottom-4 right-4 z-[60] w-[min(26rem,calc(100vw-2rem))] transition-opacity duration-200 ease-out ${
           visible
             ? "opacity-100"
             : "opacity-0"
@@ -385,7 +385,7 @@ export default function GameLoadingOverlay({
     >
       <div
         className={
-          `w-full max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-slate-900/95 shadow-2xl shadow-black/50 ring-1 ring-white/[0.035] transition-all duration-200 ease-out ${
+          `w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-900/95 shadow-2xl shadow-black/50 ring-1 ring-white/[0.035] transition-all duration-200 ease-out ${
             visible
               ? "translate-y-0 scale-100"
               : "translate-y-2 scale-[0.985]"
@@ -422,7 +422,7 @@ export default function GameLoadingOverlay({
               <div
                 className="mt-1 text-xl font-semibold text-white"
               >
-                Loading Game Data
+                Loading additional game data
               </div>
 
               <div
@@ -553,7 +553,7 @@ export default function GameLoadingOverlay({
           <div
             className="mt-3 text-center text-[11px] text-slate-600"
           >
-            Game details will open automatically when analysis is ready.
+            Game details remain available while analysis finishes.
           </div>
         </div>
       </div>

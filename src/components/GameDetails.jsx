@@ -642,6 +642,7 @@ export default function GameDetails({
   onCheckForUpdates,
   updateCheckStatus,
   onSelectGame,
+  networkOnline = true,
 }) {
   const [
     pathError,
@@ -730,6 +731,9 @@ export default function GameDetails({
         }
         onSelectGame={
           onSelectGame
+        }
+        networkOnline={
+          networkOnline
         }
       />
     );
@@ -1007,17 +1011,6 @@ export default function GameDetails({
                   game
                 }
               />
-
-              <GamePersonalization
-                game={
-                  game
-                }
-              />
-              <PersonalRatingPanel
-                game={
-                  game
-                }
-              />
             </div>
 
 
@@ -1079,7 +1072,7 @@ export default function GameDetails({
 
 
         
-        <GameSectionNavigator />
+        <GameSectionNavigator key={game.id} />
 
 
         <CollapsibleSection
@@ -1147,12 +1140,58 @@ export default function GameDetails({
 
 
         <CollapsibleSection
+          id="my-game"
+          title="My Game"
+          description="Your play status, rating, tags, launch profiles, notes, and recent activity."
+          icon={UserRoundCog}
+          defaultOpen={false}
+          summary="Status, rating, notes & profiles"
+        >
+          <GamePersonalization
+            game={
+              game
+            }
+          />
+
+          <PersonalRatingPanel
+            game={
+              game
+            }
+          />
+
+          <div className="mt-5">
+            <PlayStatusNotesPanel
+              game={
+                game
+              }
+            />
+          </div>
+
+          <div className="mt-5">
+            <LaunchProfilesPanel
+              game={
+                game
+              }
+            />
+          </div>
+
+          <div className="mt-5">
+            <RecentActivityPanel
+              game={
+                game
+              }
+            />
+          </div>
+        </CollapsibleSection>
+
+
+        <CollapsibleSection
           id="compatibility-performance"
           title="Compatibility & Performance"
-          description="System fit, verified settings, hardware capability, and installation readiness in one place."
+          description="System fit, verified settings, hardware capability, and installation readiness."
           icon={MonitorCog}
-          defaultOpen
-          summary="Estimate, known-good setup, health & hardware"
+          defaultOpen={false}
+          summary="Setup, health & hardware"
         >
           <CompatibilitySetupPanel
             game={
@@ -1176,27 +1215,15 @@ export default function GameDetails({
             />
           </div>
 
-          <WindowsPerformanceDiagnosticsPanel
-            game={
-              game
-            }
-          />
-
-          <BackgroundConflictPanel />
-
-          <CleanLaunchPanel
-            game={
-              game
-            }
-          />
-
-          <ShaderCachePanel
-            game={
-              game
-            }
-          />
-
-          <GraphicsDriverDiagnosticsPanel />
+          {isLinux ? (
+            <div className="mt-5">
+              <LinuxPerformancePanel
+                game={
+                  game
+                }
+              />
+            </div>
+          ) : null}
         </CollapsibleSection>
 
 
@@ -1220,13 +1247,21 @@ export default function GameDetails({
             }
           />
 
-          <div className="mt-5">
+          <CollapsibleSection
+            id="controller-support"
+            title="Controller Support"
+            description="Controller families, prompts, connection modes, hotplugging, and DualSense features."
+            icon={Gamepad2}
+            defaultOpen={false}
+            summary="Open controller details"
+            className="mt-5"
+          >
             <ControllerCompatibility
               game={
                 game
               }
             />
-          </div>
+          </CollapsibleSection>
         </CollapsibleSection>
 
 
@@ -1304,6 +1339,14 @@ export default function GameDetails({
           </div>
 
           <div className="mt-5">
+            <LibraryEntryEditor
+              game={
+                game
+              }
+            />
+          </div>
+
+          <div className="mt-5">
             <ChangeHistoryPanel
               game={
                 game
@@ -1348,39 +1391,64 @@ export default function GameDetails({
         <CollapsibleSection
           id="technical-troubleshooting"
           title="Technical & Troubleshooting"
-          description="Engine and API details, PCGamingWiki improvements, known issues, and library metadata."
+          description="Recommended fixes, known issues, diagnostics, technical details, and advanced tools."
           icon={Settings2}
           defaultOpen={false}
+          className="mb-10"
           summary={
             game.technical?.engine
             ?? game.technical?.api
             ?? "Technical details & fixes"
           }
         >
-          <TechnicalDetailsPanel
+          <EssentialImprovements
             game={
               game
             }
           />
 
           <div className="mt-5">
-            <LibraryEntryEditor
-              game={
-                game
-              }
-            />
-          </div>
-
-          <div className="mt-5">
-            <EssentialImprovements
-              game={
-                game
-              }
-            />
-          </div>
-
-          <div className="mt-5">
             <KnownIssuesPanel
+              game={
+                game
+              }
+            />
+          </div>
+
+          <WindowsPerformanceDiagnosticsPanel
+            game={
+              game
+            }
+          />
+
+          <BackgroundConflictPanel />
+
+          <CleanLaunchPanel
+            game={
+              game
+            }
+          />
+
+          <ShaderCachePanel
+            game={
+              game
+            }
+          />
+
+          <GraphicsDriverDiagnosticsPanel />
+
+          {isLinux ? (
+            <div className="mt-5">
+              <ProtonToolboxPanel
+                game={
+                  game
+                }
+              />
+            </div>
+          ) : null}
+
+          <div className="mt-5">
+            <TechnicalDetailsPanel
               game={
                 game
               }
@@ -1395,73 +1463,6 @@ export default function GameDetails({
             />
           </div>
         </CollapsibleSection>
-
-
-        <CollapsibleSection
-          id="my-game"
-          title="My Game"
-          description="Launch profiles, play status, personal notes, and GameAtlas launch history."
-          icon={UserRoundCog}
-          defaultOpen={false}
-          summary="Profiles, status, notes & recent activity"
-          className="mb-10"
-        >
-          <LaunchProfilesPanel
-            game={
-              game
-            }
-          />
-
-          <div className="mt-5">
-            <PlayStatusNotesPanel
-              game={
-                game
-              }
-            />
-          </div>
-
-          <div className="mt-5">
-            <RecentActivityPanel
-              game={
-                game
-              }
-            />
-          </div>
-        </CollapsibleSection>
-      
-        {isLinux ? (
-          <>
-            <CollapsibleSection
-              id="proton-toolbox"
-              title="Proton Toolbox"
-              description="Inspect this game's Proton prefix and the compatibility tools installed on this Linux system."
-              icon={Settings2}
-              defaultOpen={false}
-              summary="Prefix & Proton versions"
-            >
-              <ProtonToolboxPanel
-                game={
-                  game
-                }
-              />
-            </CollapsibleSection>
-
-            <CollapsibleSection
-              id="linux-performance"
-              title="Linux Performance"
-              description="Configure per-game MangoHud, FPS limiting, GameMode, Gamescope, HDR, and Wayland options."
-              icon={MonitorCog}
-              defaultOpen={false}
-              summary="MangoHud, FPS limits, Gamescope & HDR"
-            >
-              <LinuxPerformancePanel
-                game={
-                  game
-                }
-              />
-            </CollapsibleSection>
-          </>
-        ) : null}
 
 
 </div>

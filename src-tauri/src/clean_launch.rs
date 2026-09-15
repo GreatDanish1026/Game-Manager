@@ -392,8 +392,7 @@ fn candidate_from_definition(
     }
 }
 
-#[tauri::command]
-pub fn get_clean_launch_status() -> CleanLaunchStatus {
+fn build_clean_launch_status() -> CleanLaunchStatus {
     #[cfg(target_os = "windows")]
     {
         let running = running_process_names();
@@ -438,6 +437,13 @@ pub fn get_clean_launch_status() -> CleanLaunchStatus {
             message: "Clean Launch is currently available on Windows.".to_string(),
         }
     }
+}
+
+#[tauri::command]
+pub async fn get_clean_launch_status() -> Result<CleanLaunchStatus, String> {
+    tauri::async_runtime::spawn_blocking(build_clean_launch_status)
+        .await
+        .map_err(|error| format!("Clean Launch status worker failed: {error}"))
 }
 
 #[tauri::command]

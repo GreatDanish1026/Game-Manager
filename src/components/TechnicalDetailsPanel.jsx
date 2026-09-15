@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 
 import {
-  useEffect,
   useState,
 } from "react";
 
@@ -225,17 +224,6 @@ export default function TechnicalDetailsPanel({
   }
 
 
-  useEffect(
-    () => {
-      load();
-    },
-    [
-      game?.id,
-      game?.installPath,
-    ]
-  );
-
-
   const detected =
     installation
       ?.technicalDetails
@@ -371,7 +359,9 @@ export default function TechnicalDetailsPanel({
 
           {loading
             ? "Detecting…"
-            : "Redetect"}
+            : installation
+              ? "Redetect"
+              : "Detect Locally"}
         </button>
       </div>
 

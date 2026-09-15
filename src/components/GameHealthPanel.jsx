@@ -268,7 +268,9 @@ export default function GameHealthPanel({
     useState(null);
 
 
-  async function refresh() {
+  async function refresh({
+    force = false,
+  } = {}) {
     setLoading(
       true
     );
@@ -283,8 +285,7 @@ export default function GameHealthPanel({
           inspectLocalInstallation(
             game,
             {
-              force:
-                true,
+              force,
             }
           ),
         ];
@@ -427,7 +428,22 @@ export default function GameHealthPanel({
 
   useEffect(
     () => {
-      refresh();
+      /*
+       * Let the expanded section paint before beginning filesystem work.
+       * Automatic checks reuse any local-inspection promise/result already
+       * requested by another panel for this game.
+       */
+      const timer =
+        window.setTimeout(
+          () =>
+            refresh(),
+          120
+        );
+
+      return () =>
+        window.clearTimeout(
+          timer
+        );
     },
     [
       game?.id,
@@ -950,7 +966,11 @@ export default function GameHealthPanel({
           <button
             type="button"
             onClick={
-              refresh
+              () =>
+                refresh({
+                  force:
+                    true,
+                })
             }
             disabled={
               loading

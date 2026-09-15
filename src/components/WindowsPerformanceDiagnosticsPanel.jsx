@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 
 import {
-  useEffect,
   useState,
 } from "react";
 
@@ -75,7 +74,7 @@ export default function WindowsPerformanceDiagnosticsPanel({
     loading,
     setLoading,
   ] =
-    useState(true);
+    useState(false);
 
   const [
     error,
@@ -114,17 +113,6 @@ export default function WindowsPerformanceDiagnosticsPanel({
       );
     }
   }
-
-
-  useEffect(
-    () => {
-      refresh();
-    },
-    [
-      game?.id,
-      game?.installPath,
-    ]
-  );
 
 
   if (
@@ -267,7 +255,9 @@ export default function WindowsPerformanceDiagnosticsPanel({
             />
           )}
 
-          Rescan
+          {report
+            ? "Rescan"
+            : "Run Scan"}
         </button>
       </div>
 
