@@ -1,7 +1,9 @@
 mod background_conflicts;
 mod clean_launch;
 mod controller_conflicts;
+mod crash_detective;
 mod diagnostics;
+mod display_validator;
 mod ea_games;
 mod fluffy;
 mod game_file_utilities;
@@ -20,9 +22,11 @@ mod lutris_games;
 mod manual_games;
 mod pcgamingwiki;
 mod pcgw_issues;
+mod performance_capture;
 mod platform;
 mod renodx;
 mod rhi;
+mod runtime_dependency_doctor;
 mod save_backups;
 mod save_browser;
 mod shader_cache;
@@ -60,6 +64,12 @@ pub fn run() {
             shader_cache::clear_shader_cache_targets,
             graphics_driver_diagnostics::get_graphics_driver_diagnostics,
             controller_conflicts::get_controller_conflict_report,
+            crash_detective::get_crash_detective_report,
+            display_validator::get_display_validation_report,
+            runtime_dependency_doctor::get_runtime_dependency_report,
+            performance_capture::get_performance_capture_status,
+            performance_capture::run_performance_capture,
+            performance_capture::cancel_performance_capture,
             windows_performance_diagnostics::get_windows_performance_diagnostics,
             reshade_windows::install_reshade_addons_windows,
             renodx_installer::get_renodx_package_info,

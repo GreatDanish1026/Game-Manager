@@ -1,13 +1,15 @@
 import {
   AlertTriangle,
   CheckCircle2,
-  CircleDashed,
+  CircleHelp,
+  ExternalLink,
+  FolderOpen,
   HeartPulse,
   Loader2,
-  RefreshCcw,
-  FolderOpen,
+  RefreshCw,
   Save,
-  Wrench,
+  ShieldAlert,
+  Sparkles,
 } from "lucide-react";
 
 import {
@@ -17,165 +19,263 @@ import {
 } from "react";
 
 import {
-  inspectLocalInstallation,
-} from "../services/localInstallation";
+  runGameHealthCheck,
+  summarizeGameHealth,
+} from "../services/gameHealth";
 
 import {
-  createSaveBackup,
-  getSaveBackupStatus,
-} from "../services/saveBackups";
+  storeInstallationHealth,
+} from "../services/installationHealth";
 
 import {
   openGamePath,
 } from "../services/pathActions";
 
 import {
-  storeInstallationHealth,
-} from "../services/installationHealth";
+  createSaveBackup,
+} from "../services/saveBackups";
 
 
-function HealthCheck({
-  label,
-  detail,
-  state,
-  actionLabel = null,
-  onAction = null,
-  actionDisabled = false,
-  actionBusy = false,
-}) {
-  const icon =
-    state === "pass"
-      ? (
-        <CheckCircle2
-          className="
-            h-4
-            w-4
-            shrink-0
-            text-emerald-300/80
-          "
-        />
-      )
-      : state === "warn"
-        ? (
-          <AlertTriangle
-            className="
-              h-4
-              w-4
-              shrink-0
-              text-amber-300/80
-            "
-          />
+const GROUPS = [
+  {
+    severity: "attention",
+    label: "Needs attention",
+    description: "Conditions likely to affect launching, stability, or performance.",
+    className: "border-red-400/15 bg-red-400/[0.035]",
+    open: true,
+  },
+  {
+    severity: "recommendation",
+    label: "Recommended",
+    description: "Useful follow-up steps that are not confirmed problems.",
+    className: "border-amber-400/15 bg-amber-400/[0.03]",
+    open: true,
+  },
+  {
+    severity: "good",
+    label: "Looks good",
+    description: "Checks that passed successfully.",
+    className: "border-emerald-400/12 bg-emerald-400/[0.025]",
+    open: false,
+  },
+  {
+    severity: "information",
+    label: "Information",
+    description: "Context that may help with troubleshooting without indicating a problem.",
+    className: "border-cyan-400/10 bg-cyan-400/[0.02]",
+    open: false,
+  },
+  {
+    severity: "unavailable",
+    label: "Could not check",
+    description: "Checks that did not return a usable result.",
+    className: "border-white/[0.08] bg-white/[0.018]",
+    open: false,
+  },
+];
+
+
+function statusText(status) {
+  switch (status) {
+    case "attention":
+      return "Needs attention";
+    case "recommendation":
+      return "Recommendations available";
+    case "good":
+      return "Looks good";
+    default:
+      return "Check incomplete";
+  }
+}
+
+
+function scanStatusText(status) {
+  switch (status) {
+    case "complete":
+      return "Complete";
+    case "unsupported":
+      return "Not supported";
+    case "failed":
+      return "Could not check";
+    default:
+      return "Pending";
+  }
+}
+
+
+function scanStatusClassName(status) {
+  switch (status) {
+    case "complete":
+      return "text-emerald-200/65";
+    case "failed":
+      return "text-red-200/65";
+    default:
+      return "text-white/35";
+  }
+}
+
+
+function openDiagnostic(
+  scan
+) {
+  const sectionIds =
+    scan?.sectionIds
+    ?? [];
+
+  sectionIds.forEach(
+    (
+      id,
+      index
+    ) => {
+      window.setTimeout(
+        () => {
+          window.dispatchEvent(
+            new CustomEvent(
+              "game-manager-open-section",
+              {
+                detail: {
+                  id,
+                },
+              }
+            )
+          );
+        },
+        index
+        * 90
+      );
+    }
+  );
+
+  window.setTimeout(
+    () => {
+      document
+        .getElementById(
+          scan?.targetId
         )
-        : (
-          <CircleDashed
-            className="
-              h-4
-              w-4
-              shrink-0
-              text-white/20
-            "
-          />
-        );
+        ?.scrollIntoView({
+          behavior:
+            "smooth",
+          block:
+            "start",
+        });
+    },
+    sectionIds.length
+    * 90
+    + 80
+  );
+}
 
+
+function ScanCard({
+  scan,
+}) {
   return (
-    <div
-      className="
-        flex
-        items-start
-        gap-3
-        border-b
-        border-white/[0.055]
-        px-4
-        py-3
-        last:border-b-0
-      "
-    >
-      {icon}
+    <div className="flex items-center justify-between gap-2 bg-black/35 px-3 py-2.5">
+      <div className="min-w-0">
+        <div className="truncate text-xs font-medium text-white/58">
+          {scan.label}
+        </div>
+        <div className={`mt-0.5 text-[10px] ${scanStatusClassName(scan.status)}`}>
+          {scanStatusText(
+            scan.status
+          )}
+        </div>
+      </div>
 
-      <div
-        className="
-          min-w-0
-          flex-1
-        "
-      >
-        <div
-          className="
-            flex
-            items-start
-            justify-between
-            gap-3
-          "
+      {scan.targetId ? (
+        <button
+          type="button"
+          onClick={
+            () =>
+              openDiagnostic(
+                scan
+              )
+          }
+          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.025] px-2 py-1 text-[10px] font-semibold text-white/38 hover:bg-white/[0.06] hover:text-white/65"
         >
-          <div
-            className="
-              min-w-0
-            "
-          >
-            <div
-              className={`
-                text-sm
-                font-medium
-                ${
-                  state === "pass"
-                    ? "text-white/70"
-                    : state === "warn"
-                      ? "text-amber-100/70"
-                      : "text-white/35"
-                }
-              `}
-            >
-              {label}
-            </div>
+          View
+          <ExternalLink className="h-3 w-3" />
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
-            {detail ? (
-              <div
-                className="
-                  mt-0.5
-                  text-xs
-                  leading-relaxed
-                  text-white/28
-                "
-              >
-                {detail}
+
+function statusClassName(status) {
+  switch (status) {
+    case "attention":
+      return "border-red-400/20 bg-red-400/[0.07] text-red-100/80";
+    case "recommendation":
+      return "border-amber-400/20 bg-amber-400/[0.07] text-amber-100/80";
+    case "good":
+      return "border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-100/80";
+    default:
+      return "border-white/10 bg-white/[0.035] text-white/55";
+  }
+}
+
+
+function FindingIcon({ severity }) {
+  if (severity === "attention") {
+    return <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-300/85" />;
+  }
+
+  if (severity === "recommendation") {
+    return <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300/80" />;
+  }
+
+  if (severity === "good") {
+    return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300/75" />;
+  }
+
+  return <CircleHelp className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300/55" />;
+}
+
+
+function FindingRow({
+  item,
+  actionBusy,
+  onAction,
+}) {
+  return (
+    <div className="flex items-start gap-3 border-b border-white/[0.05] px-4 py-3.5 last:border-b-0">
+      <FindingIcon severity={item.severity} />
+
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-white/72">
+              {item.title}
+            </div>
+            <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/24">
+              {item.source}
+            </div>
+            <div className="mt-1.5 break-words text-xs leading-relaxed text-white/38">
+              {item.detail}
+            </div>
+            {item.suggestion ? (
+              <div className="mt-2 text-xs leading-relaxed text-cyan-100/55">
+                Suggested: {item.suggestion}
               </div>
             ) : null}
           </div>
 
-          {actionLabel ? (
+          {item.action ? (
             <button
               type="button"
-              onClick={onAction}
-              disabled={
-                actionDisabled
-                || actionBusy
-              }
-              className="
-                inline-flex
-                shrink-0
-                items-center
-                gap-1.5
-                rounded-lg
-                border
-                border-white/[0.08]
-                bg-white/[0.025]
-                px-2.5
-                py-1.5
-                text-[10px]
-                font-semibold
-                text-white/55
-                transition
-                hover:bg-white/[0.06]
-                hover:text-white/75
-                disabled:opacity-30
-              "
+              onClick={() => onAction(item)}
+              disabled={actionBusy === item.id}
+              className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.035] px-3 py-2 text-[11px] font-semibold text-white/60 hover:bg-white/[0.07] hover:text-white/80 disabled:opacity-40"
             >
-              {actionLabel === "Create Backup" ? (
-                <Save className="h-3 w-3" />
+              {actionBusy === item.id ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : item.action.type === "create-save-backup" ? (
+                <Save className="h-3.5 w-3.5" />
               ) : (
-                <FolderOpen className="h-3 w-3" />
+                <FolderOpen className="h-3.5 w-3.5" />
               )}
-
-              {actionLabel}
+              {item.action.label}
             </button>
           ) : null}
         </div>
@@ -185,967 +285,345 @@ function HealthCheck({
 }
 
 
-function gradeFromScore(
-  score
-) {
-  if (score >= 90) {
-    return {
-      label:
-        "Excellent",
-
-      className:
-        "text-emerald-200 border-emerald-400/20 bg-emerald-400/[0.06]",
-    };
+function ResultGroup({
+  group,
+  findings,
+  actionBusy,
+  onAction,
+}) {
+  if (findings.length === 0) {
+    return null;
   }
 
-  if (score >= 75) {
-    return {
-      label:
-        "Good",
+  const heading = (
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <div className="text-sm font-semibold text-white/72">
+          {group.label}
+        </div>
+        <div className="mt-0.5 text-xs leading-relaxed text-white/30">
+          {group.description}
+        </div>
+      </div>
+      <span className="rounded-full bg-black/15 px-2 py-0.5 text-[10px] font-semibold text-white/45">
+        {findings.length}
+      </span>
+    </div>
+  );
 
-      className:
-        "text-cyan-200 border-cyan-400/20 bg-cyan-400/[0.06]",
-    };
-  }
+  const content = (
+    <div className="mt-3 overflow-hidden rounded-lg border border-white/[0.06] bg-black/10">
+      {findings.map((item) => (
+        <FindingRow
+          key={item.id}
+          item={item}
+          actionBusy={actionBusy}
+          onAction={onAction}
+        />
+      ))}
+    </div>
+  );
 
-  if (score >= 55) {
-    return {
-      label:
-        "Needs Attention",
+  return (
+    <section className={`rounded-xl border p-4 ${group.className}`}>
+      {group.open ? (
+        <>
+          {heading}
+          {content}
+        </>
+      ) : (
+        <details>
+          <summary className="cursor-pointer list-none">
+            {heading}
+          </summary>
+          {content}
+        </details>
+      )}
+    </section>
+  );
+}
 
-      className:
-        "text-amber-200 border-amber-400/20 bg-amber-400/[0.06]",
-    };
-  }
 
+function healthRecordFromReport(report) {
   return {
-    label:
-      "Incomplete",
-
-    className:
-      "text-white/50 border-white/10 bg-white/[0.025]",
+    score: report.score,
+    passed: report.counts.good,
+    warnings: report.counts.attention,
+    informational: report.counts.information + report.counts.unavailable,
+    actionable: report.findings.filter((item) => Boolean(item.action)).length,
   };
 }
 
 
 export default function GameHealthPanel({
   game,
+  isWindows = true,
 }) {
-  const [
-    local,
-    setLocal,
-  ] =
-    useState(null);
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const [error, setError] = useState(null);
+  const [actionBusy, setActionBusy] = useState(null);
+  const [actionMessage, setActionMessage] = useState(null);
 
-  const [
-    backups,
-    setBackups,
-  ] =
-    useState(null);
+  useEffect(() => {
+    setReport(null);
+    setError(null);
+    setProgress(null);
+    setActionMessage(null);
+  }, [game?.id, game?.installPath]);
 
-  const [
-    loading,
-    setLoading,
-  ] =
-    useState(false);
-
-  const [
-    error,
-    setError,
-  ] =
-    useState(null);
-
-  const [
-    backupBusy,
-    setBackupBusy,
-  ] =
-    useState(false);
-
-  const [
-    actionMessage,
-    setActionMessage,
-  ] =
-    useState(null);
-
-
-  async function refresh({
-    force = false,
-  } = {}) {
-    setLoading(
-      true
-    );
-
-    setError(
-      null
-    );
+  async function runCheck() {
+    setLoading(true);
+    setError(null);
+    setActionMessage(null);
 
     try {
-      const tasks =
-        [
-          inspectLocalInstallation(
-            game,
-            {
-              force,
-            }
-          ),
-        ];
+      const next = await runGameHealthCheck(game, {
+        includeWindows: isWindows,
+        onProgress: setProgress,
+      });
 
-      if (
-        game.technical
-          ?.saveLocation
-      ) {
-        tasks.push(
-          getSaveBackupStatus(
-            game
-          )
-        );
-      } else {
-        tasks.push(
-          Promise.resolve(
-            null
-          )
-        );
-      }
-
-      const [
-        localResult,
-        backupResult,
-      ] =
-        await Promise.allSettled(
-          tasks
-        );
-
-      if (
-        localResult.status
-        === "fulfilled"
-      ) {
-        setLocal(
-          localResult.value
-        );
-      } else {
-        setLocal(
-          null
-        );
-      }
-
-      if (
-        backupResult.status
-        === "fulfilled"
-      ) {
-        setBackups(
-          backupResult.value
-        );
-      } else {
-        setBackups(
-          null
-        );
-      }
-
-      if (
-        localResult.status
-        === "rejected"
-      ) {
-        setError(
-          String(
-            localResult.reason
-          )
-        );
-      }
+      setReport(next);
+      storeInstallationHealth(game, healthRecordFromReport(next));
+    } catch (checkError) {
+      setError(String(checkError));
     } finally {
-      setLoading(
-        false
-      );
+      setLoading(false);
+      setProgress(null);
     }
   }
 
-
-  async function handleOpenPath(
-    path
-  ) {
-    setActionMessage(
-      null
-    );
-
-    try {
-      await openGamePath(
-        path,
-        game.installPath
-      );
-    } catch (openError) {
-      setActionMessage(
-        String(openError)
-      );
-    }
-  }
-
-
-  async function handleCreateBackup() {
-    if (
-      !game.technical
-        ?.saveLocation
-    ) {
+  async function handleAction(item) {
+    if (!item.action) {
       return;
     }
 
-    setBackupBusy(
-      true
-    );
-
-    setActionMessage(
-      null
-    );
+    setActionBusy(item.id);
+    setActionMessage(null);
 
     try {
-      await createSaveBackup(
-        game
-      );
-
-      const next =
-        await getSaveBackupStatus(
-          game
-        );
-
-      setBackups(
-        next
-      );
-
-      setActionMessage(
-        "Save backup created successfully."
-      );
-    } catch (backupError) {
-      setActionMessage(
-        `Backup failed: ${String(
-          backupError
-        )}`
-      );
-    } finally {
-      setBackupBusy(
-        false
-      );
-    }
-  }
-
-
-  useEffect(
-    () => {
-      /*
-       * Let the expanded section paint before beginning filesystem work.
-       * Automatic checks reuse any local-inspection promise/result already
-       * requested by another panel for this game.
-       */
-      const timer =
-        window.setTimeout(
-          () =>
-            refresh(),
-          120
-        );
-
-      return () =>
-        window.clearTimeout(
-          timer
-        );
-    },
-    [
-      game?.id,
-      game?.installPath,
-      game?.technical
-        ?.saveLocation,
-    ]
-  );
-
-
-  const checks =
-    useMemo(
-      () => {
-        const list =
-          [];
-
-        list.push(
-          {
-            label:
-              "Install path available",
-
-            detail:
-              game.installPath,
-
-            state:
-              game.installPath
-                ? "pass"
-                : "warn",
-
-            actionLabel:
-              game.installPath
-                ? "Open"
-                : null,
-
-            onAction:
-              game.installPath
-                ? () =>
-                    handleOpenPath(
-                      game.installPath
-                    )
-                : null,
-          }
-        );
-
-        list.push(
-          {
-            label:
-              "Primary game binary detected",
-
-            detail:
-              local?.executable
-                ?.fileName
-                ?? "No likely primary game binary or launcher identified.",
-
-            state:
-              local?.executable
-                ?.found
-                ? "pass"
-                : "warn",
-
-            actionLabel:
-              game.installPath
-                ? "Open Folder"
-                : null,
-
-            onAction:
-              game.installPath
-                ? () =>
-                    handleOpenPath(
-                      game.installPath
-                    )
-                : null,
-          }
-        );
-
-        list.push(
-          {
-            label:
-              "Runtime path identified",
-
-            detail:
-              local?.technicalDetails
-                ?.runtime
-                ?? "GameAtlas could not classify the selected game binary runtime.",
-
-            state:
-              local?.technicalDetails
-                ?.runtime
-                ? "pass"
-                : local
-                  ? "neutral"
-                  : "neutral",
-          }
-        );
-
-        list.push(
-          {
-            label:
-              "PCGamingWiki data loaded",
-
-            detail:
-              game.pcgwPageName
-                ?? game.pcgwPageUrl
-                ?? "No PCGamingWiki page is currently loaded.",
-
-            state:
-              game.pcgwLoaded
-                && !game.pcgwError
-                ? "pass"
-                : "neutral",
-          }
-        );
-
-        list.push(
-          {
-            label:
-              "Configuration path available",
-
-            detail:
-              game.technical
-                ?.configLocation
-                ?? "No configuration location reported.",
-
-            state:
-              game.technical
-                ?.configLocation
-                ? "pass"
-                : "neutral",
-
-            actionLabel:
-              game.technical
-                ?.configLocation
-                ? "Open"
-                : null,
-
-            onAction:
-              game.technical
-                ?.configLocation
-                ? () =>
-                    handleOpenPath(
-                      game.technical
-                        ?.configLocation
-                    )
-                : null,
-          }
-        );
-
-        list.push(
-          {
-            label:
-              "Save path available",
-
-            detail:
-              game.technical
-                ?.saveLocation
-                ?? "No save location reported.",
-
-            state:
-              game.technical
-                ?.saveLocation
-                ? "pass"
-                : "neutral",
-
-            actionLabel:
-              game.technical
-                ?.saveLocation
-                ? "Open"
-                : null,
-
-            onAction:
-              game.technical
-                ?.saveLocation
-                ? () =>
-                    handleOpenPath(
-                      game.technical
-                        ?.saveLocation
-                    )
-                : null,
-          }
-        );
-
-        list.push(
-          {
-            label:
-              "Save backup created",
-
-            detail:
-              backups?.backupCount
-                ? `${backups.backupCount} backup${backups.backupCount === 1 ? "" : "s"} available.`
-                : "No GameAtlas save backup has been created yet.",
-
-            state:
-              backups?.backupCount
-                > 0
-                ? "pass"
-                : game.technical
-                    ?.saveLocation
-                  ? "warn"
-                  : "neutral",
-
-            actionLabel:
-              game.technical
-                ?.saveLocation
-                && !(backups?.backupCount > 0)
-                ? "Create Backup"
-                : null,
-
-            onAction:
-              handleCreateBackup,
-
-            actionBusy:
-              backupBusy,
-          }
-        );
-
-        const hdrEnhancementAvailable =
-          Boolean(
-            game.renodx
-              ?.renodx
-              ?.available
-            || game.renodx
-              ?.luma
-              ?.available
-          );
-
-        list.push(
-          {
-            label:
-              "HDR enhancement availability checked",
-
-            detail:
-              hdrEnhancementAvailable
-                ? "RenoDX or Luma enhancement is available for this game."
-                : "No RenoDX/Luma enhancement is currently marked available.",
-
-            state:
-              game.renodxLoaded
-                ? "pass"
-                : "neutral",
-          }
-        );
-
-        list.push(
-          {
-            label:
-              "Local graphics technologies inspected",
-
-            detail:
-              local
-                ? [
-                    local.graphics
-                      ?.dlss
-                      ? "DLSS"
-                      : null,
-
-                    local.graphics
-                      ?.dlssFrameGeneration
-                      ? "DLSS Frame Generation"
-                      : null,
-
-                    local.graphics
-                      ?.xess
-                      ? "XeSS"
-                      : null,
-
-                    local.graphics
-                      ?.fsr
-                      ? "FSR"
-                      : null,
-                  ]
-                  .filter(
-                    Boolean
-                  )
-                  .concat(
-                    local.technicalDetails
-                      ?.graphicsApis
-                      ?? []
-                  )
-                  .concat(
-                    local.technicalDetails
-                      ?.translationLayers
-                      ?? []
-                  )
-                  .filter(
-                    (
-                      value,
-                      index,
-                      values
-                    ) =>
-                      values.indexOf(
-                        value
-                      ) === index
-                  )
-                  .join(
-                    ", "
-                  )
-                  || "No recognized local graphics technologies were detected."
-                : "Local installation has not been inspected.",
-
-            state:
-              local
-                ? "pass"
-                : "neutral",
-          }
-        );
-
-        list.push(
-          {
-            label:
-              "ReShade status inspected",
-
-            detail:
-              local?.reshade
-                ?.installed
-                ? `ReShade detected${local.reshade.proxyDll ? ` (${local.reshade.proxyDll})` : ""}.`
-                : "ReShade not detected.",
-
-            state:
-              local
-                ? "pass"
-                : "neutral",
-          }
-        );
-
-        return list;
-      },
-      [
-        game,
-        local,
-        backups,
-        backupBusy,
-      ]
-    );
-
-
-  const scoredChecks =
-    checks.filter(
-      (check) =>
-        check.state
-        !== "neutral"
-    );
-
-  const passedChecks =
-    scoredChecks.filter(
-      (check) =>
-        check.state
-        === "pass"
-    ).length;
-
-  const score =
-    scoredChecks.length
-      ? Math.round(
-          (
-            passedChecks
-            / scoredChecks.length
-          )
-          * 100
-        )
-      : 0;
-
-  const grade =
-    gradeFromScore(
-      score
-    );
-
-  const warningChecks =
-    checks.filter(
-      (check) =>
-        check.state === "warn"
-    );
-
-  const informationalChecks =
-    checks.filter(
-      (check) =>
-        check.state === "neutral"
-    );
-
-  const actionableChecks =
-    warningChecks.filter(
-      (check) =>
-        Boolean(
-          check.actionLabel
-        )
-    );
-
-  useEffect(
-    () => {
-      if (
-        loading
-        || !game
-      ) {
+      if (item.action.type === "open-path") {
+        await openGamePath(item.action.path, game.installPath);
         return;
       }
 
-      storeInstallationHealth(
-        game,
-        {
-          score,
-          passed:
-            passedChecks,
-          warnings:
-            warningChecks.length,
-          informational:
-            informationalChecks.length,
-          actionable:
-            actionableChecks.length,
-        }
-      );
-    },
-    [
-      game?.id,
-      loading,
-      score,
-      passedChecks,
-      warningChecks.length,
-      informationalChecks.length,
-      actionableChecks.length,
-    ]
+      if (item.action.type === "create-save-backup") {
+        await createSaveBackup(game);
+
+        setReport((current) => {
+          if (!current) {
+            return current;
+          }
+
+          const findings = current.findings.map((findingItem) =>
+            findingItem.id === item.id
+              ? {
+                  ...findingItem,
+                  severity: "good",
+                  title: "Save backup is available",
+                  detail: "A GameAtlas save backup was created successfully.",
+                  suggestion: null,
+                  action: null,
+                }
+              : findingItem
+          );
+
+          const next = {
+            ...current,
+            findings,
+            ...summarizeGameHealth(findings),
+          };
+
+          storeInstallationHealth(game, healthRecordFromReport(next));
+          return next;
+        });
+
+        setActionMessage("Save backup created successfully.");
+      }
+    } catch (actionError) {
+      setActionMessage(`Action failed: ${String(actionError)}`);
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  const groupedFindings = useMemo(
+    () => Object.fromEntries(
+      GROUPS.map((group) => [
+        group.severity,
+        report?.findings.filter((item) => item.severity === group.severity) ?? [],
+      ])
+    ),
+    [report]
   );
 
-  const summaryText =
-    warningChecks.length > 0
-      ? `${warningChecks.length} item${warningChecks.length === 1 ? "" : "s"} need attention.${actionableChecks.length > 0 ? ` ${actionableChecks.length} can be acted on directly below.` : ""}`
-      : "No scored setup issues are currently detected.";
-
-
   return (
-    <div
-      className="
-        space-y-4
-      "
-    >
-      <div
-        className="
-          flex
-          flex-col
-          gap-4
-          rounded-xl
-          border
-          border-white/[0.08]
-          bg-black/10
-          p-4
-          sm:flex-row
-          sm:items-center
-          sm:justify-between
-        "
-      >
-        <div>
-          <div
-            className="
-              flex
-              items-center
-              gap-2
-              text-sm
-              font-semibold
-              text-white/72
-            "
-          >
-            <HeartPulse
-              className="
-                h-4
-                w-4
-                text-cyan-300/80
-              "
-            />
-
-            Installation Health
-          </div>
-
-          <div
-            className="
-              mt-1
-              text-xs
-              text-white/30
-            "
-          >
-            {summaryText}
-          </div>
-        </div>
-
-        <div
-          className="
-            flex
-            items-center
-            gap-2
-          "
-        >
-          <div
-            className={`
-              rounded-lg
-              border
-              px-3
-              py-2
-              text-center
-              ${grade.className}
-            `}
-          >
-            <div
-              className="
-                text-lg
-                font-bold
-              "
-            >
-              {score}%
+    <div className="space-y-4">
+      <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-black/10">
+        <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-300">
+              <HeartPulse className="h-5 w-5" />
             </div>
 
-            <div
-              className="
-                text-[10px]
-                font-semibold
-                uppercase
-                tracking-wide
-                opacity-70
-              "
-            >
-              {grade.label}
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-sm font-semibold text-white/78">
+                  Diagnostics Center
+                </div>
+                {report ? (
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClassName(report.status)}`}>
+                    {statusText(report.status)}
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="mt-1 max-w-3xl text-xs leading-relaxed text-white/35">
+                {isWindows
+                  ? "Runs installation, performance, driver, display, crash, runtime, background-app, and controller checks, then puts the most useful next steps first."
+                  : "Checks installation and save-protection readiness, then puts the most useful next steps first."}
+              </div>
+              <div className="mt-2 text-[11px] text-white/24">
+                Nothing runs until you start the check. Detailed tools remain available in Technical &amp; Troubleshooting.
+              </div>
             </div>
           </div>
 
           <button
             type="button"
-            onClick={
-              () =>
-                refresh({
-                  force:
-                    true,
-                })
-            }
-            disabled={
-              loading
-            }
-            className="
-              flex
-              h-10
-              w-10
-              items-center
-              justify-center
-              rounded-lg
-              border
-              border-white/[0.08]
-              bg-white/[0.025]
-              text-white/40
-              hover:bg-white/[0.06]
-              hover:text-white/70
-              disabled:opacity-30
-            "
-            title="Refresh health checks"
+            onClick={runCheck}
+            disabled={loading}
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-cyan-400/20 bg-cyan-400/[0.07] px-3.5 py-2.5 text-xs font-semibold text-cyan-100/75 hover:bg-cyan-400/[0.12] disabled:opacity-40"
           >
             {loading ? (
-              <Loader2
-                className="
-                  h-4
-                  w-4
-                  animate-spin
-                "
-              />
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : report ? (
+              <RefreshCw className="h-3.5 w-3.5" />
             ) : (
-              <RefreshCcw
-                className="h-4 w-4"
-              />
+              <Sparkles className="h-3.5 w-3.5" />
             )}
+            {loading ? "Checking…" : report ? "Run Again" : "Run Full Diagnostic"}
           </button>
         </div>
 
-        <div
-          className="
-            mt-4
-            grid
-            grid-cols-3
-            gap-2
-          "
-        >
-          <div className="rounded-lg bg-emerald-500/[0.05] px-3 py-2">
-            <div className="text-lg font-bold text-emerald-200/80">
-              {passedChecks}
+        {loading ? (
+          <div className="border-t border-white/[0.06] bg-cyan-400/[0.025] px-4 py-3">
+            <div className="flex items-center gap-2 text-xs text-cyan-100/55">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              {typeof progress === "string"
+                ? progress
+                : progress?.label
+                  ?? "Preparing diagnostics…"}
             </div>
-            <div className="text-[10px] uppercase tracking-wide text-white/25">
-              Verified
-            </div>
+            {typeof progress === "object"
+            && progress?.total ? (
+              <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.06]">
+                <div
+                  className="h-full rounded-full bg-cyan-300/55 transition-all duration-300"
+                  style={{
+                    width:
+                      `${Math.max(
+                        4,
+                        Math.min(
+                          100,
+                          (
+                            progress.completed
+                            / progress.total
+                          )
+                          * 100
+                        )
+                      )}%`,
+                  }}
+                />
+              </div>
+            ) : null}
           </div>
+        ) : null}
 
-          <div className="rounded-lg bg-amber-500/[0.05] px-3 py-2">
-            <div className="text-lg font-bold text-amber-200/80">
-              {warningChecks.length}
+        {report ? (
+          <div className="border-t border-white/[0.06]">
+            <div className="grid grid-cols-2 gap-px bg-white/[0.05] sm:grid-cols-4">
+              <div className="bg-black/40 px-4 py-3">
+                <div className="text-lg font-bold text-red-200/80">{report.counts.attention}</div>
+                <div className="text-[10px] uppercase tracking-wide text-white/25">Attention</div>
+              </div>
+              <div className="bg-black/40 px-4 py-3">
+                <div className="text-lg font-bold text-amber-200/80">{report.counts.recommendation}</div>
+                <div className="text-[10px] uppercase tracking-wide text-white/25">Recommended</div>
+              </div>
+              <div className="bg-black/40 px-4 py-3">
+                <div className="text-lg font-bold text-emerald-200/80">{report.counts.good}</div>
+                <div className="text-[10px] uppercase tracking-wide text-white/25">Passed</div>
+              </div>
+              <div className="bg-black/40 px-4 py-3">
+                <div className="text-lg font-bold text-white/55">{report.counts.unavailable}</div>
+                <div className="text-[10px] uppercase tracking-wide text-white/25">Unavailable</div>
+              </div>
             </div>
-            <div className="text-[10px] uppercase tracking-wide text-white/25">
-              Attention
-            </div>
-          </div>
 
-          <div className="rounded-lg bg-white/[0.025] px-3 py-2">
-            <div className="text-lg font-bold text-white/55">
-              {informationalChecks.length}
-            </div>
-            <div className="text-[10px] uppercase tracking-wide text-white/25">
-              Informational
+            <div className="border-t border-white/[0.05] px-4 py-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-white/28">
+                  Diagnostic coverage
+                </div>
+                <div className="text-[10px] text-white/22">
+                  {report.scans.filter((scan) => scan.status === "complete").length}/{report.scans.length} completed
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-white/[0.06] bg-white/[0.05] sm:grid-cols-2 xl:grid-cols-4">
+                {report.scans.map(
+                  (scan) => (
+                    <ScanCard
+                      key={scan.id}
+                      scan={scan}
+                    />
+                  )
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        ) : null}
       </div>
 
+      {error ? (
+        <div className="rounded-xl border border-red-500/20 bg-red-500/[0.05] px-4 py-3 text-xs text-red-100/70">
+          Diagnostics Center could not finish: {error}
+        </div>
+      ) : null}
 
       {actionMessage ? (
-        <div
-          className="
-            rounded-xl
-            border
-            border-cyan-500/15
-            bg-cyan-500/[0.04]
-            px-4
-            py-3
-            text-xs
-            text-cyan-100/65
-          "
-        >
+        <div className="rounded-xl border border-cyan-500/15 bg-cyan-500/[0.04] px-4 py-3 text-xs text-cyan-100/65">
           {actionMessage}
         </div>
       ) : null}
 
-
-      {warningChecks.length > 0 ? (
-        <div
-          className="
-            rounded-xl
-            border
-            border-amber-500/15
-            bg-amber-500/[0.035]
-            p-4
-          "
-        >
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-200/70">
-            <Wrench className="h-3.5 w-3.5" />
-            Recommended Next Steps
-          </div>
-
-          <div className="mt-2 space-y-1 text-xs text-white/38">
-            {warningChecks
-              .slice(0, 3)
-              .map(
-                (check) => (
-                  <div key={check.label}>
-                    • {check.label}
-                  </div>
-                )
-              )}
-          </div>
-        </div>
-      ) : null}
-
-
-      {error ? (
-        <div
-          className="
-            rounded-xl
-            border
-            border-amber-500/20
-            bg-amber-500/[0.05]
-            px-4
-            py-3
-            text-xs
-            text-amber-200/70
-          "
-        >
-          Local inspection warning: {error}
-        </div>
-      ) : null}
-
-
-      <div
-        className="
-          overflow-hidden
-          rounded-xl
-          border
-          border-white/[0.08]
-          bg-black/10
-        "
-      >
-        {checks.map(
-          (
-            check,
-            index
-          ) => (
-            <HealthCheck
-              key={
-                `${check.label}-${index}`
-              }
-              {...check}
+      {report ? (
+        <div className="space-y-3">
+          {GROUPS.map((group) => (
+            <ResultGroup
+              key={group.severity}
+              group={group}
+              findings={groupedFindings[group.severity]}
+              actionBusy={actionBusy}
+              onAction={handleAction}
             />
-          )
-        )}
-      </div>
-
-      <div
-        className="
-          text-[11px]
-          leading-relaxed
-          text-white/24
-        "
-      >
-        Installation Health measures setup completeness using checks GameAtlas can verify. It is not a diagnosis of whether a game is broken.
-        Neutral checks are informational and do not reduce the score.
-      </div>
+          ))}
+          <div className="px-1 text-[11px] leading-relaxed text-white/24">
+            Diagnostics Center reports observable conditions and likely contributors. It does not claim that every running app or configuration difference is a confirmed problem.
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-white/[0.07] bg-white/[0.018] px-4 py-5 text-center">
+          <HeartPulse className="mx-auto h-5 w-5 text-white/20" />
+          <div className="mt-2 text-sm font-medium text-white/45">
+            No full diagnostic has been run for this game.
+          </div>
+          <div className="mt-1 text-xs text-white/25">
+            Start the check when you want a current, prioritized assessment.
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -86,6 +86,10 @@ import BackgroundConflictPanel from "./BackgroundConflictPanel";
 import CleanLaunchPanel from "./CleanLaunchPanel";
 import ShaderCachePanel from "./ShaderCachePanel";
 import GraphicsDriverDiagnosticsPanel from "./GraphicsDriverDiagnosticsPanel";
+import CrashDetectivePanel from "./CrashDetectivePanel";
+import DisplayValidatorPanel from "./DisplayValidatorPanel";
+import RuntimeDependencyDoctorPanel from "./RuntimeDependencyDoctorPanel";
+import PerformanceCapturePanel from "./PerformanceCapturePanel";
 
 
 import RenoDxManagerPanel from "./RenoDxManagerPanel";
@@ -1212,6 +1216,9 @@ export default function GameDetails({
               game={
                 game
               }
+              isWindows={
+                !isLinux
+              }
             />
           </div>
 
@@ -1415,13 +1422,75 @@ export default function GameDetails({
             />
           </div>
 
-          <WindowsPerformanceDiagnosticsPanel
-            game={
-              game
-            }
-          />
+          {!isLinux ? (
+            <div
+              id="diagnostic-crash-detective"
+              className="scroll-mt-20"
+            >
+              <CrashDetectivePanel
+                game={
+                  game
+                }
+              />
+            </div>
+          ) : null}
 
-          <BackgroundConflictPanel />
+          {!isLinux ? (
+            <div
+              id="diagnostic-display"
+              className="scroll-mt-20"
+            >
+              <DisplayValidatorPanel
+                game={
+                  game
+                }
+              />
+            </div>
+          ) : null}
+
+          {!isLinux ? (
+            <div
+              id="diagnostic-runtime-dependencies"
+              className="scroll-mt-20"
+            >
+              <RuntimeDependencyDoctorPanel
+                game={
+                  game
+                }
+              />
+            </div>
+          ) : null}
+
+          <div
+            id="diagnostic-windows-performance"
+            className="scroll-mt-20"
+          >
+            <WindowsPerformanceDiagnosticsPanel
+              game={
+                game
+              }
+            />
+          </div>
+
+          {!isLinux ? (
+            <div
+              id="diagnostic-performance-capture"
+              className="scroll-mt-20"
+            >
+              <PerformanceCapturePanel
+                game={
+                  game
+                }
+              />
+            </div>
+          ) : null}
+
+          <div
+            id="diagnostic-background-apps"
+            className="scroll-mt-20"
+          >
+            <BackgroundConflictPanel />
+          </div>
 
           <CleanLaunchPanel
             game={
@@ -1435,7 +1504,12 @@ export default function GameDetails({
             }
           />
 
-          <GraphicsDriverDiagnosticsPanel />
+          <div
+            id="diagnostic-graphics-drivers"
+            className="scroll-mt-20"
+          >
+            <GraphicsDriverDiagnosticsPanel />
+          </div>
 
           {isLinux ? (
             <div className="mt-5">

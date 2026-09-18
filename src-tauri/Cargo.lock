@@ -4,19 +4,22 @@ version = 4
 
 [[package]]
 name = "GameManager"
-version = "2.3.0"
+version = "2.4.0"
 dependencies = [
+ "hex",
  "reqwest 0.12.28",
  "rfd",
  "semver",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
  "tauri-plugin-process",
  "tauri-plugin-updater",
  "urlencoding",
+ "windows-sys 0.61.2",
  "winreg",
 ]
 
