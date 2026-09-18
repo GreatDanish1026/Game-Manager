@@ -1,14 +1,21 @@
 import {
   Activity,
   AlertTriangle,
+  BarChart3,
+  Bookmark,
+  CalendarClock,
   CheckCircle2,
   CircleHelp,
   FolderOpen,
   Loader2,
+  Minus,
   Play,
   RefreshCw,
   Square,
   Timer,
+  Trash2,
+  TrendingDown,
+  TrendingUp,
 } from "lucide-react";
 
 import {
@@ -20,8 +27,11 @@ import {
 
 import {
   cancelPerformanceCapture,
+  getPerformanceCaptureHistory,
   getPerformanceCaptureStatus,
+  removePerformanceCaptureHistoryEntry,
   runPerformanceCapture,
+  setPerformanceCaptureBaseline,
 } from "../services/performanceCapture";
 
 import {
@@ -83,6 +93,166 @@ function MetricCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+
+function formatCaptureDate(
+  unix
+) {
+  return Number.isFinite(
+    unix
+  )
+    ? new Date(
+        unix
+      ).toLocaleString()
+    : "Unknown date";
+}
+
+
+function sceneIdentity(
+  value
+) {
+  return String(
+    value
+    ?? ""
+  )
+    .trim()
+    .replace(
+      /\s+/g,
+      " "
+    )
+    .toLocaleLowerCase();
+}
+
+
+function percentChange(
+  value,
+  baseline
+) {
+  if (
+    !Number.isFinite(value)
+    || !Number.isFinite(baseline)
+    || baseline === 0
+  ) {
+    return null;
+  }
+
+  return (
+    value
+    - baseline
+  )
+  / baseline
+  * 100;
+}
+
+
+function compareCapture(
+  entry,
+  baseline
+) {
+  if (
+    !entry
+    || !baseline
+    || entry.id === baseline.id
+    || entry.historyId === baseline.id
+  ) {
+    return null;
+  }
+
+  const average =
+    percentChange(
+      entry.averageFps,
+      baseline.averageFps
+    );
+
+  const low =
+    percentChange(
+      entry.onePercentLowFps,
+      baseline.onePercentLowFps
+    );
+
+  const p95 =
+    percentChange(
+      entry.p95FrameTimeMs,
+      baseline.p95FrameTimeMs
+    );
+
+  const spikePoints =
+    Number.isFinite(entry.spikePercent)
+    && Number.isFinite(baseline.spikePercent)
+      ? entry.spikePercent
+        - baseline.spikePercent
+      : null;
+
+  let status =
+    "similar";
+
+  if (
+    average <= -10
+    || low <= -15
+    || p95 >= 15
+    || spikePoints >= 2
+  ) {
+    status =
+      "regression";
+  } else if (
+    average <= -5
+    || low <= -8
+    || p95 >= 8
+    || spikePoints >= 1
+  ) {
+    status =
+      "possible-regression";
+  } else if (
+    average >= 5
+    || low >= 8
+    || p95 <= -8
+  ) {
+    status =
+      "improvement";
+  }
+
+  return {
+    average,
+    low,
+    p95,
+    spikePoints,
+    status,
+  };
+}
+
+
+function Delta({
+  value,
+  lowerIsBetter = false,
+  suffix = "%",
+}) {
+  if (!Number.isFinite(value)) {
+    return (
+      <span className="text-white/25">
+        —
+      </span>
+    );
+  }
+
+  const improved =
+    lowerIsBetter
+      ? value < -0.5
+      : value > 0.5;
+
+  const regressed =
+    lowerIsBetter
+      ? value > 0.5
+      : value < -0.5;
+
+  return (
+    <span className={improved ? "text-emerald-200/70" : regressed ? "text-amber-200/70" : "text-white/38"}>
+      {value > 0
+        ? "+"
+        : ""}
+      {value.toFixed(1)}{suffix}
+    </span>
   );
 }
 
@@ -238,6 +408,473 @@ function FrameTimeChart({
 }
 
 
+function ComparisonSummary({
+  report,
+  history,
+}) {
+  const baseline =
+    history?.entries
+      ?.find(
+        (entry) =>
+          entry.isBaseline
+          && sceneIdentity(
+            entry.sceneLabel
+          )
+          === sceneIdentity(
+            report?.sceneLabel
+          )
+      );
+
+  if (
+    !report?.historySaved
+    || !baseline
+  ) {
+    return null;
+  }
+
+  if (
+    report.historyId
+    === baseline.id
+  ) {
+    return (
+      <div className="flex items-start gap-3 border-b border-emerald-400/10 bg-emerald-400/[0.025] px-4 py-3">
+        <Bookmark className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300/70" />
+        <div>
+          <div className="text-xs font-semibold text-emerald-100/65">
+            Baseline saved for “{report.sceneLabel}”
+          </div>
+          <div className="mt-0.5 text-[11px] text-white/28">
+            Future captures using this exact scene label will be compared with this run.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const comparison =
+    compareCapture(
+      report,
+      baseline
+    );
+
+  if (!comparison) {
+    return null;
+  }
+
+  const appearance = {
+    regression: {
+      icon:
+        TrendingDown,
+      label:
+        "Performance regression detected",
+      className:
+        "border-red-400/15 bg-red-400/[0.035] text-red-100/70",
+    },
+    "possible-regression": {
+      icon:
+        TrendingDown,
+      label:
+        "Possible performance regression",
+      className:
+        "border-amber-400/15 bg-amber-400/[0.035] text-amber-100/70",
+    },
+    improvement: {
+      icon:
+        TrendingUp,
+      label:
+        "Performance improvement detected",
+      className:
+        "border-emerald-400/15 bg-emerald-400/[0.035] text-emerald-100/70",
+    },
+    similar: {
+      icon:
+        Minus,
+      label:
+        "Performance is similar to baseline",
+      className:
+        "border-cyan-400/12 bg-cyan-400/[0.025] text-cyan-100/62",
+    },
+  }[comparison.status];
+
+  const Icon =
+    appearance.icon;
+
+  return (
+    <div className={`border-b px-4 py-3 ${appearance.className}`}>
+      <div className="flex items-start gap-3">
+        <Icon className="mt-0.5 h-4 w-4 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-semibold">
+            {appearance.label}
+          </div>
+          <div className="mt-1 grid grid-cols-2 gap-x-5 gap-y-1 text-[11px] sm:grid-cols-4">
+            <div>
+              Average FPS <Delta value={comparison.average} />
+            </div>
+            <div>
+              1% low <Delta value={comparison.low} />
+            </div>
+            <div>
+              P95 frame time <Delta value={comparison.p95} lowerIsBetter />
+            </div>
+            <div>
+              Spike rate <Delta value={comparison.spikePoints} lowerIsBetter suffix=" pts" />
+            </div>
+          </div>
+          <div className="mt-1.5 text-[10px] text-white/25">
+            Compared with {formatCaptureDate(baseline.createdUnix)} · use the same route, settings, and duration for the most reliable comparison.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function CaptureHistory({
+  game,
+  history,
+  setHistory,
+  loading,
+  error,
+}) {
+  const [
+    busy,
+    setBusy,
+  ] =
+    useState(null);
+
+  const [
+    removeId,
+    setRemoveId,
+  ] =
+    useState(null);
+
+  const [
+    showAll,
+    setShowAll,
+  ] =
+    useState(false);
+
+  const [
+    actionError,
+    setActionError,
+  ] =
+    useState(null);
+
+
+  async function setBaseline(
+    entry
+  ) {
+    setBusy(
+      entry.id
+    );
+    setActionError(
+      null
+    );
+
+    try {
+      setHistory(
+        await setPerformanceCaptureBaseline(
+          game,
+          entry.id
+        )
+      );
+    } catch (baselineError) {
+      setActionError(
+        String(
+          baselineError
+        )
+      );
+    } finally {
+      setBusy(
+        null
+      );
+    }
+  }
+
+
+  async function removeEntry(
+    entry
+  ) {
+    setBusy(
+      entry.id
+    );
+    setActionError(
+      null
+    );
+
+    try {
+      setHistory(
+        await removePerformanceCaptureHistoryEntry(
+          game,
+          entry.id
+        )
+      );
+      setRemoveId(
+        null
+      );
+    } catch (removeError) {
+      setActionError(
+        String(
+          removeError
+        )
+      );
+    } finally {
+      setBusy(
+        null
+      );
+    }
+  }
+
+
+  const entries =
+    history?.entries
+    ?? [];
+
+  const visible =
+    showAll
+      ? entries
+      : entries.slice(
+          0,
+          8
+        );
+
+
+  return (
+    <div className="border-t border-white/[0.06] bg-emerald-400/[0.012] p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-400/[0.07] text-emerald-200/60">
+            <BarChart3 className="h-4.5 w-4.5" />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-white/68">
+              Performance Capture History
+            </div>
+            <div className="mt-1 max-w-3xl text-xs leading-relaxed text-white/30">
+              Tracks up to {history?.historyLimit ?? 50} summaries per game. Baselines are kept separately for each scene label.
+            </div>
+          </div>
+        </div>
+
+        {history?.historyDirectory
+        && entries.length > 0 ? (
+          <button
+            type="button"
+            onClick={
+              () =>
+                openGamePath(
+                  history.historyDirectory,
+                  history.historyDirectory
+                )
+            }
+            className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2 text-[11px] font-semibold text-white/45 hover:bg-white/[0.06]"
+          >
+            <FolderOpen className="h-3.5 w-3.5" />
+            History Folder
+          </button>
+        ) : null}
+      </div>
+
+      {loading ? (
+        <div className="mt-3 flex items-center gap-2 text-xs text-white/28">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Loading capture history…
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="mt-3 rounded-lg border border-red-400/15 bg-red-400/[0.035] px-3 py-2 text-xs text-red-100/60">
+          Capture history could not be loaded: {error}
+        </div>
+      ) : null}
+
+      {actionError ? (
+        <div className="mt-3 rounded-lg border border-red-400/15 bg-red-400/[0.035] px-3 py-2 text-xs text-red-100/60">
+          History could not be updated: {actionError}
+        </div>
+      ) : null}
+
+      {!loading
+      && !error
+      && entries.length === 0 ? (
+        <div className="mt-3 rounded-lg border border-white/[0.06] bg-black/10 px-3 py-3 text-xs text-white/27">
+          Complete a performance capture to create the first baseline for its scene label.
+        </div>
+      ) : null}
+
+      {entries.length > 0 ? (
+        <div className="mt-4 overflow-hidden rounded-lg border border-white/[0.07]">
+          {visible.map(
+            (entry) => {
+              const baseline =
+                entries.find(
+                  (candidate) =>
+                    candidate.isBaseline
+                    && sceneIdentity(
+                      candidate.sceneLabel
+                    )
+                    === sceneIdentity(
+                      entry.sceneLabel
+                    )
+                );
+
+              const comparison =
+                compareCapture(
+                  entry,
+                  baseline
+                );
+
+              return (
+                <div
+                  key={entry.id}
+                  className="border-b border-white/[0.055] px-3 py-3 last:border-b-0"
+                >
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="truncate text-xs font-semibold text-white/60">
+                          {entry.sceneLabel}
+                        </div>
+                        {entry.isBaseline ? (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/15 bg-emerald-400/[0.05] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-100/55">
+                            <Bookmark className="h-2.5 w-2.5" />
+                            Baseline
+                          </span>
+                        ) : comparison ? (
+                          <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${comparison.status === "regression" ? "border-red-300/15 bg-red-400/[0.04] text-red-100/55" : comparison.status === "possible-regression" ? "border-amber-300/15 bg-amber-400/[0.04] text-amber-100/55" : comparison.status === "improvement" ? "border-emerald-300/15 bg-emerald-400/[0.04] text-emerald-100/55" : "border-white/10 bg-white/[0.025] text-white/35"}`}>
+                            {comparison.status.replace("-", " ")}
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-white/24">
+                        <span className="inline-flex items-center gap-1">
+                          <CalendarClock className="h-3 w-3" />
+                          {formatCaptureDate(entry.createdUnix)}
+                        </span>
+                        <span>{entry.requestedDurationSeconds}s</span>
+                        <span>{entry.frameCount.toLocaleString()} frames</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-x-5 gap-y-1 text-[10px] sm:grid-cols-4 lg:min-w-[360px]">
+                      <div className="text-white/28">
+                        Avg <span className="text-white/60">{entry.averageFps.toFixed(1)}</span>
+                        {comparison ? <> <Delta value={comparison.average} /></> : null}
+                      </div>
+                      <div className="text-white/28">
+                        1% <span className="text-white/60">{entry.onePercentLowFps.toFixed(1)}</span>
+                        {comparison ? <> <Delta value={comparison.low} /></> : null}
+                      </div>
+                      <div className="text-white/28">
+                        P95 <span className="text-white/60">{entry.p95FrameTimeMs.toFixed(1)} ms</span>
+                      </div>
+                      <div className="text-white/28">
+                        Spikes <span className="text-white/60">{entry.spikePercent.toFixed(1)}%</span>
+                      </div>
+                    </div>
+
+                    <div className="flex shrink-0 flex-wrap gap-1.5">
+                      {!entry.isBaseline ? (
+                        <button
+                          type="button"
+                          onClick={
+                            () =>
+                              setBaseline(
+                                entry
+                              )
+                          }
+                          disabled={Boolean(busy)}
+                          className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-1.5 text-[9px] font-semibold text-white/40 hover:bg-white/[0.05] disabled:opacity-35"
+                        >
+                          <Bookmark className="h-3 w-3" />
+                          Use as Baseline
+                        </button>
+                      ) : null}
+
+                      {removeId === entry.id ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={
+                              () =>
+                                removeEntry(
+                                  entry
+                                )
+                            }
+                            disabled={Boolean(busy)}
+                            className="rounded-md border border-red-300/15 bg-red-400/[0.05] px-2 py-1.5 text-[9px] font-semibold text-red-100/60 disabled:opacity-35"
+                          >
+                            Confirm Remove
+                          </button>
+                          <button
+                            type="button"
+                            onClick={
+                              () =>
+                                setRemoveId(
+                                  null
+                                )
+                            }
+                            disabled={Boolean(busy)}
+                            className="rounded-md border border-white/10 px-2 py-1.5 text-[9px] font-semibold text-white/38 disabled:opacity-35"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={
+                            () =>
+                              setRemoveId(
+                                entry.id
+                              )
+                          }
+                          disabled={Boolean(busy)}
+                          title="Remove summary from history; keep raw CSV"
+                          className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-1.5 text-[9px] font-semibold text-white/32 hover:bg-red-400/[0.04] hover:text-red-100/55 disabled:opacity-35"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+          )}
+        </div>
+      ) : null}
+
+      {entries.length > 8 ? (
+        <button
+          type="button"
+          onClick={
+            () =>
+              setShowAll(
+                (current) =>
+                  !current
+              )
+          }
+          className="mt-3 text-[10px] font-semibold text-emerald-100/45 hover:text-emerald-100/65"
+        >
+          {showAll
+            ? "Show recent captures"
+            : `Show all ${entries.length} captures`}
+        </button>
+      ) : null}
+
+      <div className="mt-3 text-[10px] leading-relaxed text-white/20">
+        Removing a history entry does not delete its raw CSV. Automatic regression labels are indicators; scene, settings, duration, background activity, and shader compilation can all affect results.
+      </div>
+    </div>
+  );
+}
+
+
 export default function PerformanceCapturePanel({
   game,
 }) {
@@ -263,6 +900,32 @@ export default function PerformanceCapturePanel({
     setDuration,
   ] =
     useState(30);
+
+  const [
+    sceneLabel,
+    setSceneLabel,
+  ] =
+    useState(
+      "General gameplay"
+    );
+
+  const [
+    history,
+    setHistory,
+  ] =
+    useState(null);
+
+  const [
+    historyLoading,
+    setHistoryLoading,
+  ] =
+    useState(false);
+
+  const [
+    historyError,
+    setHistoryError,
+  ] =
+    useState(null);
 
   const [
     remaining,
@@ -306,6 +969,34 @@ export default function PerformanceCapturePanel({
   }
 
 
+  async function refreshHistory() {
+    setHistoryLoading(
+      true
+    );
+    setHistoryError(
+      null
+    );
+
+    try {
+      setHistory(
+        await getPerformanceCaptureHistory(
+          game
+        )
+      );
+    } catch (loadError) {
+      setHistoryError(
+        String(
+          loadError
+        )
+      );
+    } finally {
+      setHistoryLoading(
+        false
+      );
+    }
+  }
+
+
   useEffect(
     () => {
       requestId.current +=
@@ -319,6 +1010,12 @@ export default function PerformanceCapturePanel({
       setError(
         null
       );
+      setHistory(
+        null
+      );
+      setHistoryError(
+        null
+      );
       setCapturing(
         false
       );
@@ -326,6 +1023,7 @@ export default function PerformanceCapturePanel({
         null
       );
       refreshStatus();
+      refreshHistory();
     },
     [
       game?.id,
@@ -392,7 +1090,8 @@ export default function PerformanceCapturePanel({
       const next =
         await runPerformanceCapture(
           game,
-          duration
+          duration,
+          sceneLabel
         );
 
       if (
@@ -402,6 +1101,7 @@ export default function PerformanceCapturePanel({
         setReport(
           next
         );
+        await refreshHistory();
       }
     } catch (captureError) {
       if (
@@ -482,6 +1182,43 @@ export default function PerformanceCapturePanel({
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <input
+            type="text"
+            value={sceneLabel}
+            onChange={
+              (event) =>
+                setSceneLabel(
+                  event.target.value
+                    .slice(
+                      0,
+                      80
+                    )
+                )
+            }
+            list="performance-scene-labels"
+            disabled={capturing}
+            placeholder="Scene label"
+            aria-label="Repeatable scene label"
+            className="min-w-[170px] rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/60 outline-none placeholder:text-white/20 focus:border-emerald-300/25 disabled:opacity-40"
+          />
+          <datalist id="performance-scene-labels">
+            {[...new Set(
+              history?.entries
+                ?.map(
+                  (entry) =>
+                    entry.sceneLabel
+                )
+              ?? []
+            )].map(
+              (label) => (
+                <option
+                  key={label}
+                  value={label}
+                />
+              )
+            )}
+          </datalist>
+
           <select
             value={duration}
             onChange={
@@ -590,6 +1327,15 @@ export default function PerformanceCapturePanel({
 
       {report ? (
         <>
+          <ComparisonSummary
+            report={
+              report
+            }
+            history={
+              history
+            }
+          />
+
           <div className="grid grid-cols-2 gap-3 border-b border-white/[0.06] p-4 lg:grid-cols-4">
             <MetricCard
               label="Average FPS"
@@ -703,6 +1449,24 @@ export default function PerformanceCapturePanel({
           </div>
         ) : null
       )}
+
+      <CaptureHistory
+        game={
+          game
+        }
+        history={
+          history
+        }
+        setHistory={
+          setHistory
+        }
+        loading={
+          historyLoading
+        }
+        error={
+          historyError
+        }
+      />
     </div>
   );
 }

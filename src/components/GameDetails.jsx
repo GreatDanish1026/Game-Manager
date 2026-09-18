@@ -39,6 +39,7 @@ import EssentialImprovements from "./EssentialImprovements";
 import CollapsibleSection from "./CollapsibleSection";
 import CompactFeatureGrid from "./CompactFeatureGrid";
 import ModDashboard from "./ModDashboard";
+import ModConflictInspectorPanel from "./ModConflictInspectorPanel";
 import QuickStatusBar from "./QuickStatusBar";
 import LaunchProfilesPanel from "./LaunchProfilesPanel";
 import PlayStatusNotesPanel from "./PlayStatusNotesPanel";
@@ -90,6 +91,8 @@ import CrashDetectivePanel from "./CrashDetectivePanel";
 import DisplayValidatorPanel from "./DisplayValidatorPanel";
 import RuntimeDependencyDoctorPanel from "./RuntimeDependencyDoctorPanel";
 import PerformanceCapturePanel from "./PerformanceCapturePanel";
+import ConfigurationValidatorPanel from "./ConfigurationValidatorPanel";
+import LaunchFailureAnalyzerPanel from "./LaunchFailureAnalyzerPanel";
 
 
 import RenoDxManagerPanel from "./RenoDxManagerPanel";
@@ -1290,6 +1293,14 @@ export default function GameDetails({
             }
           />
 
+          {!isLinux ? (
+            <ModConflictInspectorPanel
+              game={
+                game
+              }
+            />
+          ) : null}
+
           <RenoDxManagerPanel
             game={
               game
@@ -1437,6 +1448,19 @@ export default function GameDetails({
 
           {!isLinux ? (
             <div
+              id="diagnostic-launch-failure"
+              className="scroll-mt-20"
+            >
+              <LaunchFailureAnalyzerPanel
+                game={
+                  game
+                }
+              />
+            </div>
+          ) : null}
+
+          {!isLinux ? (
+            <div
               id="diagnostic-display"
               className="scroll-mt-20"
             >
@@ -1478,6 +1502,19 @@ export default function GameDetails({
               className="scroll-mt-20"
             >
               <PerformanceCapturePanel
+                game={
+                  game
+                }
+              />
+            </div>
+          ) : null}
+
+          {!isLinux ? (
+            <div
+              id="diagnostic-configuration-validator"
+              className="scroll-mt-20"
+            >
+              <ConfigurationValidatorPanel
                 game={
                   game
                 }

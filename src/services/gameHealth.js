@@ -11,6 +11,10 @@ import {
 } from "./crashDetective";
 
 import {
+  getConfigurationValidationReport,
+} from "./configurationValidator";
+
+import {
   getDisplayValidationReport,
 } from "./displayValidator";
 
@@ -372,6 +376,105 @@ function reportFindings(
 }
 
 
+function configurationFindings(
+  report
+) {
+  if (!report?.supported) {
+    return [];
+  }
+
+  const results =
+    (report.issues ?? []).map(
+      (
+        item,
+        index
+      ) =>
+        finding({
+          id:
+            `configuration.${index}`,
+
+          source:
+            "Game configuration",
+
+          severity:
+            normalizeFindingSeverity(
+              item.severity
+            ),
+
+          title:
+            item.title,
+
+          detail:
+            item.fileName
+              ? `${item.fileName}${item.line ? `, line ${item.line}` : ""}: ${item.detail}`
+              : item.detail,
+
+          suggestion:
+            item.suggestion
+            ?? null,
+
+          action:
+            report.configPath
+              ? {
+                  type:
+                    "open-path",
+
+                  label:
+                    "Open Config Folder",
+
+                  path:
+                    report.configPath,
+                }
+              : null,
+        })
+    );
+
+  if (
+    report.filesInspected > 0
+    && !results.some(
+      (item) =>
+        item.severity
+        === "attention"
+    )
+  ) {
+    results.unshift(
+      finding({
+        id:
+          "configuration.valid",
+
+        source:
+          "Game configuration",
+
+        severity:
+          "good",
+
+        title:
+          "Recognized configuration files are valid",
+
+        detail:
+          report.summary,
+
+        action:
+          report.configPath
+            ? {
+                type:
+                  "open-path",
+
+                label:
+                  "Open Config Folder",
+
+                path:
+                  report.configPath,
+              }
+            : null,
+      })
+    );
+  }
+
+  return results;
+}
+
+
 async function settleCheck({
   id,
   label,
@@ -497,7 +600,7 @@ export async function runGameHealthCheck(
   const scans = [];
   const totalScans =
     includeWindows
-      ? 8
+      ? 9
       : 1;
   let completedScans =
     0;
@@ -709,7 +812,7 @@ export async function runGameHealthCheck(
       firstBatch.length;
 
     updateProgress(
-      "Checking crashes and runtime dependencies…"
+      "Checking crashes, runtime dependencies, and game configuration…"
     );
 
     const stabilityBatch =
@@ -779,6 +882,29 @@ export async function runGameHealthCheck(
                     "Runtime dependencies",
                 }
               ),
+        }),
+        settleCheck({
+          id:
+            "configuration",
+
+          label:
+            "Game configuration",
+
+          sectionIds: [
+            "technical-troubleshooting",
+          ],
+
+          targetId:
+            "diagnostic-configuration-validator",
+
+          task:
+            () =>
+              getConfigurationValidationReport(
+                game
+              ),
+
+          map:
+            configurationFindings,
         }),
       ]);
 

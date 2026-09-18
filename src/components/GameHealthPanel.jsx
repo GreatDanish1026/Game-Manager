@@ -481,7 +481,7 @@ export default function GameHealthPanel({
 
               <div className="mt-1 max-w-3xl text-xs leading-relaxed text-white/35">
                 {isWindows
-                  ? "Runs installation, performance, driver, display, crash, runtime, background-app, and controller checks, then puts the most useful next steps first."
+                  ? "Runs installation, performance, driver, display, crash, runtime, game-configuration, background-app, and controller checks, then puts the most useful next steps first."
                   : "Checks installation and save-protection readiness, then puts the most useful next steps first."}
               </div>
               <div className="mt-2 text-[11px] text-white/24">

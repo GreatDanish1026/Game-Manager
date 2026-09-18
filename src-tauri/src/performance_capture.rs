@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[cfg(target_os = "windows")]
 use sha2::{Digest, Sha256};
@@ -11,7 +11,10 @@ use std::{
     os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::Command,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -31,6 +34,10 @@ const SESSION_NAME: &str = "GameAtlasPerformanceCapture";
 
 #[cfg(target_os = "windows")]
 static CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "windows")]
+static HISTORY_LOCK: Mutex<()> = Mutex::new(());
+#[cfg(target_os = "windows")]
+const HISTORY_LIMIT: usize = 50;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -80,6 +87,57 @@ pub struct PerformanceCaptureReport {
     pub data_file: String,
     pub data_directory: String,
     pub provider: String,
+    pub history_id: Option<String>,
+    pub history_saved: bool,
+    pub scene_label: Option<String>,
+    pub created_unix: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceHistoryEntry {
+    pub id: String,
+    pub created_unix: u64,
+    pub scene_label: String,
+    pub requested_duration_seconds: u32,
+    pub measured_duration_seconds: f64,
+    pub frame_count: usize,
+    pub average_fps: f64,
+    pub one_percent_low_fps: f64,
+    pub average_frame_time_ms: f64,
+    pub p95_frame_time_ms: f64,
+    pub p99_frame_time_ms: f64,
+    pub spike_threshold_ms: f64,
+    pub spike_count: usize,
+    pub spike_percent: f64,
+    pub average_cpu_busy_ms: Option<f64>,
+    pub average_gpu_time_ms: Option<f64>,
+    pub present_runtime: Option<String>,
+    pub present_mode: Option<String>,
+    pub provider: String,
+    pub data_file: String,
+    pub data_directory: String,
+    #[serde(default, skip_serializing)]
+    pub is_baseline: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceCaptureHistory {
+    pub supported: bool,
+    pub entries: Vec<PerformanceHistoryEntry>,
+    pub history_limit: usize,
+    pub history_directory: String,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PerformanceHistoryFile {
+    schema_version: u32,
+    #[serde(default)]
+    baselines: HashMap<String, String>,
+    #[serde(default)]
+    entries: Vec<PerformanceHistoryEntry>,
 }
 
 #[cfg(target_os = "windows")]
@@ -100,6 +158,237 @@ impl Drop for CaptureGuard {
     fn drop(&mut self) {
         CAPTURE_ACTIVE.store(false, Ordering::Release);
     }
+}
+
+#[cfg(target_os = "windows")]
+fn unix_now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+#[cfg(target_os = "windows")]
+fn sanitize_component(value: &str) -> String {
+    let cleaned = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | ' ') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_matches('.')
+        .to_string();
+    if cleaned.is_empty() {
+        "Unknown Game".to_string()
+    } else {
+        cleaned
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn clean_scene_label(value: Option<&str>) -> String {
+    let clean = value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("General gameplay")
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(80)
+        .collect::<String>();
+    if clean.is_empty() {
+        "General gameplay".to_string()
+    } else {
+        clean
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn scene_key(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+#[cfg(target_os = "windows")]
+fn history_directory(
+    app: &tauri::AppHandle,
+    game_name: &str,
+    game_id: Option<&str>,
+) -> Result<PathBuf, String> {
+    let mut folder = sanitize_component(game_name);
+    if let Some(id) = game_id
+        .map(sanitize_component)
+        .filter(|value| !value.is_empty())
+    {
+        folder.push_str(" [");
+        folder.push_str(&id);
+        folder.push(']');
+    }
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Could not resolve performance history storage: {error}"))?
+        .join("performance-history")
+        .join(folder))
+}
+
+#[cfg(target_os = "windows")]
+fn history_path(directory: &Path) -> PathBuf {
+    directory.join("history.json")
+}
+
+#[cfg(target_os = "windows")]
+fn read_history(directory: &Path) -> Result<PerformanceHistoryFile, String> {
+    let path = history_path(directory);
+    if !path.exists() {
+        return Ok(PerformanceHistoryFile {
+            schema_version: 1,
+            baselines: HashMap::new(),
+            entries: Vec::new(),
+        });
+    }
+    let text = fs::read_to_string(&path)
+        .map_err(|error| format!("Could not read performance history: {error}"))?;
+    let history: PerformanceHistoryFile = serde_json::from_str(&text)
+        .map_err(|error| format!("Performance history is invalid: {error}"))?;
+    if history.schema_version != 1 {
+        return Err("Performance history uses an unsupported format.".to_string());
+    }
+    Ok(history)
+}
+
+#[cfg(target_os = "windows")]
+fn write_history(directory: &Path, history: &PerformanceHistoryFile) -> Result<(), String> {
+    fs::create_dir_all(directory)
+        .map_err(|error| format!("Could not create performance history storage: {error}"))?;
+    let json = serde_json::to_string_pretty(history)
+        .map_err(|error| format!("Could not serialize performance history: {error}"))?;
+    let path = history_path(directory);
+    let staged = directory.join("history.json.new");
+    let previous = directory.join("history.json.previous");
+    fs::write(&staged, json)
+        .map_err(|error| format!("Could not stage performance history: {error}"))?;
+
+    if previous.exists() {
+        fs::remove_file(&previous)
+            .map_err(|error| format!("Could not clear old history recovery data: {error}"))?;
+    }
+    if path.exists() {
+        fs::rename(&path, &previous)
+            .map_err(|error| format!("Could not preserve current performance history: {error}"))?;
+    }
+    if let Err(error) = fs::rename(&staged, &path) {
+        if previous.exists() {
+            let _ = fs::rename(&previous, &path);
+        }
+        return Err(format!("Could not update performance history: {error}"));
+    }
+    if previous.exists() {
+        let _ = fs::remove_file(previous);
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn decorate_history(mut history: PerformanceHistoryFile) -> Vec<PerformanceHistoryEntry> {
+    for entry in &mut history.entries {
+        entry.is_baseline = history
+            .baselines
+            .get(&scene_key(&entry.scene_label))
+            .is_some_and(|id| id == &entry.id);
+    }
+    history.entries.sort_by(|left, right| {
+        right
+            .created_unix
+            .cmp(&left.created_unix)
+            .then_with(|| right.id.cmp(&left.id))
+    });
+    history.entries
+}
+
+#[cfg(target_os = "windows")]
+fn store_capture_history(
+    app: &tauri::AppHandle,
+    game_name: &str,
+    game_id: Option<&str>,
+    scene_label: Option<&str>,
+    report: &PerformanceCaptureReport,
+) -> Result<PerformanceHistoryEntry, String> {
+    let _guard = HISTORY_LOCK
+        .lock()
+        .map_err(|_| "Performance history lock is unavailable.".to_string())?;
+    let directory = history_directory(app, game_name, game_id)?;
+    let mut history = read_history(&directory)?;
+    let label = clean_scene_label(scene_label);
+    let created_unix = unix_now_millis();
+    let id = format!("capture-{created_unix}");
+    let key = scene_key(&label);
+    let mut entry = PerformanceHistoryEntry {
+        id: id.clone(),
+        created_unix,
+        scene_label: label,
+        requested_duration_seconds: report.requested_duration_seconds,
+        measured_duration_seconds: report.measured_duration_seconds,
+        frame_count: report.frame_count,
+        average_fps: report.average_fps,
+        one_percent_low_fps: report.one_percent_low_fps,
+        average_frame_time_ms: report.average_frame_time_ms,
+        p95_frame_time_ms: report.p95_frame_time_ms,
+        p99_frame_time_ms: report.p99_frame_time_ms,
+        spike_threshold_ms: report.spike_threshold_ms,
+        spike_count: report.spike_count,
+        spike_percent: report.spike_percent,
+        average_cpu_busy_ms: report.average_cpu_busy_ms,
+        average_gpu_time_ms: report.average_gpu_time_ms,
+        present_runtime: report.present_runtime.clone(),
+        present_mode: report.present_mode.clone(),
+        provider: report.provider.clone(),
+        data_file: report.data_file.clone(),
+        data_directory: report.data_directory.clone(),
+        is_baseline: false,
+    };
+    if !history.baselines.contains_key(&key) {
+        history.baselines.insert(key, id);
+        entry.is_baseline = true;
+    }
+    history.entries.push(entry.clone());
+    history.entries.sort_by(|left, right| {
+        right
+            .created_unix
+            .cmp(&left.created_unix)
+            .then_with(|| right.id.cmp(&left.id))
+    });
+    if history.entries.len() > HISTORY_LIMIT {
+        history.entries.truncate(HISTORY_LIMIT);
+        let retained = history
+            .entries
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        history
+            .baselines
+            .retain(|_, id| retained.contains(id.as_str()));
+    }
+    write_history(&directory, &history)?;
+    Ok(entry)
+}
+
+#[cfg(target_os = "windows")]
+fn valid_history_id(value: &str) -> bool {
+    value.starts_with("capture-")
+        && value.len() <= 40
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-')
 }
 
 #[cfg(target_os = "windows")]
@@ -477,6 +766,10 @@ fn parse_capture(
         data_file: path.to_string_lossy().to_string(),
         data_directory: path.parent().unwrap_or(path).to_string_lossy().to_string(),
         provider: format!("PresentMon {PROVIDER_VERSION}"),
+        history_id: None,
+        history_saved: false,
+        scene_label: None,
+        created_unix: None,
     })
 }
 
@@ -529,6 +822,9 @@ pub async fn run_performance_capture(
     app: tauri::AppHandle,
     executable_path: String,
     duration_seconds: u32,
+    game_name: String,
+    game_id: Option<String>,
+    scene_label: Option<String>,
 ) -> Result<PerformanceCaptureReport, String> {
     #[cfg(target_os = "windows")]
     {
@@ -610,13 +906,180 @@ pub async fn run_performance_capture(
             });
         }
 
-        return parse_capture(&output_path, process_name, duration_seconds);
+        let mut report = parse_capture(&output_path, process_name, duration_seconds)?;
+        match store_capture_history(
+            &app,
+            &game_name,
+            game_id.as_deref(),
+            scene_label.as_deref(),
+            &report,
+        ) {
+            Ok(entry) => {
+                report.history_id = Some(entry.id);
+                report.history_saved = true;
+                report.scene_label = Some(entry.scene_label);
+                report.created_unix = Some(entry.created_unix);
+            }
+            Err(error) => {
+                report.findings.push(performance_finding(
+                    "warning",
+                    "Capture history could not be saved",
+                    error,
+                    Some("The raw CSV is still available. Try another capture after checking GameAtlas data-folder permissions."),
+                ));
+            }
+        }
+        return Ok(report);
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (app, executable_path, duration_seconds);
+        let _ = (
+            app,
+            executable_path,
+            duration_seconds,
+            game_name,
+            game_id,
+            scene_label,
+        );
         Err("Performance Capture is currently available on Windows.".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn get_performance_capture_history(
+    app: tauri::AppHandle,
+    game_name: String,
+    game_id: Option<String>,
+) -> Result<PerformanceCaptureHistory, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let _guard = HISTORY_LOCK
+            .lock()
+            .map_err(|_| "Performance history lock is unavailable.".to_string())?;
+        let directory = history_directory(&app, &game_name, game_id.as_deref())?;
+        let entries = decorate_history(read_history(&directory)?);
+        return Ok(PerformanceCaptureHistory {
+            supported: true,
+            entries,
+            history_limit: HISTORY_LIMIT,
+            history_directory: directory.to_string_lossy().to_string(),
+        });
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app, game_name, game_id);
+        Ok(PerformanceCaptureHistory {
+            supported: false,
+            entries: Vec::new(),
+            history_limit: 0,
+            history_directory: String::new(),
+        })
+    }
+}
+
+#[tauri::command]
+pub fn set_performance_capture_baseline(
+    app: tauri::AppHandle,
+    game_name: String,
+    game_id: Option<String>,
+    capture_id: String,
+) -> Result<PerformanceCaptureHistory, String> {
+    #[cfg(target_os = "windows")]
+    {
+        if !valid_history_id(&capture_id) {
+            return Err("Invalid performance capture identifier.".to_string());
+        }
+        let _guard = HISTORY_LOCK
+            .lock()
+            .map_err(|_| "Performance history lock is unavailable.".to_string())?;
+        let directory = history_directory(&app, &game_name, game_id.as_deref())?;
+        let mut history = read_history(&directory)?;
+        let entry = history
+            .entries
+            .iter()
+            .find(|entry| entry.id == capture_id)
+            .ok_or_else(|| {
+                "The selected performance capture is no longer in history.".to_string()
+            })?;
+        history
+            .baselines
+            .insert(scene_key(&entry.scene_label), capture_id);
+        write_history(&directory, &history)?;
+        let entries = decorate_history(history);
+        return Ok(PerformanceCaptureHistory {
+            supported: true,
+            entries,
+            history_limit: HISTORY_LIMIT,
+            history_directory: directory.to_string_lossy().to_string(),
+        });
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app, game_name, game_id, capture_id);
+        Err("Performance Capture History is currently available only on Windows.".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn remove_performance_capture_history_entry(
+    app: tauri::AppHandle,
+    game_name: String,
+    game_id: Option<String>,
+    capture_id: String,
+) -> Result<PerformanceCaptureHistory, String> {
+    #[cfg(target_os = "windows")]
+    {
+        if !valid_history_id(&capture_id) {
+            return Err("Invalid performance capture identifier.".to_string());
+        }
+        let _guard = HISTORY_LOCK
+            .lock()
+            .map_err(|_| "Performance history lock is unavailable.".to_string())?;
+        let directory = history_directory(&app, &game_name, game_id.as_deref())?;
+        let mut history = read_history(&directory)?;
+        let removed = history
+            .entries
+            .iter()
+            .find(|entry| entry.id == capture_id)
+            .cloned()
+            .ok_or_else(|| {
+                "The selected performance capture is no longer in history.".to_string()
+            })?;
+        history.entries.retain(|entry| entry.id != capture_id);
+        let key = scene_key(&removed.scene_label);
+        if history
+            .baselines
+            .get(&key)
+            .is_some_and(|id| id == &capture_id)
+        {
+            if let Some(replacement) = history
+                .entries
+                .iter()
+                .filter(|entry| scene_key(&entry.scene_label) == key)
+                .max_by_key(|entry| entry.created_unix)
+            {
+                history.baselines.insert(key, replacement.id.clone());
+            } else {
+                history.baselines.remove(&key);
+            }
+        }
+        write_history(&directory, &history)?;
+        let entries = decorate_history(history);
+        return Ok(PerformanceCaptureHistory {
+            supported: true,
+            entries,
+            history_limit: HISTORY_LIMIT,
+            history_directory: directory.to_string_lossy().to_string(),
+        });
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app, game_name, game_id, capture_id);
+        Err("Performance Capture History is currently available only on Windows.".to_string())
     }
 }
 
@@ -690,5 +1153,63 @@ mod tests {
         assert!(report.one_percent_low_fps < report.average_fps);
         assert_eq!(report.spike_count, 1);
         assert_eq!(report.present_runtime.as_deref(), Some("DXGI"));
+    }
+
+    #[test]
+    fn history_roundtrips_and_decorates_scene_baseline() {
+        let directory = std::env::temp_dir().join(format!(
+            "gameatlas-performance-history-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let entry = PerformanceHistoryEntry {
+            id: "capture-12345".to_string(),
+            created_unix: 12345,
+            scene_label: "Built-in benchmark".to_string(),
+            requested_duration_seconds: 30,
+            measured_duration_seconds: 30.0,
+            frame_count: 1800,
+            average_fps: 60.0,
+            one_percent_low_fps: 48.0,
+            average_frame_time_ms: 16.67,
+            p95_frame_time_ms: 20.0,
+            p99_frame_time_ms: 25.0,
+            spike_threshold_ms: 33.3,
+            spike_count: 2,
+            spike_percent: 0.1,
+            average_cpu_busy_ms: Some(5.0),
+            average_gpu_time_ms: Some(10.0),
+            present_runtime: Some("DXGI".to_string()),
+            present_mode: Some("Hardware: Independent Flip".to_string()),
+            provider: "PresentMon 2.5.1".to_string(),
+            data_file: "capture.csv".to_string(),
+            data_directory: "captures".to_string(),
+            is_baseline: false,
+        };
+        let mut baselines = HashMap::new();
+        baselines.insert(scene_key(&entry.scene_label), entry.id.clone());
+        let history = PerformanceHistoryFile {
+            schema_version: 1,
+            baselines,
+            entries: vec![entry],
+        };
+
+        write_history(&directory, &history).expect("write history");
+        let entries = decorate_history(read_history(&directory).expect("read history"));
+        let _ = fs::remove_dir_all(&directory);
+
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].is_baseline);
+        assert_eq!(entries[0].scene_label, "Built-in benchmark");
+    }
+
+    #[test]
+    fn scene_labels_and_history_ids_are_sanitized() {
+        assert_eq!(clean_scene_label(Some("  City route  ")), "City route");
+        assert_eq!(clean_scene_label(Some("   ")), "General gameplay");
+        assert!(valid_history_id("capture-123456"));
+        assert!(!valid_history_id("../capture-123456"));
     }
 }

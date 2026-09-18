@@ -1,5 +1,6 @@
 mod background_conflicts;
 mod clean_launch;
+mod configuration_validator;
 mod controller_conflicts;
 mod crash_detective;
 mod diagnostics;
@@ -12,6 +13,7 @@ mod game_version;
 mod graphics_driver_diagnostics;
 mod heroic_games;
 mod installed_games;
+mod launch_failure_analyzer;
 mod launch_profiles;
 mod linux_performance;
 mod linux_steam;
@@ -20,6 +22,7 @@ mod local_paths;
 mod logging;
 mod lutris_games;
 mod manual_games;
+mod mod_conflict_inspector;
 mod pcgamingwiki;
 mod pcgw_issues;
 mod performance_capture;
@@ -60,6 +63,11 @@ pub fn run() {
             clean_launch::get_clean_launch_status,
             clean_launch::prepare_clean_launch,
             clean_launch::restore_clean_launch_apps,
+            configuration_validator::get_game_configuration_validation_report,
+            configuration_validator::get_game_configuration_backup_status,
+            configuration_validator::create_game_configuration_backup,
+            configuration_validator::safely_reset_game_configuration,
+            configuration_validator::restore_game_configuration_backup,
             shader_cache::get_shader_cache_report,
             shader_cache::clear_shader_cache_targets,
             graphics_driver_diagnostics::get_graphics_driver_diagnostics,
@@ -70,6 +78,9 @@ pub fn run() {
             performance_capture::get_performance_capture_status,
             performance_capture::run_performance_capture,
             performance_capture::cancel_performance_capture,
+            performance_capture::get_performance_capture_history,
+            performance_capture::set_performance_capture_baseline,
+            performance_capture::remove_performance_capture_history_entry,
             windows_performance_diagnostics::get_windows_performance_diagnostics,
             reshade_windows::install_reshade_addons_windows,
             renodx_installer::get_renodx_package_info,
@@ -120,6 +131,9 @@ pub fn run() {
             save_backups::restore_save_backup,
             game_launcher::launch_game,
             launch_profiles::launch_profile_executable,
+            launch_failure_analyzer::monitor_game_launch,
+            launch_failure_analyzer::cancel_launch_failure_monitor,
+            mod_conflict_inspector::inspect_mod_conflicts,
             launch_profiles::get_installed_proton_tools,
             game_launcher::get_launcher_status,
             local_installation::inspect_local_installation,

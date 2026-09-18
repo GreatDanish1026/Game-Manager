@@ -56,7 +56,8 @@ export async function getPerformanceCaptureStatus(
 
 export async function runPerformanceCapture(
   game,
-  durationSeconds
+  durationSeconds,
+  sceneLabel
 ) {
   return invoke(
     "run_performance_capture",
@@ -67,6 +68,21 @@ export async function runPerformanceCapture(
         ),
 
       durationSeconds,
+
+      gameName:
+        game?.name
+        ?? "Unknown Game",
+
+      gameId:
+        game?.id == null
+          ? null
+          : String(
+              game.id
+            ),
+
+      sceneLabel:
+        sceneLabel
+        ?? null,
     }
   );
 }
@@ -75,5 +91,69 @@ export async function runPerformanceCapture(
 export async function cancelPerformanceCapture() {
   return invoke(
     "cancel_performance_capture"
+  );
+}
+
+
+function historyIdentity(
+  game
+) {
+  return {
+    gameName:
+      game?.name
+      ?? "Unknown Game",
+
+    gameId:
+      game?.id == null
+        ? null
+        : String(
+            game.id
+          ),
+  };
+}
+
+
+export async function getPerformanceCaptureHistory(
+  game
+) {
+  return invoke(
+    "get_performance_capture_history",
+    historyIdentity(
+      game
+    )
+  );
+}
+
+
+export async function setPerformanceCaptureBaseline(
+  game,
+  captureId
+) {
+  return invoke(
+    "set_performance_capture_baseline",
+    {
+      ...historyIdentity(
+        game
+      ),
+
+      captureId,
+    }
+  );
+}
+
+
+export async function removePerformanceCaptureHistoryEntry(
+  game,
+  captureId
+) {
+  return invoke(
+    "remove_performance_capture_history_entry",
+    {
+      ...historyIdentity(
+        game
+      ),
+
+      captureId,
+    }
   );
 }
