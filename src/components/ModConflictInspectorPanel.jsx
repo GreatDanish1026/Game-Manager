@@ -187,6 +187,7 @@ function DllRow({
 
 export default function ModConflictInspectorPanel({
   game,
+  isLinux = false,
 }) {
   const requestId =
     useRef(0);
@@ -364,7 +365,9 @@ export default function ModConflictInspectorPanel({
               Mod Conflict &amp; DLL Inspector
             </div>
             <div className="mt-1 max-w-3xl text-xs leading-relaxed text-white/35">
-              Inventories local DLLs and plug-ins, recognizes common mod frameworks, and checks architecture, proxy entry points, empty files, and differing duplicate mod DLLs.
+              {isLinux
+                ? "Inventories Proton DLLs, native shared libraries, and plug-ins; recognizes common mod frameworks; and checks architecture, proxy entry points, empty files, and differing duplicate mod binaries."
+                : "Inventories local DLLs and plug-ins, recognizes common mod frameworks, and checks architecture, proxy entry points, empty files, and differing duplicate mod DLLs."}
             </div>
             <div className="mt-2 text-[10px] text-white/24">
               Manual and read-only. GameAtlas does not remove, replace, disable, or upload any files.
@@ -387,7 +390,9 @@ export default function ModConflictInspectorPanel({
             ? "Inspecting…"
             : report
               ? "Scan Again"
-              : "Inspect Mods & DLLs"}
+              : isLinux
+                ? "Inspect Mods & Binaries"
+                : "Inspect Mods & DLLs"}
         </button>
       </div>
 
@@ -400,7 +405,9 @@ export default function ModConflictInspectorPanel({
       {loading && !report ? (
         <div className="flex items-center gap-3 p-4 text-sm text-white/35">
           <Loader2 className="h-4 w-4 animate-spin text-fuchsia-300/70" />
-          Mapping mod frameworks and inspecting local DLLs…
+          {isLinux
+            ? "Mapping mod frameworks and inspecting local binaries…"
+            : "Mapping mod frameworks and inspecting local DLLs…"}
         </div>
       ) : null}
 
@@ -418,11 +425,15 @@ export default function ModConflictInspectorPanel({
               ],
               [
                 report.proxyCount,
-                "Proxy DLLs",
+                isLinux
+                  ? "Windows proxy DLLs"
+                  : "Proxy DLLs",
               ],
               [
                 report.dllCount,
-                "DLLs inspected",
+                isLinux
+                  ? "Binaries inspected"
+                  : "DLLs inspected",
               ],
             ].map(
               ([
@@ -500,7 +511,9 @@ export default function ModConflictInspectorPanel({
           {report.duplicateGroups.length > 0 ? (
             <div className="border-b border-white/[0.06] p-4">
               <div className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-white/28">
-                Relevant duplicate DLL names
+                {isLinux
+                  ? "Relevant duplicate mod binary names"
+                  : "Relevant duplicate DLL names"}
               </div>
               <div className="space-y-2">
                 {report.duplicateGroups.slice(0, 8).map(
@@ -543,7 +556,9 @@ export default function ModConflictInspectorPanel({
             >
               <div>
                 <div className="text-xs font-semibold text-white/55">
-                  DLL inventory
+                  {isLinux
+                    ? "Mod binary inventory"
+                    : "DLL inventory"}
                 </div>
                 <div className="mt-0.5 text-[10px] text-white/23">
                   {report.dllsReturned} detailed record{report.dllsReturned === 1 ? "" : "s"} available
@@ -652,7 +667,7 @@ export default function ModConflictInspectorPanel({
                   </div>
                 ) : (
                   <div className="px-4 py-6 text-center text-xs text-white/28">
-                    No DLLs match the current filter.
+                    No mod binaries match the current filter.
                   </div>
                 )}
               </div>

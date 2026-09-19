@@ -272,7 +272,11 @@ export function buildLinuxLaunchOptions(settings) {
       "MANGOHUD=1"
     );
 
-    const config = [];
+    const config = [
+      "output_folder=${XDG_DATA_HOME:-$HOME/.local/share}/com.greatdanish.gamemanager/performance-captures",
+      "log_interval=0",
+      "control=mangohud-%p",
+    ];
 
     if (
       !value.gamescopeEnabled
@@ -307,6 +311,15 @@ export function buildLinuxLaunchOptions(settings) {
     );
   }
 
+  if (
+    value.mangoHudEnabled
+    && !value.gamescopeEnabled
+  ) {
+    command.push(
+      "mangohud"
+    );
+  }
+
   if (value.gamescopeEnabled) {
     command.push(
       "gamescope"
@@ -315,6 +328,12 @@ export function buildLinuxLaunchOptions(settings) {
     if (value.gamescopeFullscreen) {
       command.push(
         "-f"
+      );
+    }
+
+    if (value.mangoHudEnabled) {
+      command.push(
+        "--mangoapp"
       );
     }
 

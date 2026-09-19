@@ -50,7 +50,7 @@ export async function getCrashDetectiveReport(
         game
       );
   } catch {
-    // The Windows event-log query can still use the game name.
+    // The platform crash-record query can still use the game name.
   }
 
   return invoke(

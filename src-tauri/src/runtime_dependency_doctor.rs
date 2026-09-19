@@ -1,12 +1,17 @@
 use serde::Serialize;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 use std::{
-    cmp::Ordering,
     env, fs,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
+
+#[cfg(target_os = "windows")]
+use std::cmp::Ordering;
+
+#[cfg(target_os = "linux")]
+use std::process::Command;
 
 #[cfg(target_os = "windows")]
 use winreg::{
@@ -47,6 +52,7 @@ pub struct DependencyFinding {
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeDependencyReport {
     pub supported: bool,
+    pub platform: String,
     pub executable_name: Option<String>,
     pub architecture: Option<String>,
     pub checks: Vec<DependencyCheck>,
@@ -56,7 +62,7 @@ pub struct RuntimeDependencyReport {
     pub scan_limited: bool,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 #[derive(Debug, Default)]
 struct BinaryRequirements {
     vc_runtime_dlls: Vec<String>,
@@ -66,7 +72,7 @@ struct BinaryRequirements {
     xna: bool,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn finding(
     severity: &str,
     title: impl Into<String>,
@@ -81,7 +87,7 @@ fn finding(
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn read_pe_architecture(path: &Path) -> Option<String> {
     let mut file = fs::File::open(path).ok()?;
     let mut dos = [0u8; 64];
@@ -104,7 +110,7 @@ fn read_pe_architecture(path: &Path) -> Option<String> {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn contains_ascii(haystack: &[u8], needle: &str) -> bool {
     let needle = needle.as_bytes();
     haystack.windows(needle.len()).any(|window| {
@@ -115,7 +121,7 @@ fn contains_ascii(haystack: &[u8], needle: &str) -> bool {
     })
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn binary_requirements(path: &Path) -> Result<BinaryRequirements, String> {
     let file = fs::File::open(path)
         .map_err(|error| format!("Could not open the selected executable: {error}"))?;
@@ -298,7 +304,7 @@ fn xna_installed() -> bool {
         .is_dir()
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn collect_bundled_installers(root: &Path) -> (Vec<String>, bool) {
     let mut found = Vec::new();
     let mut stack = vec![(root.to_path_buf(), 0usize)];
@@ -342,7 +348,7 @@ fn collect_bundled_installers(root: &Path) -> (Vec<String>, bool) {
     (found, limited)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn dependency_check(
     id: &str,
     name: &str,
@@ -622,6 +628,7 @@ fn build_report(
 
     Ok(RuntimeDependencyReport {
         supported: true,
+        platform: "windows".to_string(),
         executable_name: executable
             .file_name()
             .and_then(|name| name.to_str())
@@ -635,11 +642,784 @@ fn build_report(
     })
 }
 
+#[cfg(target_os = "linux")]
+fn read_elf_architecture(path: &Path) -> Option<String> {
+    let mut file = fs::File::open(path).ok()?;
+    let mut header = [0u8; 20];
+    file.read_exact(&mut header).ok()?;
+    if &header[0..4] != b"\x7fELF" {
+        return None;
+    }
+    let class = match header[4] {
+        1 => "32-bit",
+        2 => "64-bit",
+        _ => "Unknown class",
+    };
+    let machine = if header[5] == 2 {
+        u16::from_be_bytes([header[18], header[19]])
+    } else {
+        u16::from_le_bytes([header[18], header[19]])
+    };
+    let machine = match machine {
+        0x0003 => "x86",
+        0x003e => "x86_64",
+        0x0028 => "ARM",
+        0x00b7 => "ARM64",
+        0x00f3 => "RISC-V",
+        _ => "Unknown",
+    };
+    Some(format!("{class} ({machine})"))
+}
+
+#[cfg(target_os = "linux")]
+fn command_text(program: &str, arguments: &[&str], host: bool) -> Result<String, String> {
+    let mut command = if host {
+        let mut command = Command::new("distrobox-host-exec");
+        command.arg(program);
+        command
+    } else {
+        Command::new(program)
+    };
+    command
+        .args(arguments)
+        .env_remove("LD_LIBRARY_PATH")
+        .env_remove("PYTHONHOME")
+        .env_remove("PYTHONPATH");
+    let output = command
+        .output()
+        .map_err(|error| format!("Could not start {program}: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let text = format!("{}\n{}", stdout, stderr).trim().to_string();
+    let lower = text.to_ascii_lowercase();
+    if output.status.success()
+        || lower.contains("statically linked")
+        || lower.contains("not a dynamic executable")
+    {
+        Ok(text)
+    } else {
+        Err(if text.is_empty() {
+            format!("{program} did not return dependency information.")
+        } else {
+            text
+        })
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_command_text(program: &str, arguments: &[&str]) -> Result<String, String> {
+    command_text(program, arguments, false).or_else(|_| command_text(program, arguments, true))
+}
+
+#[cfg(target_os = "linux")]
+fn parse_elf_interpreter(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let marker = "Requesting program interpreter:";
+        let (_, value) = line.split_once(marker)?;
+        Some(value.trim().trim_end_matches(']').to_string())
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn missing_ldd_libraries(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.contains("=> not found"))
+        .filter_map(|line| line.split_whitespace().next().map(str::to_string))
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn executable_in_path(program: &str) -> Option<PathBuf> {
+    let path = env::var_os("PATH")?;
+    env::split_paths(&path)
+        .map(|directory| directory.join(program))
+        .find(|candidate| candidate.is_file())
+}
+
+#[cfg(target_os = "linux")]
+fn case_insensitive_file(directory: &Path, name: &str) -> Option<PathBuf> {
+    let exact = directory.join(name);
+    if exact.is_file() {
+        return Some(exact);
+    }
+    fs::read_dir(directory)
+        .ok()?
+        .flatten()
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(name)
+        })
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+}
+
+#[cfg(target_os = "linux")]
+fn proton_dll(
+    executable: &Path,
+    prefix: Option<&Path>,
+    architecture: &str,
+    name: &str,
+) -> Option<PathBuf> {
+    if let Some(local) = executable
+        .parent()
+        .and_then(|directory| case_insensitive_file(directory, name))
+    {
+        return Some(local);
+    }
+    let prefix = prefix?;
+    let windows = prefix.join("drive_c").join("windows");
+    let system = if architecture.eq_ignore_ascii_case("x86") {
+        windows.join("syswow64")
+    } else {
+        windows.join("system32")
+    };
+    case_insensitive_file(&system, name)
+}
+
+#[cfg(target_os = "linux")]
+fn build_proton_report(
+    install_path: &str,
+    executable: &Path,
+    architecture_hint: Option<String>,
+    proton_prefix: Option<String>,
+) -> Result<RuntimeDependencyReport, String> {
+    let architecture = read_pe_architecture(executable).or_else(|| {
+        architecture_hint.map(|value| {
+            if value.contains("32-bit") {
+                "x86".to_string()
+            } else if value.contains("64-bit") {
+                "x64".to_string()
+            } else {
+                value
+            }
+        })
+    });
+    let architecture_value = architecture.clone().unwrap_or_else(|| "x64".to_string());
+    let requirements = binary_requirements(executable)?;
+    let prefix = proton_prefix
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    let prefix_supplied = prefix.is_some();
+    let prefix_available = prefix.as_ref().is_some_and(|path| path.is_dir());
+    let install_root = PathBuf::from(install_path.trim());
+    let (bundled_installers, scan_limited) = if install_root.is_dir() {
+        collect_bundled_installers(&install_root)
+    } else {
+        (Vec::new(), false)
+    };
+    let mut checks = Vec::new();
+    let mut findings = Vec::new();
+
+    checks.push(dependency_check(
+        "proton-prefix",
+        "Proton / Wine prefix",
+        "Compatibility runtime",
+        prefix_supplied,
+        prefix_available,
+        None,
+        architecture.clone(),
+        if prefix_available {
+            format!("The game prefix is available at {}.", prefix.as_ref().unwrap().display())
+        } else if prefix_supplied {
+            "The configured Proton or Wine prefix path does not currently exist.".to_string()
+        } else {
+            "The launcher did not provide a Proton or Wine prefix path, so prefix-installed dependencies cannot be verified.".to_string()
+        },
+        prefix
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string())
+            .into_iter()
+            .collect(),
+        (prefix_supplied && !prefix_available).then_some("Launch the game once through its configured launcher to create the prefix, then run this check again."),
+    ));
+    if prefix_supplied && !prefix_available {
+        findings.push(finding(
+            "warning",
+            "Proton or Wine prefix was not found",
+            "GameAtlas can inspect the executable, but cannot confirm prefix-installed Windows runtimes without the game's prefix.",
+            Some("Launch the game once through its configured launcher, then run Runtime and Dependency Doctor again."),
+        ));
+    } else if !prefix_supplied {
+        findings.push(finding(
+            "info",
+            "Compatibility prefix could not be inspected",
+            "The launcher did not expose this game's Wine or Proton prefix path, so prefix-installed Windows components are reported as unverified rather than missing.",
+            Some("If the launcher exposes a per-game prefix path, add it to the library entry before relying on prefix dependency results."),
+        ));
+    }
+
+    let mut add_import_check = |id: &str,
+                                name: &str,
+                                category: &str,
+                                imports: Vec<String>,
+                                suggestion: &'static str| {
+        let required = !imports.is_empty();
+        let missing = imports
+            .iter()
+            .filter(|dll| {
+                proton_dll(executable, prefix.as_deref(), &architecture_value, dll).is_none()
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let available = required && missing.is_empty();
+        let mut check = dependency_check(
+            id,
+            name,
+            category,
+            required,
+            available,
+            None,
+            architecture.clone(),
+            if required {
+                if available {
+                    "Every recognized imported DLL was found beside the game or in the game's prefix.".to_string()
+                } else {
+                    format!("The executable imports {}, but these files were not found beside the game or in its prefix: {}.", imports.join(", "), missing.join(", "))
+                }
+            } else {
+                format!("No recognized {name} import was found in the primary executable. Secondary DLLs may still require it.")
+            },
+            imports.clone(),
+            (required && !available && prefix_available).then_some(suggestion),
+        );
+        if required && !available && !prefix_available {
+            check.status = "not verified".to_string();
+            check.severity = "info".to_string();
+            check.detail = format!("The executable imports {}, but the compatibility prefix was unavailable for inspection.", imports.join(", "));
+        }
+        checks.push(check);
+        if required && !available && prefix_available {
+            findings.push(finding(
+                "warning",
+                format!("{name} files may be missing from the prefix"),
+                missing.join(", "),
+                Some(suggestion),
+            ));
+        }
+    };
+
+    add_import_check(
+        "visual-cpp",
+        "Microsoft Visual C++ runtime",
+        "Proton Windows runtime",
+        requirements.vc_runtime_dlls,
+        "Verify the game files first. If the game still reports a missing DLL, use its bundled redistributable or protontricks for this specific prefix.",
+    );
+    add_import_check(
+        "directx-legacy",
+        "DirectX legacy components",
+        "Proton graphics and input",
+        requirements.directx_dlls,
+        "Verify the game files first, then use the game's DirectX installer or the matching protontricks component only if the launch error names the missing DLL.",
+    );
+    add_import_check(
+        "openal",
+        "OpenAL",
+        "Proton audio runtime",
+        requirements
+            .openal
+            .then(|| vec!["OpenAL32.dll".to_string()])
+            .unwrap_or_default(),
+        "Verify the game files or run the game's bundled OpenAL installer inside this prefix.",
+    );
+    let managed_roots = prefix
+        .as_ref()
+        .map(|prefix| prefix.join("drive_c").join("windows"));
+    let dotnet_evidence = managed_roots.as_ref().and_then(|windows| {
+        [
+            windows.join("Microsoft.NET/Framework/v4.0.30319/mscorwks.dll"),
+            windows.join("Microsoft.NET/Framework64/v4.0.30319/mscorwks.dll"),
+            windows.join("Microsoft.NET/Framework/v2.0.50727/mscorwks.dll"),
+            windows.join("mono/mono-2.0/bin/mono.dll"),
+        ]
+        .into_iter()
+        .find(|path| path.is_file())
+    });
+    let dotnet_available = dotnet_evidence.is_some();
+    let mut dotnet_check = dependency_check(
+        "dotnet-framework",
+        ".NET Framework / Wine Mono",
+        "Proton managed runtime",
+        requirements.dotnet_framework,
+        dotnet_available,
+        None,
+        architecture.clone(),
+        if requirements.dotnet_framework {
+            if dotnet_available {
+                "The executable contains managed-runtime evidence and the prefix contains a .NET Framework or Wine Mono runtime file.".to_string()
+            } else {
+                "The executable contains managed-runtime evidence, but the prefix does not show a .NET Framework or Wine Mono installation.".to_string()
+            }
+        } else {
+            "No direct managed-runtime loader import was found in the primary executable.".to_string()
+        },
+        dotnet_evidence
+            .map(|path| path.to_string_lossy().to_string())
+            .into_iter()
+            .collect(),
+        (requirements.dotnet_framework && !dotnet_available && prefix_available).then_some("Confirm the game supports Proton, then install only the required .NET version into this prefix using the launcher's tools or protontricks."),
+    );
+    if requirements.dotnet_framework && !dotnet_available && !prefix_available {
+        dotnet_check.status = "not verified".to_string();
+        dotnet_check.severity = "info".to_string();
+        dotnet_check.detail = "The executable contains managed-runtime evidence, but the compatibility prefix was unavailable for inspection.".to_string();
+    }
+    checks.push(dotnet_check);
+    if requirements.dotnet_framework && !dotnet_available && prefix_available {
+        findings.push(finding(
+            "warning",
+            "Managed runtime may be missing from the prefix",
+            "The primary executable references the Windows managed loader, but no .NET Framework or Wine Mono runtime evidence was found.",
+            Some("Check the game's documented Proton requirements before installing the matching .NET component into this prefix."),
+        ));
+    }
+
+    let xna_evidence = managed_roots.as_ref().and_then(|windows| {
+        let path = windows
+            .join("assembly")
+            .join("GAC_MSIL")
+            .join("Microsoft.Xna.Framework");
+        path.is_dir().then_some(path)
+    });
+    let xna_available = xna_evidence.is_some()
+        || executable.parent().is_some_and(|directory| {
+            case_insensitive_file(directory, "Microsoft.Xna.Framework.dll").is_some()
+        });
+    let mut xna_check = dependency_check(
+        "xna",
+        "Microsoft XNA Framework",
+        "Proton legacy managed runtime",
+        requirements.xna,
+        xna_available,
+        None,
+        architecture.clone(),
+        if requirements.xna {
+            if xna_available {
+                "The executable contains XNA evidence and an XNA assembly was found locally or in the prefix.".to_string()
+            } else {
+                "The executable contains XNA evidence, but no XNA assembly was found locally or in the prefix.".to_string()
+            }
+        } else {
+            "No XNA Framework reference was found in the primary executable.".to_string()
+        },
+        xna_evidence
+            .map(|path| path.to_string_lossy().to_string())
+            .into_iter()
+            .collect(),
+        (requirements.xna && !xna_available && prefix_available).then_some("Use the game's bundled XNA installer or the appropriate protontricks component for this prefix."),
+    );
+    if requirements.xna && !xna_available && !prefix_available {
+        xna_check.status = "not verified".to_string();
+        xna_check.severity = "info".to_string();
+        xna_check.detail = "The executable contains XNA evidence, but the compatibility prefix was unavailable for inspection.".to_string();
+    }
+    checks.push(xna_check);
+    if requirements.xna && !xna_available && prefix_available {
+        findings.push(finding(
+            "warning",
+            "XNA Framework may be missing from the prefix",
+            "The primary executable contains XNA evidence, but no matching assembly was found.",
+            Some("Use the game's bundled XNA installer or the appropriate protontricks component for this prefix."),
+        ));
+    }
+
+    let protontricks = executable_in_path("protontricks");
+    checks.push(dependency_check(
+        "protontricks",
+        "Protontricks",
+        "Repair tooling",
+        false,
+        protontricks.is_some(),
+        None,
+        None,
+        if protontricks.is_some() {
+            "Protontricks is available for targeted prefix repair when a specific dependency is confirmed.".to_string()
+        } else {
+            "Protontricks was not found. It is optional and should not be installed solely because this inventory entry is absent.".to_string()
+        },
+        protontricks
+            .map(|path| path.to_string_lossy().to_string())
+            .into_iter()
+            .collect(),
+        None,
+    ));
+
+    if !bundled_installers.is_empty() {
+        findings.push(finding(
+            "info",
+            "Bundled prerequisite installers found",
+            format!("The game includes {} Windows prerequisite installer{} that may be useful inside its prefix.", bundled_installers.len(), if bundled_installers.len() == 1 { "" } else { "s" }),
+            Some("Prefer launcher Verify/Repair first. Run a bundled installer only when a matching dependency check or launch error indicates it is needed."),
+        ));
+    }
+    let warning_count = findings
+        .iter()
+        .filter(|item| item.severity == "warning")
+        .count();
+    if warning_count == 0 {
+        findings.insert(0, finding(
+            "good",
+            "No confirmed Proton runtime dependency problem found",
+            "Recognized imports from the selected executable were found locally or in the game's prefix.",
+            None,
+        ));
+    }
+    Ok(RuntimeDependencyReport {
+        supported: true,
+        platform: "linux".to_string(),
+        executable_name: executable
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string),
+        architecture,
+        checks,
+        findings,
+        bundled_installers,
+        summary: if warning_count == 0 {
+            "No confirmed Proton runtime dependency problem found.".to_string()
+        } else {
+            format!(
+                "Found {warning_count} possible Proton runtime dependency problem{}.",
+                if warning_count == 1 { "" } else { "s" }
+            )
+        },
+        scan_limited,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn build_native_linux_report(executable: &Path) -> Result<RuntimeDependencyReport, String> {
+    let architecture = read_elf_architecture(executable)
+        .ok_or_else(|| "The selected file is not a supported Linux ELF executable.".to_string())?;
+    let executable_text = executable.to_string_lossy().to_string();
+    let readelf = linux_command_text("readelf", &["-l", &executable_text]).unwrap_or_default();
+    let interpreter = parse_elf_interpreter(&readelf);
+    let interpreter_available = interpreter
+        .as_deref()
+        .map(Path::new)
+        .is_some_and(Path::is_file);
+    let ldd = linux_command_text("ldd", &[&executable_text])?;
+    let missing = missing_ldd_libraries(&ldd);
+    let static_binary = ldd.to_ascii_lowercase().contains("statically linked");
+    let dependency_evidence = ldd
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(24)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let mut checks = Vec::new();
+    let mut findings = Vec::new();
+
+    checks.push(dependency_check(
+        "elf-interpreter",
+        "ELF dynamic loader",
+        "Native Linux runtime",
+        interpreter.is_some(),
+        interpreter.is_none() || interpreter_available,
+        None,
+        Some(architecture.clone()),
+        match interpreter.as_deref() {
+            Some(value) if interpreter_available => format!("The executable requests {value}, and that loader is available."),
+            Some(value) => format!("The executable requests {value}, but that loader was not found on the host."),
+            None if static_binary => "The executable appears to be statically linked and does not request a dynamic loader.".to_string(),
+            None => "No ELF interpreter was reported.".to_string(),
+        },
+        interpreter.clone().into_iter().collect(),
+        (interpreter.is_some() && !interpreter_available).then_some("Install the matching Linux architecture runtime. For a 32-bit game on Bazzite, ensure the required 32-bit runtime is available through Steam Linux Runtime or the host."),
+    ));
+    if interpreter.is_some() && !interpreter_available {
+        findings.push(finding(
+            "warning",
+            "Required ELF loader appears to be missing",
+            interpreter.clone().unwrap_or_default(),
+            Some("Use Steam Linux Runtime when supported, or install the matching host architecture runtime."),
+        ));
+    }
+
+    checks.push(dependency_check(
+        "shared-libraries",
+        "Native shared libraries",
+        "Native Linux runtime",
+        !static_binary,
+        missing.is_empty(),
+        None,
+        Some(architecture.clone()),
+        if static_binary {
+            "The executable reports that it is statically linked.".to_string()
+        } else if missing.is_empty() {
+            "The host dynamic loader resolved every library reported for the primary executable.".to_string()
+        } else {
+            format!("The host dynamic loader could not resolve: {}.", missing.join(", "))
+        },
+        dependency_evidence,
+        (!missing.is_empty()).then_some("Verify the game files and use the game's intended Steam Linux Runtime or container before adding host packages. Host ldd results may differ from the launcher's runtime container."),
+    ));
+    if !missing.is_empty() {
+        findings.push(finding(
+            "warning",
+            "Native shared libraries appear unresolved",
+            missing.join(", "),
+            Some("Verify the game files and confirm the intended Steam Linux Runtime is selected. Install host libraries only when the game is designed to use the host runtime."),
+        ));
+    }
+
+    let loader_inventory = linux_command_text("ldconfig", &["-p"]).unwrap_or_default();
+    for (id, name, needle, category) in [
+        (
+            "vulkan-loader",
+            "Vulkan loader",
+            "libvulkan.so",
+            "Graphics runtime",
+        ),
+        (
+            "opengl-loader",
+            "OpenGL loader",
+            "libGL.so",
+            "Graphics runtime",
+        ),
+        (
+            "sdl2",
+            "SDL 2",
+            "libSDL2",
+            "Input, window, and audio runtime",
+        ),
+    ] {
+        let available = loader_inventory.contains(needle);
+        checks.push(dependency_check(
+            id,
+            name,
+            category,
+            false,
+            available,
+            None,
+            Some(architecture.clone()),
+            if available {
+                format!("The host library cache contains {needle}.")
+            } else {
+                format!("{needle} was not found in the host library cache. The game may bundle it or obtain it from Steam Linux Runtime.")
+            },
+            Vec::new(),
+            None,
+        ));
+    }
+
+    if findings.is_empty() {
+        findings.push(finding(
+            "good",
+            "No confirmed native Linux dependency problem found",
+            "The ELF loader and directly linked libraries do not show an unresolved dependency.",
+            None,
+        ));
+    }
+    let warning_count = findings
+        .iter()
+        .filter(|item| item.severity == "warning")
+        .count();
+    Ok(RuntimeDependencyReport {
+        supported: true,
+        platform: "linux".to_string(),
+        executable_name: executable
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string),
+        architecture: Some(architecture),
+        checks,
+        findings,
+        bundled_installers: Vec::new(),
+        summary: if warning_count == 0 {
+            "No confirmed native Linux dependency problem found.".to_string()
+        } else {
+            format!(
+                "Found {warning_count} possible native Linux dependency problem{}.",
+                if warning_count == 1 { "" } else { "s" }
+            )
+        },
+        scan_limited: false,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn build_linux_script_report(executable: &Path) -> Result<RuntimeDependencyReport, String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let file = fs::File::open(executable)
+        .map_err(|error| format!("Could not read the launcher script: {error}"))?;
+    let mut text = String::new();
+    file.take(8 * 1024)
+        .read_to_string(&mut text)
+        .map_err(|error| format!("Could not decode the launcher script: {error}"))?;
+    let shebang = text
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix("#!"))
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .ok_or_else(|| {
+            "The selected file is not an ELF executable or launcher script.".to_string()
+        })?;
+    let mut parts = shebang.split_whitespace();
+    let launcher = parts.next().unwrap_or_default();
+    let interpreter = if launcher.ends_with("/env") {
+        parts.next().unwrap_or_default()
+    } else {
+        launcher
+    };
+    let interpreter_path = if interpreter.contains('/') {
+        let path = PathBuf::from(interpreter);
+        path.is_file().then_some(path)
+    } else {
+        executable_in_path(interpreter)
+    };
+    let executable_permission = fs::metadata(executable)
+        .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false);
+    let mut checks = vec![dependency_check(
+        "script-interpreter",
+        "Launcher script interpreter",
+        "Native Linux launcher",
+        true,
+        interpreter_path.is_some(),
+        None,
+        Some("Script".to_string()),
+        interpreter_path
+            .as_ref()
+            .map(|path| {
+                format!(
+                    "The launcher requests {shebang}, resolved to {}.",
+                    path.display()
+                )
+            })
+            .unwrap_or_else(|| {
+                format!(
+                    "The launcher requests {shebang}, but its interpreter could not be resolved."
+                )
+            }),
+        interpreter_path
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string())
+            .into_iter()
+            .collect(),
+        interpreter_path
+            .is_none()
+            .then_some("Install the requested script interpreter or repair the game installation."),
+    )];
+    checks.push(dependency_check(
+        "script-permission",
+        "Executable permission",
+        "Native Linux launcher",
+        true,
+        executable_permission,
+        None,
+        Some("Script".to_string()),
+        if executable_permission {
+            "The launcher script has an executable permission bit.".to_string()
+        } else {
+            "The launcher script does not have an executable permission bit.".to_string()
+        },
+        vec![executable.to_string_lossy().to_string()],
+        (!executable_permission).then_some("Verify or repair the game installation so the launcher script's executable permission is restored."),
+    ));
+    let findings = if interpreter_path.is_some() && executable_permission {
+        vec![finding(
+            "good",
+            "No confirmed launcher-script dependency problem found",
+            "The requested interpreter is available and the script is executable.",
+            None,
+        )]
+    } else {
+        vec![finding(
+            "warning",
+            "Launcher script cannot be executed as configured",
+            "The script interpreter or executable permission is unavailable.",
+            Some("Repair the game installation before changing unrelated system libraries."),
+        )]
+    };
+    Ok(RuntimeDependencyReport {
+        supported: true,
+        platform: "linux".to_string(),
+        executable_name: executable
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string),
+        architecture: Some("Script".to_string()),
+        checks,
+        findings,
+        bundled_installers: Vec::new(),
+        summary: if interpreter_path.is_some() && executable_permission {
+            "No confirmed launcher-script dependency problem found.".to_string()
+        } else {
+            "Found a launcher-script dependency problem.".to_string()
+        },
+        scan_limited: false,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn build_linux_report(
+    install_path: String,
+    executable_path: String,
+    architecture: Option<String>,
+    proton_prefix: Option<String>,
+) -> Result<RuntimeDependencyReport, String> {
+    let executable = PathBuf::from(executable_path.trim());
+    if !executable.is_file() {
+        return Err("The selected game's executable could not be found.".to_string());
+    }
+    if read_pe_architecture(&executable).is_some() {
+        build_proton_report(&install_path, &executable, architecture, proton_prefix)
+    } else if read_elf_architecture(&executable).is_some() {
+        build_native_linux_report(&executable)
+    } else {
+        build_linux_script_report(&executable)
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests {
+    use super::{missing_ldd_libraries, parse_elf_interpreter, read_elf_architecture};
+    use std::path::Path;
+
+    #[test]
+    fn parses_elf_interpreter() {
+        let output = "      [Requesting program interpreter: /lib64/ld-linux-x86-64.so.2]";
+        assert_eq!(
+            parse_elf_interpreter(output).as_deref(),
+            Some("/lib64/ld-linux-x86-64.so.2")
+        );
+    }
+
+    #[test]
+    fn parses_only_unresolved_ldd_entries() {
+        let output = r#"
+libSDL2-2.0.so.0 => /lib64/libSDL2-2.0.so.0 (0x00007f00)
+libmissing-game.so => not found
+libc.so.6 => /lib64/libc.so.6 (0x00007f01)
+"#;
+        assert_eq!(
+            missing_ldd_libraries(output),
+            vec!["libmissing-game.so".to_string()]
+        );
+    }
+
+    #[test]
+    fn reads_current_linux_executable_architecture() {
+        assert!(read_elf_architecture(Path::new("/proc/self/exe")).is_some());
+    }
+}
+
 #[tauri::command]
 pub async fn get_runtime_dependency_report(
     install_path: String,
     executable_path: String,
     architecture: Option<String>,
+    proton_prefix: Option<String>,
 ) -> Result<RuntimeDependencyReport, String> {
     #[cfg(target_os = "windows")]
     {
@@ -650,11 +1430,21 @@ pub async fn get_runtime_dependency_report(
         .map_err(|error| format!("Runtime dependency worker failed: {error}"))?;
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
     {
-        let _ = (install_path, executable_path, architecture);
+        return tauri::async_runtime::spawn_blocking(move || {
+            build_linux_report(install_path, executable_path, architecture, proton_prefix)
+        })
+        .await
+        .map_err(|error| format!("Runtime dependency worker failed: {error}"))?;
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    {
+        let _ = (install_path, executable_path, architecture, proton_prefix);
         Ok(RuntimeDependencyReport {
             supported: false,
+            platform: std::env::consts::OS.to_string(),
             executable_name: None,
             architecture: None,
             checks: Vec::new(),

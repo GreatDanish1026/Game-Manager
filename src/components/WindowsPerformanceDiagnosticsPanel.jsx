@@ -63,6 +63,7 @@ function CheckIcon({
 
 export default function WindowsPerformanceDiagnosticsPanel({
   game,
+  isLinux = false,
 }) {
   const [
     report,
@@ -181,7 +182,7 @@ export default function WindowsPerformanceDiagnosticsPanel({
                 text-white/75
               "
             >
-              Windows Performance Diagnostics
+              System Performance Diagnostics
             </div>
 
             <div
@@ -299,7 +300,9 @@ export default function WindowsPerformanceDiagnosticsPanel({
             "
           />
 
-          Inspecting the Windows performance environment…
+          Inspecting the {isLinux
+            ? "Linux"
+            : "Windows"} performance environment…
         </div>
       ) : null}
 

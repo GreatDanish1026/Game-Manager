@@ -3,12 +3,9 @@ use serde::{Deserialize, Serialize};
 #[cfg(target_os = "windows")]
 use sha2::{Digest, Sha256};
 
-#[cfg(target_os = "windows")]
 use std::{
     collections::HashMap,
-    fs,
-    io::Read,
-    os::windows::process::CommandExt,
+    env, fs,
     path::{Path, PathBuf},
     process::Command,
     sync::{
@@ -19,6 +16,14 @@ use std::{
 };
 
 #[cfg(target_os = "windows")]
+use std::{io::Read, os::windows::process::CommandExt};
+
+#[cfg(target_os = "linux")]
+use std::{
+    io::{Read, Write},
+    os::{linux::net::SocketAddrExt, unix::net::UnixStream},
+};
+
 use tauri::Manager;
 
 #[cfg(target_os = "windows")]
@@ -31,12 +36,13 @@ const PROVIDER_VERSION: &str = "2.5.1";
 const PROVIDER_SHA256: &str = "9bec3083069f58f911e6a512f4806db51a27bd096103087bc1d05ef54c80a191";
 #[cfg(target_os = "windows")]
 const SESSION_NAME: &str = "GameAtlasPerformanceCapture";
+#[cfg(target_os = "linux")]
+const LINUX_PROVIDER_NAME: &str = "MangoHud";
 
-#[cfg(target_os = "windows")]
 static CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
-#[cfg(target_os = "windows")]
+#[cfg(target_os = "linux")]
+static CAPTURE_CANCEL_REQUESTED: AtomicBool = AtomicBool::new(false);
 static HISTORY_LOCK: Mutex<()> = Mutex::new(());
-#[cfg(target_os = "windows")]
 const HISTORY_LIMIT: usize = 50;
 
 #[derive(Debug, Clone, Serialize)]
@@ -130,7 +136,6 @@ pub struct PerformanceCaptureHistory {
     pub history_directory: String,
 }
 
-#[cfg(target_os = "windows")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PerformanceHistoryFile {
     schema_version: u32,
@@ -150,17 +155,14 @@ struct FrameRow {
     present_mode: Option<String>,
 }
 
-#[cfg(target_os = "windows")]
 struct CaptureGuard;
 
-#[cfg(target_os = "windows")]
 impl Drop for CaptureGuard {
     fn drop(&mut self) {
         CAPTURE_ACTIVE.store(false, Ordering::Release);
     }
 }
 
-#[cfg(target_os = "windows")]
 fn unix_now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -168,7 +170,6 @@ fn unix_now_millis() -> u64 {
         .unwrap_or(0)
 }
 
-#[cfg(target_os = "windows")]
 fn sanitize_component(value: &str) -> String {
     let cleaned = value
         .chars()
@@ -192,7 +193,6 @@ fn sanitize_component(value: &str) -> String {
     }
 }
 
-#[cfg(target_os = "windows")]
 fn clean_scene_label(value: Option<&str>) -> String {
     let clean = value
         .map(str::trim)
@@ -209,7 +209,6 @@ fn clean_scene_label(value: Option<&str>) -> String {
     }
 }
 
-#[cfg(target_os = "windows")]
 fn scene_key(value: &str) -> String {
     value
         .split_whitespace()
@@ -218,7 +217,6 @@ fn scene_key(value: &str) -> String {
         .to_lowercase()
 }
 
-#[cfg(target_os = "windows")]
 fn history_directory(
     app: &tauri::AppHandle,
     game_name: &str,
@@ -241,12 +239,10 @@ fn history_directory(
         .join(folder))
 }
 
-#[cfg(target_os = "windows")]
 fn history_path(directory: &Path) -> PathBuf {
     directory.join("history.json")
 }
 
-#[cfg(target_os = "windows")]
 fn read_history(directory: &Path) -> Result<PerformanceHistoryFile, String> {
     let path = history_path(directory);
     if !path.exists() {
@@ -266,7 +262,6 @@ fn read_history(directory: &Path) -> Result<PerformanceHistoryFile, String> {
     Ok(history)
 }
 
-#[cfg(target_os = "windows")]
 fn write_history(directory: &Path, history: &PerformanceHistoryFile) -> Result<(), String> {
     fs::create_dir_all(directory)
         .map_err(|error| format!("Could not create performance history storage: {error}"))?;
@@ -298,7 +293,6 @@ fn write_history(directory: &Path, history: &PerformanceHistoryFile) -> Result<(
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
 fn decorate_history(mut history: PerformanceHistoryFile) -> Vec<PerformanceHistoryEntry> {
     for entry in &mut history.entries {
         entry.is_baseline = history
@@ -315,7 +309,6 @@ fn decorate_history(mut history: PerformanceHistoryFile) -> Vec<PerformanceHisto
     history.entries
 }
 
-#[cfg(target_os = "windows")]
 fn store_capture_history(
     app: &tauri::AppHandle,
     game_name: &str,
@@ -382,7 +375,6 @@ fn store_capture_history(
     Ok(entry)
 }
 
-#[cfg(target_os = "windows")]
 fn valid_history_id(value: &str) -> bool {
     value.starts_with("capture-")
         && value.len() <= 40
@@ -471,7 +463,6 @@ fn process_is_running(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(target_os = "windows")]
 fn csv_line(line: &str) -> Vec<String> {
     let mut values = Vec::new();
     let mut value = String::new();
@@ -506,7 +497,6 @@ fn header_index(headers: &[String], names: &[&str]) -> Option<usize> {
     })
 }
 
-#[cfg(target_os = "windows")]
 fn value_at<'a>(values: &'a [String], index: Option<usize>) -> Option<&'a str> {
     values
         .get(index?)
@@ -514,7 +504,6 @@ fn value_at<'a>(values: &'a [String], index: Option<usize>) -> Option<&'a str> {
         .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("NA"))
 }
 
-#[cfg(target_os = "windows")]
 fn numeric_at(values: &[String], index: Option<usize>) -> Option<f64> {
     value_at(values, index)?.parse::<f64>().ok()
 }
@@ -525,7 +514,6 @@ fn average(values: impl Iterator<Item = f64>) -> Option<f64> {
     (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
 }
 
-#[cfg(target_os = "windows")]
 fn percentile(sorted: &[f64], percentile: f64) -> f64 {
     if sorted.is_empty() {
         return 0.0;
@@ -546,7 +534,6 @@ fn most_common(values: impl Iterator<Item = String>) -> Option<String> {
         .map(|(value, _)| value)
 }
 
-#[cfg(target_os = "windows")]
 fn downsample(values: &[f64], limit: usize) -> Vec<f64> {
     if values.len() <= limit {
         return values.to_vec();
@@ -561,7 +548,6 @@ fn downsample(values: &[f64], limit: usize) -> Vec<f64> {
         .collect()
 }
 
-#[cfg(target_os = "windows")]
 fn performance_finding(
     severity: &str,
     title: &str,
@@ -773,6 +759,406 @@ fn parse_capture(
     })
 }
 
+#[cfg(target_os = "linux")]
+fn executable_in_path(program: &str) -> Option<PathBuf> {
+    env::var_os("PATH")
+        .into_iter()
+        .flat_map(|path| env::split_paths(&path).collect::<Vec<_>>())
+        .chain([PathBuf::from("/usr/bin"), PathBuf::from("/usr/local/bin")])
+        .map(|directory| directory.join(program))
+        .find(|candidate| candidate.is_file())
+}
+
+#[cfg(target_os = "linux")]
+fn linux_tool_available(program: &str) -> bool {
+    executable_in_path(program).is_some()
+        || executable_in_path("distrobox-host-exec")
+            .and_then(|host| {
+                Command::new(host)
+                    .args(["sh", "-lc", &format!("command -v -- {program}")])
+                    .output()
+                    .ok()
+            })
+            .is_some_and(|output| output.status.success() && !output.stdout.is_empty())
+}
+
+#[cfg(target_os = "linux")]
+fn linux_tool_output(program: &str, arguments: &[&str]) -> Result<std::process::Output, String> {
+    if let Some(path) = executable_in_path(program) {
+        return Command::new(path)
+            .args(arguments)
+            .output()
+            .map_err(|error| format!("Could not run {program}: {error}"));
+    }
+    if let Some(host) = executable_in_path("distrobox-host-exec") {
+        return Command::new(host)
+            .arg(program)
+            .args(arguments)
+            .output()
+            .map_err(|error| format!("Could not run {program} on the host: {error}"));
+    }
+    Err(format!("{program} is not installed."))
+}
+
+#[cfg(target_os = "linux")]
+fn mangohud_version() -> Option<String> {
+    let output = linux_tool_output("mangohud", &["--version"]).ok()?;
+    let text = format!(
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    text.split_whitespace()
+        .find(|part| part.starts_with('v') && part[1..].chars().any(|value| value.is_ascii_digit()))
+        .map(str::to_string)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_executable_name(path: Option<&str>) -> Option<String> {
+    Path::new(path?.trim())
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+        .filter(|name| !name.is_empty())
+}
+
+#[cfg(target_os = "linux")]
+fn matching_linux_processes(name: &str) -> Vec<u32> {
+    let wanted = name.to_ascii_lowercase();
+    let stem = Path::new(name)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(name)
+        .to_ascii_lowercase();
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_string_lossy().parse::<u32>().ok())
+        .filter(|pid| {
+            fs::read(format!("/proc/{pid}/cmdline"))
+                .ok()
+                .map(|bytes| String::from_utf8_lossy(&bytes).to_ascii_lowercase())
+                .is_some_and(|command| command.contains(&wanted) || command.contains(&stem))
+        })
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn process_has_mangohud(pid: u32) -> bool {
+    let mapped = fs::read_to_string(format!("/proc/{pid}/maps"))
+        .map(|maps| {
+            let lower = maps.to_ascii_lowercase();
+            lower.contains("libmangohud") || lower.contains("libmangoapp")
+        })
+        .unwrap_or(false);
+    if mapped {
+        return true;
+    }
+
+    fs::read(format!("/proc/{pid}/environ"))
+        .map(|environment| {
+            environment.split(|byte| *byte == 0).any(|variable| {
+                variable == b"MANGOHUD=1"
+                    || variable.starts_with(b"MANGOHUD_CONFIG=")
+                    || variable.starts_with(b"MANGOHUD_CONFIGFILE=")
+            })
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "linux")]
+fn capture_csv_files(directory: &Path) -> HashMap<PathBuf, SystemTime> {
+    fs::read_dir(directory)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            (path.extension().and_then(|value| value.to_str()) == Some("csv"))
+                .then(|| {
+                    entry
+                        .metadata()
+                        .ok()
+                        .and_then(|metadata| metadata.modified().ok())
+                        .map(|modified| (path, modified))
+                })
+                .flatten()
+        })
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn newest_capture_file(
+    directory: &Path,
+    previous: &HashMap<PathBuf, SystemTime>,
+) -> Option<PathBuf> {
+    capture_csv_files(directory)
+        .into_iter()
+        .filter(|(path, modified)| previous.get(path).is_none_or(|before| modified > before))
+        .max_by_key(|(_, modified)| *modified)
+        .map(|(path, _)| path)
+}
+
+#[cfg(target_os = "linux")]
+fn mangohud_control_names() -> Vec<String> {
+    fs::read_to_string("/proc/net/unix")
+        .map(|sockets| {
+            sockets
+                .lines()
+                .filter_map(|line| line.split_whitespace().last())
+                .filter_map(|name| name.strip_prefix('@').or(Some(name)))
+                .filter(|name| *name == "mangohud" || name.starts_with("mangohud-"))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(target_os = "linux")]
+fn send_mangohud_logging(socket_name: &str, enabled: bool) -> Result<(), String> {
+    let address = std::os::unix::net::SocketAddr::from_abstract_name(socket_name.as_bytes())
+        .map_err(|error| format!("Could not address the MangoHud control endpoint: {error}"))?;
+    let mut stream = UnixStream::connect_addr(&address)
+        .map_err(|error| format!("Could not connect to the MangoHud control endpoint: {error}"))?;
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_millis(250)))
+        .map_err(|error| format!("Could not configure the MangoHud control connection: {error}"))?;
+    stream
+        .set_write_timeout(Some(std::time::Duration::from_secs(1)))
+        .map_err(|error| format!("Could not configure the MangoHud control connection: {error}"))?;
+
+    // MangoHud sends protocol, device, and version headers immediately after
+    // connection. Drain them before sending the logging command so repeated
+    // captures cannot fill the socket's receive buffer.
+    let mut headers = [0u8; 4096];
+    let _ = stream.read(&mut headers);
+    let command = if enabled {
+        b":logging=1;".as_slice()
+    } else {
+        b":logging=0;".as_slice()
+    };
+    stream
+        .write_all(command)
+        .and_then(|_| stream.flush())
+        .map_err(|error| format!("Could not send the MangoHud logging command: {error}"))
+}
+
+#[cfg(target_os = "linux")]
+fn mangohud_control_targets(preferred_pids: &[u32]) -> Result<Vec<String>, String> {
+    let available = mangohud_control_names();
+    let mut targets = available
+        .iter()
+        .filter(|name| {
+            preferred_pids
+                .iter()
+                .any(|pid| name.as_str() == format!("mangohud-{pid}"))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if targets.is_empty() {
+        targets = available;
+    }
+    targets.sort();
+    targets.dedup();
+    if targets.is_empty() {
+        return Err(
+            "No MangoHud control endpoint was found. Save the current Linux Performance launch options to Steam, fully exit the game, and relaunch it."
+                .to_string(),
+        );
+    }
+
+    // A game can leave helper render processes behind. Avoid creating an
+    // unbounded number of control workers when PID matching is unavailable.
+    targets.truncate(16);
+    Ok(targets)
+}
+
+#[cfg(target_os = "linux")]
+fn set_mangohud_logging(enabled: bool, targets: &[String]) -> Result<(), String> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    for target in targets {
+        let sender = sender.clone();
+        let target = target.clone();
+        std::thread::spawn(move || {
+            let result = send_mangohud_logging(&target, enabled);
+            let _ = sender.send((target, result));
+        });
+    }
+    drop(sender);
+
+    let mut errors = Vec::new();
+    let mut sent = 0usize;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while sent + errors.len() < targets.len() {
+        let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) else {
+            break;
+        };
+        match receiver.recv_timeout(remaining) {
+            Ok((_target, Ok(()))) => sent += 1,
+            Ok((target, Err(error))) => errors.push(format!("{target}: {error}")),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    if sent > 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "Could not control any MangoHud render process: {}",
+            if errors.is_empty() {
+                "the control request timed out".to_string()
+            } else {
+                errors.join("; ")
+            }
+        ))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn parse_mangohud_capture(
+    path: &Path,
+    process_name: String,
+    requested_duration_seconds: u32,
+) -> Result<PerformanceCaptureReport, String> {
+    let text = fs::read_to_string(path)
+        .map_err(|error| format!("Could not read the MangoHud capture: {error}"))?;
+    let mut frame_times = Vec::new();
+    let mut timestamps = Vec::new();
+
+    for line in text.lines() {
+        let values = csv_line(line);
+        let Some(fps) = numeric_at(&values, Some(0)) else {
+            continue;
+        };
+        if fps.is_finite() && fps > 0.0 && fps <= 10_000.0 {
+            frame_times.push(1000.0 / fps);
+            if let Some(timestamp) = numeric_at(&values, Some(3)).filter(|value| value.is_finite())
+            {
+                timestamps.push(timestamp);
+            }
+        }
+    }
+
+    if frame_times.len() < 30 {
+        return Err(format!(
+            "Only {} valid MangoHud samples were captured. Confirm MangoHud is enabled for this game and keep it actively rendering during the capture.",
+            frame_times.len()
+        ));
+    }
+
+    let mut sorted = frame_times.clone();
+    sorted.sort_by(f64::total_cmp);
+    let average_frame_time_ms = sorted.iter().sum::<f64>() / sorted.len() as f64;
+    let median_frame_time_ms = percentile(&sorted, 0.50);
+    let p95_frame_time_ms = percentile(&sorted, 0.95);
+    let p99_frame_time_ms = percentile(&sorted, 0.99);
+    let worst_count = ((sorted.len() as f64 * 0.01).ceil() as usize).max(1);
+    let worst_average = sorted.iter().rev().take(worst_count).sum::<f64>() / worst_count as f64;
+    let average_fps = 1000.0 / average_frame_time_ms;
+    let one_percent_low_fps = 1000.0 / worst_average;
+    let spike_threshold_ms = (median_frame_time_ms * 2.0).max(33.3);
+    let spike_count = frame_times
+        .iter()
+        .filter(|value| **value > spike_threshold_ms)
+        .count();
+    let spike_percent = spike_count as f64 / frame_times.len() as f64 * 100.0;
+    let low_ratio = one_percent_low_fps / average_fps;
+    let mut findings = vec![performance_finding(
+        if low_ratio < 0.65 { "warning" } else { "good" },
+        if low_ratio < 0.65 {
+            "Frame delivery was inconsistent"
+        } else {
+            "Frame delivery was reasonably consistent"
+        },
+        format!(
+            "The 1% low was {:.1} FPS compared with a {:.1} FPS average ({:.0}% of the average).",
+            one_percent_low_fps,
+            average_fps,
+            low_ratio * 100.0
+        ),
+        (low_ratio < 0.65).then_some(
+            "Repeat the same scene after checking shader compilation, overlays, background activity, and graphics settings.",
+        ),
+    )];
+    findings.push(performance_finding(
+        if spike_percent > 1.0 { "warning" } else { "good" },
+        if spike_percent > 1.0 {
+            "Frequent frame-time spikes detected"
+        } else {
+            "Few large frame-time spikes detected"
+        },
+        format!(
+            "{} samples ({:.1}%) exceeded the {:.1} ms spike threshold.",
+            spike_count, spike_percent, spike_threshold_ms
+        ),
+        (spike_percent > 1.0).then_some(
+            "Capture the same repeatable scene again after one change at a time to identify the contributor.",
+        ),
+    ));
+    if requested_duration_seconds < 30 {
+        findings.push(performance_finding(
+            "info",
+            "Short capture",
+            "Short samples may miss intermittent traversal or shader-compilation stutter."
+                .to_string(),
+            Some("Use a 30- or 60-second capture for a more representative result."),
+        ));
+    }
+
+    let measured_duration_seconds = timestamps
+        .first()
+        .zip(timestamps.last())
+        .map(|(first, last)| (last - first).max(0.0))
+        .filter(|duration| *duration > 0.0)
+        .map(|duration| {
+            let average_step = duration / timestamps.len().saturating_sub(1).max(1) as f64;
+            if average_step > 1_000.0 {
+                duration / 1_000_000.0
+            } else {
+                duration / 1_000.0
+            }
+        })
+        .unwrap_or(requested_duration_seconds as f64);
+
+    Ok(PerformanceCaptureReport {
+        process_name,
+        requested_duration_seconds,
+        measured_duration_seconds,
+        frame_count: frame_times.len(),
+        average_fps,
+        one_percent_low_fps,
+        average_frame_time_ms,
+        median_frame_time_ms,
+        p95_frame_time_ms,
+        p99_frame_time_ms,
+        spike_threshold_ms,
+        spike_count,
+        spike_percent,
+        average_cpu_busy_ms: None,
+        average_gpu_time_ms: None,
+        present_runtime: Some("Vulkan/OpenGL".to_string()),
+        present_mode: None,
+        frame_time_metric: "MangoHud FPS samples".to_string(),
+        frame_times_ms: downsample(&frame_times, 180),
+        findings,
+        data_file: path.to_string_lossy().to_string(),
+        data_directory: path.parent().unwrap_or(path).to_string_lossy().to_string(),
+        provider: format!(
+            "{} {}",
+            LINUX_PROVIDER_NAME,
+            mangohud_version().unwrap_or_default()
+        )
+        .trim()
+        .to_string(),
+        history_id: None,
+        history_saved: false,
+        scene_label: None,
+        created_unix: None,
+    })
+}
+
 #[tauri::command]
 pub fn get_performance_capture_status(
     app: tauri::AppHandle,
@@ -801,7 +1187,47 @@ pub fn get_performance_capture_status(
         };
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    {
+        let _ = app
+            .path()
+            .app_data_dir()
+            .map(|directory| fs::create_dir_all(directory.join("performance-captures")));
+        let name = linux_executable_name(executable_path.as_deref());
+        let processes = name
+            .as_deref()
+            .map(matching_linux_processes)
+            .unwrap_or_default();
+        let running = !processes.is_empty();
+        let mango_loaded = processes.into_iter().any(process_has_mangohud);
+        let control_ready = !mangohud_control_names().is_empty();
+        let tools_ready = linux_tool_available("mangohud");
+        let provider_ready = tools_ready;
+        return PerformanceCaptureStatus {
+            supported: true,
+            provider_ready,
+            provider_name: LINUX_PROVIDER_NAME.to_string(),
+            provider_version: mangohud_version(),
+            executable_name: name,
+            game_running: running,
+            capture_active: CAPTURE_ACTIVE.load(Ordering::Acquire),
+            detail: if !tools_ready {
+                "MangoHud is required for Linux performance capture.".to_string()
+            } else if !running {
+                "Enable MangoHud in Linux Performance, save the launch options, then launch the game."
+                    .to_string()
+            } else if !control_ready {
+                "The game is running without the MangoHud control endpoint. Save the current Linux Performance launch options and relaunch it."
+                    .to_string()
+            } else if !mango_loaded {
+                "Game process found. MangoHud will be verified when the capture starts.".to_string()
+            } else {
+                "MangoHud and the game process are ready for capture.".to_string()
+            },
+        };
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         let _ = (app, executable_path);
         PerformanceCaptureStatus {
@@ -812,7 +1238,7 @@ pub fn get_performance_capture_status(
             executable_name: None,
             game_running: false,
             capture_active: false,
-            detail: "Performance Capture is currently available on Windows.".to_string(),
+            detail: "Performance Capture is not available on this platform.".to_string(),
         }
     }
 }
@@ -932,7 +1358,101 @@ pub async fn run_performance_capture(
         return Ok(report);
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    {
+        let duration_seconds = duration_seconds.clamp(10, 120);
+        let process_name = linux_executable_name(Some(&executable_path))
+            .ok_or_else(|| "The selected game's executable is unavailable.".to_string())?;
+        let processes = matching_linux_processes(&process_name);
+        if processes.is_empty() {
+            return Err(format!(
+                "{process_name} is not running. Launch the game, reach the scene you want to test, then start the capture."
+            ));
+        }
+        if CAPTURE_ACTIVE
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err("A performance capture is already running.".to_string());
+        }
+        let _guard = CaptureGuard;
+        CAPTURE_CANCEL_REQUESTED.store(false, Ordering::Release);
+
+        let capture_root = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| format!("Could not resolve the capture storage folder: {error}"))?
+            .join("performance-captures");
+        fs::create_dir_all(&capture_root)
+            .map_err(|error| format!("Could not create the capture storage folder: {error}"))?;
+        let previous = capture_csv_files(&capture_root);
+        let worker_root = capture_root.clone();
+        let worker_pids = processes;
+        let source_path = tauri::async_runtime::spawn_blocking(move || {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            let control_targets = mangohud_control_targets(&worker_pids)?;
+            set_mangohud_logging(true, &control_targets)?;
+            let started = std::time::Instant::now();
+            while started.elapsed() < std::time::Duration::from_secs(duration_seconds as u64)
+                && !CAPTURE_CANCEL_REQUESTED.load(Ordering::Acquire)
+            {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            let stop_result = set_mangohud_logging(false, &control_targets);
+            for _ in 0..50 {
+                if let Some(path) = newest_capture_file(&worker_root, &previous) {
+                    // A stop acknowledgement can time out after MangoHud has
+                    // already closed and flushed a perfectly valid capture.
+                    return Ok(path);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            stop_result?;
+            Err("MangoHud did not create a capture file. Confirm the GameAtlas launch options include its output folder."
+                .to_string())
+        })
+        .await
+        .map_err(|error| format!("Performance capture worker failed: {error}"))??;
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let safe_name = sanitize_component(&process_name).replace(' ', "_");
+        let output_path =
+            capture_root.join(format!("{safe_name}-{timestamp}-{duration_seconds}s.csv"));
+        let final_path = if source_path == output_path {
+            source_path
+        } else if fs::rename(&source_path, &output_path).is_ok() {
+            output_path
+        } else {
+            source_path
+        };
+
+        let mut report = parse_mangohud_capture(&final_path, process_name, duration_seconds)?;
+        match store_capture_history(
+            &app,
+            &game_name,
+            game_id.as_deref(),
+            scene_label.as_deref(),
+            &report,
+        ) {
+            Ok(entry) => {
+                report.history_id = Some(entry.id);
+                report.history_saved = true;
+                report.scene_label = Some(entry.scene_label);
+                report.created_unix = Some(entry.created_unix);
+            }
+            Err(error) => report.findings.push(performance_finding(
+                "warning",
+                "Capture history could not be saved",
+                error,
+                Some("The raw CSV is still available. Check the GameAtlas data-folder permissions before trying again."),
+            )),
+        }
+        return Ok(report);
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         let _ = (
             app,
@@ -942,7 +1462,7 @@ pub async fn run_performance_capture(
             game_id,
             scene_label,
         );
-        Err("Performance Capture is currently available on Windows.".to_string())
+        Err("Performance Capture is not available on this platform.".to_string())
     }
 }
 
@@ -952,7 +1472,7 @@ pub fn get_performance_capture_history(
     game_name: String,
     game_id: Option<String>,
 ) -> Result<PerformanceCaptureHistory, String> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     {
         let _guard = HISTORY_LOCK
             .lock()
@@ -967,7 +1487,7 @@ pub fn get_performance_capture_history(
         });
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         let _ = (app, game_name, game_id);
         Ok(PerformanceCaptureHistory {
@@ -986,7 +1506,7 @@ pub fn set_performance_capture_baseline(
     game_id: Option<String>,
     capture_id: String,
 ) -> Result<PerformanceCaptureHistory, String> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     {
         if !valid_history_id(&capture_id) {
             return Err("Invalid performance capture identifier.".to_string());
@@ -1016,10 +1536,10 @@ pub fn set_performance_capture_baseline(
         });
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         let _ = (app, game_name, game_id, capture_id);
-        Err("Performance Capture History is currently available only on Windows.".to_string())
+        Err("Performance Capture History is not available on this platform.".to_string())
     }
 }
 
@@ -1030,7 +1550,7 @@ pub fn remove_performance_capture_history_entry(
     game_id: Option<String>,
     capture_id: String,
 ) -> Result<PerformanceCaptureHistory, String> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     {
         if !valid_history_id(&capture_id) {
             return Err("Invalid performance capture identifier.".to_string());
@@ -1076,10 +1596,10 @@ pub fn remove_performance_capture_history_entry(
         });
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         let _ = (app, game_name, game_id, capture_id);
-        Err("Performance Capture History is currently available only on Windows.".to_string())
+        Err("Performance Capture History is not available on this platform.".to_string())
     }
 }
 
@@ -1107,10 +1627,55 @@ pub async fn cancel_performance_capture(app: tauri::AppHandle) -> Result<bool, S
         return Ok(output.status.success());
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    {
+        let _ = app;
+        if !CAPTURE_ACTIVE.load(Ordering::Acquire) {
+            return Ok(false);
+        }
+        CAPTURE_CANCEL_REQUESTED.store(true, Ordering::Release);
+        let control_targets = mangohud_control_targets(&[])?;
+        set_mangohud_logging(false, &control_targets)?;
+        return Ok(true);
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         let _ = app;
         Ok(false)
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests {
+    use super::*;
+
+    #[test]
+    fn mangohud_parser_calculates_frame_summary() {
+        let path = std::env::temp_dir().join(format!(
+            "gameatlas-mangohud-parser-{}.csv",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let mut csv = String::from(
+            "os,cpu,gpu,ram,kernel,driver\nLinux,Test CPU,Test GPU,1024,6.0,Test Driver\n",
+        );
+        for index in 0..120 {
+            let fps = if index == 119 { 20.0 } else { 60.0 };
+            csv.push_str(&format!("{fps},25,80,{}\n", index * 16_667));
+        }
+        fs::write(&path, csv).expect("write fixture");
+        let report =
+            parse_mangohud_capture(&path, "game.exe".to_string(), 30).expect("parse capture");
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(report.frame_count, 120);
+        assert!(report.average_fps > 58.0 && report.average_fps < 60.0);
+        assert!(report.one_percent_low_fps < report.average_fps);
+        assert_eq!(report.spike_count, 1);
+        assert_eq!(report.frame_time_metric, "MangoHud FPS samples");
     }
 }
 

@@ -48,6 +48,7 @@ function formatRefresh(
     !Number.isFinite(
       value
     )
+    || value <= 0
   ) {
     return "Unknown";
   }
@@ -58,6 +59,7 @@ function formatRefresh(
 
 function DisplayCard({
   display,
+  isLinux,
 }) {
   const hdrLabel =
     display.hdrSupported === true
@@ -118,7 +120,9 @@ function DisplayCard({
         <div className="rounded-md bg-white/[0.025] px-3 py-2">
           <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-white/22">
             <Sun className="h-3 w-3" />
-            Windows HDR
+            {isLinux
+              ? "HDR"
+              : "Windows HDR"}
           </div>
           <div className={`mt-1 text-xs font-medium ${display.hdrEnabled ? "text-emerald-200/65" : "text-white/55"}`}>
             {hdrLabel}
@@ -148,6 +152,10 @@ export default function DisplayValidatorPanel({
     setReport,
   ] =
     useState(null);
+
+  const isLinux =
+    report?.platform
+    === "linux";
 
   const [
     loading,
@@ -247,7 +255,7 @@ export default function DisplayValidatorPanel({
               Display / HDR / Refresh-Rate Validator
             </div>
             <div className="mt-1 max-w-3xl text-xs leading-relaxed text-white/35">
-              Reads the active Windows display configuration and flags refresh-rate, HDR, multi-monitor, or per-game GPU preference concerns.
+              Reads the active display configuration and flags refresh-rate, HDR, multi-monitor, or per-game GPU preference concerns when available.
             </div>
             {report ? (
               <div className="mt-2 text-xs text-cyan-100/55">
@@ -302,6 +310,7 @@ export default function DisplayValidatorPanel({
                 <DisplayCard
                   key={`${display.deviceName}-${index}`}
                   display={display}
+                  isLinux={isLinux}
                 />
               )
             )}
@@ -337,7 +346,7 @@ export default function DisplayValidatorPanel({
           </div>
 
           <div className="border-t border-white/[0.06] px-4 py-3 text-[11px] leading-relaxed text-white/24">
-            This validator is read-only. It does not change Windows display, HDR, refresh-rate, or GPU settings. Supported modes reported by drivers can include options a cable or display cannot use reliably.
+            This validator is read-only. It does not change display, HDR, refresh-rate, or GPU settings. Supported modes reported by drivers can include options a cable or display cannot use reliably.
           </div>
         </>
       ) : (

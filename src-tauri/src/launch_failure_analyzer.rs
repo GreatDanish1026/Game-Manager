@@ -1,13 +1,18 @@
 use serde::Serialize;
 use std::path::Path;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 use std::{
-    mem::size_of,
     sync::atomic::{AtomicBool, Ordering},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(target_os = "windows")]
+use std::mem::size_of;
+
+#[cfg(target_os = "linux")]
+use std::fs;
 
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::{
@@ -21,9 +26,9 @@ use windows_sys::Win32::{
     },
 };
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 static MONITOR_ACTIVE: AtomicBool = AtomicBool::new(false);
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 static MONITOR_CANCEL: AtomicBool = AtomicBool::new(false);
 
 const APPEAR_TIMEOUT_SECONDS: u64 = 45;
@@ -47,10 +52,10 @@ pub struct LaunchMonitorReport {
     pub detail: String,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 struct MonitorGuard;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 impl Drop for MonitorGuard {
     fn drop(&mut self) {
         MONITOR_CANCEL.store(false, Ordering::Release);
@@ -84,7 +89,7 @@ impl Drop for ProcessHandle {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn unix_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -92,7 +97,7 @@ fn unix_millis() -> u64 {
         .unwrap_or(0)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn executable_name(path: &str) -> Option<String> {
     Path::new(path.trim().trim_matches('"'))
         .file_name()
@@ -100,6 +105,80 @@ fn executable_name(path: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+#[cfg(target_os = "linux")]
+fn argument_file_name(argument: &[u8]) -> Option<String> {
+    let normalized = String::from_utf8_lossy(argument).replace('\\', "/");
+    Path::new(&normalized)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(str::to_string)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_matches(pid: u32, wanted: &str) -> bool {
+    if fs::read_link(format!("/proc/{pid}/exe"))
+        .ok()
+        .and_then(|path| path.file_name().map(|value| value.to_os_string()))
+        .and_then(|value| value.to_str().map(str::to_string))
+        .is_some_and(|value| value.eq_ignore_ascii_case(wanted))
+    {
+        return true;
+    }
+
+    if fs::read_to_string(format!("/proc/{pid}/comm"))
+        .ok()
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case(wanted))
+    {
+        return true;
+    }
+
+    fs::read(format!("/proc/{pid}/cmdline"))
+        .ok()
+        .is_some_and(|cmdline| {
+            cmdline
+                .split(|byte| *byte == 0)
+                .filter_map(argument_file_name)
+                .any(|value| value.eq_ignore_ascii_case(wanted))
+        })
+}
+
+#[cfg(target_os = "linux")]
+fn process_ids(name: &str) -> Vec<u32> {
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    let mut ids = entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_string_lossy().parse::<u32>().ok())
+        .filter(|pid| linux_process_matches(*pid, name))
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids
+}
+
+#[cfg(target_os = "linux")]
+fn linux_exit_status(pid: u32) -> Option<String> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let fields = stat
+        .get(stat.rfind(')')? + 1..)?
+        .split_whitespace()
+        .collect::<Vec<_>>();
+    if fields.first().copied() != Some("Z") {
+        return None;
+    }
+    let status = fields.get(49)?.parse::<i32>().ok()?;
+    let signal = status & 0x7f;
+    if signal != 0 {
+        Some(if status & 0x80 != 0 {
+            format!("signal {signal} (core dumped)")
+        } else {
+            format!("signal {signal}")
+        })
+    } else {
+        Some(format!("exit {}", (status >> 8) & 0xff))
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -134,7 +213,7 @@ fn process_ids(name: &str) -> Vec<u32> {
     ids
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn cancelled_report(process_name: String, started_at: u64) -> LaunchMonitorReport {
     LaunchMonitorReport {
         supported: true,
@@ -149,6 +228,124 @@ fn cancelled_report(process_name: String, started_at: u64) -> LaunchMonitorRepor
         started_at_unix_ms: started_at,
         finished_at_unix_ms: unix_millis(),
         detail: "Launch monitoring was stopped. The game was not closed.".to_string(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn monitor_blocking(executable_path: String) -> Result<LaunchMonitorReport, String> {
+    let process_name = executable_name(&executable_path)
+        .ok_or_else(|| "GameAtlas could not identify the executable to monitor.".to_string())?;
+    if !process_ids(&process_name).is_empty() {
+        return Err(format!(
+            "{process_name} is already running. Close it before starting a monitored launch."
+        ));
+    }
+    if MONITOR_ACTIVE
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Err("Another launch monitor is already active.".to_string());
+    }
+    MONITOR_CANCEL.store(false, Ordering::Release);
+    let _guard = MonitorGuard;
+    let started_at = unix_millis();
+    let started = Instant::now();
+    let appear_timeout = Duration::from_secs(APPEAR_TIMEOUT_SECONDS);
+    let poll = Duration::from_millis(POLL_MILLISECONDS);
+
+    let (mut pid, appeared_after) = loop {
+        if MONITOR_CANCEL.load(Ordering::Acquire) {
+            return Ok(cancelled_report(process_name, started_at));
+        }
+        if let Some(pid) = process_ids(&process_name).into_iter().next() {
+            break (pid, started.elapsed());
+        }
+        if started.elapsed() >= appear_timeout {
+            return Ok(LaunchMonitorReport {
+                supported: true,
+                outcome: "not_detected".to_string(),
+                process_name: Some(process_name.clone()),
+                process_id: None,
+                process_detected: false,
+                appeared_after_seconds: None,
+                survived_seconds: None,
+                exit_code: None,
+                stable_threshold_seconds: STABLE_SECONDS,
+                started_at_unix_ms: started_at,
+                finished_at_unix_ms: unix_millis(),
+                detail: format!(
+                    "{process_name} did not appear within {APPEAR_TIMEOUT_SECONDS} seconds of the Steam, launcher, or direct launch request."
+                ),
+            });
+        }
+        thread::sleep(poll);
+    };
+
+    let process_started = Instant::now();
+    let stable_threshold = Duration::from_secs(STABLE_SECONDS);
+    loop {
+        if MONITOR_CANCEL.load(Ordering::Acquire) {
+            return Ok(LaunchMonitorReport {
+                process_detected: true,
+                process_id: Some(pid),
+                appeared_after_seconds: Some(appeared_after.as_secs_f64()),
+                survived_seconds: Some(process_started.elapsed().as_secs_f64()),
+                ..cancelled_report(process_name, started_at)
+            });
+        }
+
+        let exit_code = linux_exit_status(pid);
+        let ids = process_ids(&process_name);
+        if exit_code.is_some() || !ids.contains(&pid) {
+            if let Some(replacement) = ids.into_iter().find(|candidate| *candidate != pid) {
+                pid = replacement;
+            } else {
+                let survived = process_started.elapsed();
+                let outcome = if survived < Duration::from_secs(3) {
+                    "immediate_exit"
+                } else {
+                    "early_exit"
+                };
+                return Ok(LaunchMonitorReport {
+                    supported: true,
+                    outcome: outcome.to_string(),
+                    process_name: Some(process_name.clone()),
+                    process_id: Some(pid),
+                    process_detected: true,
+                    appeared_after_seconds: Some(appeared_after.as_secs_f64()),
+                    survived_seconds: Some(survived.as_secs_f64()),
+                    exit_code,
+                    stable_threshold_seconds: STABLE_SECONDS,
+                    started_at_unix_ms: started_at,
+                    finished_at_unix_ms: unix_millis(),
+                    detail: format!(
+                        "{process_name} appeared after {:.1} seconds and exited after {:.1} seconds.",
+                        appeared_after.as_secs_f64(),
+                        survived.as_secs_f64()
+                    ),
+                });
+            }
+        }
+
+        if process_started.elapsed() >= stable_threshold {
+            return Ok(LaunchMonitorReport {
+                supported: true,
+                outcome: "stable".to_string(),
+                process_name: Some(process_name.clone()),
+                process_id: Some(pid),
+                process_detected: true,
+                appeared_after_seconds: Some(appeared_after.as_secs_f64()),
+                survived_seconds: Some(process_started.elapsed().as_secs_f64()),
+                exit_code: None,
+                stable_threshold_seconds: STABLE_SECONDS,
+                started_at_unix_ms: started_at,
+                finished_at_unix_ms: unix_millis(),
+                detail: format!(
+                    "{process_name} remained active through the {STABLE_SECONDS}-second startup observation window."
+                ),
+            });
+        }
+        thread::sleep(poll);
     }
 }
 
@@ -282,7 +479,14 @@ pub async fn monitor_game_launch(executable_path: String) -> Result<LaunchMonito
             .map_err(|error| format!("Launch monitor worker failed: {error}"))?;
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    {
+        return tauri::async_runtime::spawn_blocking(move || monitor_blocking(executable_path))
+            .await
+            .map_err(|error| format!("Launch monitor worker failed: {error}"))?;
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         let _ = executable_path;
         Ok(LaunchMonitorReport {
@@ -297,14 +501,14 @@ pub async fn monitor_game_launch(executable_path: String) -> Result<LaunchMonito
             stable_threshold_seconds: STABLE_SECONDS,
             started_at_unix_ms: 0,
             finished_at_unix_ms: 0,
-            detail: "Launch Failure Analyzer is currently available only on Windows.".to_string(),
+            detail: "Launch Failure Analyzer is not available on this platform.".to_string(),
         })
     }
 }
 
 #[tauri::command]
 pub fn cancel_launch_failure_monitor() -> bool {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     {
         if !MONITOR_ACTIVE.load(Ordering::Acquire) {
             return false;
@@ -313,9 +517,28 @@ pub fn cancel_launch_failure_monitor() -> bool {
         return true;
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         false
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests {
+    use super::*;
+
+    #[test]
+    fn executable_name_is_normalized_from_linux_path() {
+        assert_eq!(
+            executable_name("/games/Example/game.x86_64").as_deref(),
+            Some("game.x86_64")
+        );
+    }
+
+    #[test]
+    fn current_process_can_be_discovered() {
+        let name = fs::read_to_string("/proc/self/comm").expect("read current process name");
+        assert!(process_ids(name.trim()).contains(&std::process::id()));
     }
 }
 

@@ -7,6 +7,30 @@ import {
 } from "./localInstallation";
 
 
+function protonPrefix(
+  game
+) {
+  if (
+    game?.protonPrefix
+    || game?.winePrefix
+    || game?.prefixPath
+  ) {
+    return game.protonPrefix
+      ?? game.winePrefix
+      ?? game.prefixPath;
+  }
+
+  if (
+    game?.steamLibraryPath
+    && game?.launcherId
+  ) {
+    return `${String(game.steamLibraryPath).replace(/\/$/, "")}/steamapps/compatdata/${game.launcherId}/pfx`;
+  }
+
+  return null;
+}
+
+
 export async function getConfigurationValidationReport(
   game
 ) {
@@ -33,6 +57,11 @@ export async function getConfigurationValidationReport(
           ?.configData
           ?.resolvedPath
         ?? null,
+
+      protonPrefix:
+        protonPrefix(
+          game
+        ),
     }
   );
 }
@@ -78,6 +107,11 @@ async function recoveryArgs(
       local?.executable
         ?.path
       ?? null,
+
+    protonPrefix:
+      protonPrefix(
+        game
+      ),
   };
 }
 

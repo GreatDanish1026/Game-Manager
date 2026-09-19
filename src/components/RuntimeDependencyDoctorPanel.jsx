@@ -98,6 +98,7 @@ function DependencyCard({
 
 export default function RuntimeDependencyDoctorPanel({
   game,
+  isLinux = false,
 }) {
   const requestId =
     useRef(
@@ -208,7 +209,9 @@ export default function RuntimeDependencyDoctorPanel({
               Runtime and Dependency Doctor
             </div>
             <div className="mt-1 max-w-3xl text-xs leading-relaxed text-white/35">
-              Checks the selected executable's architecture and known runtime imports against Windows, local game files, and bundled redistributables.
+              {isLinux
+                ? "Checks native ELF dependencies or Proton/Wine imports against the Linux host, game files, and the game's compatibility prefix."
+                : "Checks the selected executable's architecture and known runtime imports against Windows, local game files, and bundled redistributables."}
             </div>
 
             {report ? (
@@ -249,7 +252,9 @@ export default function RuntimeDependencyDoctorPanel({
       && !report ? (
         <div className="flex items-center gap-3 p-4 text-sm text-white/35">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Inspecting executable imports and Windows runtimes…
+          {isLinux
+            ? "Inspecting executable format and Linux runtime dependencies…"
+            : "Inspecting executable imports and Windows runtimes…"}
         </div>
       ) : null}
 
@@ -324,7 +329,9 @@ export default function RuntimeDependencyDoctorPanel({
       ) : (
         !loading ? (
           <div className="p-4 text-xs leading-relaxed text-white/28">
-            Run this after a missing-DLL message, an immediate launch failure, or a clean Windows installation. No runtimes will be installed or repaired automatically.
+            {isLinux
+              ? "Run this after a missing-library message or immediate launch failure. No host packages, prefix components, or runtimes will be installed automatically."
+              : "Run this after a missing-DLL message, an immediate launch failure, or a clean Windows installation. No runtimes will be installed or repaired automatically."}
           </div>
         ) : null
       )}

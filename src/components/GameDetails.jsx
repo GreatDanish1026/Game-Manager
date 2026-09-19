@@ -1293,13 +1293,14 @@ export default function GameDetails({
             }
           />
 
-          {!isLinux ? (
-            <ModConflictInspectorPanel
-              game={
-                game
-              }
-            />
-          ) : null}
+          <ModConflictInspectorPanel
+            game={
+              game
+            }
+            isLinux={
+              isLinux
+            }
+          />
 
           <RenoDxManagerPanel
             game={
@@ -1433,57 +1434,58 @@ export default function GameDetails({
             />
           </div>
 
-          {!isLinux ? (
-            <div
-              id="diagnostic-crash-detective"
-              className="scroll-mt-20"
-            >
-              <CrashDetectivePanel
-                game={
-                  game
-                }
-              />
-            </div>
-          ) : null}
+          <div
+            id="diagnostic-crash-detective"
+            className="scroll-mt-20"
+          >
+            <CrashDetectivePanel
+              game={
+                game
+              }
+              isLinux={
+                isLinux
+              }
+            />
+          </div>
 
-          {!isLinux ? (
-            <div
-              id="diagnostic-launch-failure"
-              className="scroll-mt-20"
-            >
-              <LaunchFailureAnalyzerPanel
-                game={
-                  game
-                }
-              />
-            </div>
-          ) : null}
+          <div
+            id="diagnostic-launch-failure"
+            className="scroll-mt-20"
+          >
+            <LaunchFailureAnalyzerPanel
+              game={
+                game
+              }
+              isLinux={
+                isLinux
+              }
+            />
+          </div>
 
-          {!isLinux ? (
-            <div
-              id="diagnostic-display"
-              className="scroll-mt-20"
-            >
-              <DisplayValidatorPanel
-                game={
-                  game
-                }
-              />
-            </div>
-          ) : null}
+          <div
+            id="diagnostic-display"
+            className="scroll-mt-20"
+          >
+            <DisplayValidatorPanel
+              game={
+                game
+              }
+            />
+          </div>
 
-          {!isLinux ? (
-            <div
-              id="diagnostic-runtime-dependencies"
-              className="scroll-mt-20"
-            >
-              <RuntimeDependencyDoctorPanel
-                game={
-                  game
-                }
-              />
-            </div>
-          ) : null}
+          <div
+            id="diagnostic-runtime-dependencies"
+            className="scroll-mt-20"
+          >
+            <RuntimeDependencyDoctorPanel
+              game={
+                game
+              }
+              isLinux={
+                isLinux
+              }
+            />
+          </div>
 
           <div
             id="diagnostic-windows-performance"
@@ -1493,34 +1495,36 @@ export default function GameDetails({
               game={
                 game
               }
+              isLinux={
+                isLinux
+              }
             />
           </div>
 
-          {!isLinux ? (
-            <div
-              id="diagnostic-performance-capture"
-              className="scroll-mt-20"
-            >
-              <PerformanceCapturePanel
-                game={
-                  game
-                }
-              />
-            </div>
-          ) : null}
+          <div
+            id="diagnostic-performance-capture"
+            className="scroll-mt-20"
+          >
+            <PerformanceCapturePanel
+              game={
+                game
+              }
+            />
+          </div>
 
-          {!isLinux ? (
-            <div
-              id="diagnostic-configuration-validator"
-              className="scroll-mt-20"
-            >
-              <ConfigurationValidatorPanel
-                game={
-                  game
-                }
-              />
-            </div>
-          ) : null}
+          <div
+            id="diagnostic-configuration-validator"
+            className="scroll-mt-20"
+          >
+            <ConfigurationValidatorPanel
+              game={
+                game
+              }
+              isLinux={
+                isLinux
+              }
+            />
+          </div>
 
           <div
             id="diagnostic-background-apps"

@@ -528,6 +528,7 @@ function ConfigurationRecovery({
 
 export default function ConfigurationValidatorPanel({
   game,
+  isLinux = false,
 }) {
   const requestId =
     useRef(
@@ -651,7 +652,7 @@ export default function ConfigurationValidatorPanel({
               Game Configuration Validator
             </div>
             <div className="mt-1 max-w-3xl text-xs leading-relaxed text-white/35">
-              Checks local settings files for damaged JSON, XML, or INI structure, duplicate INI values, read-only files, and implausible graphics or display settings.
+              Checks {isLinux ? "native Linux or Proton" : "local"} settings files for damaged JSON, XML, or INI structure, duplicate INI values, read-only files, and implausible graphics or display settings.
             </div>
 
             {report ? (

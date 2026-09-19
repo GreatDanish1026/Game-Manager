@@ -25,6 +25,12 @@ export async function getRuntimeDependencyReport(
     );
   }
 
+  const inferredSteamPrefix =
+    game?.steamLibraryPath
+    && game?.launcherId
+      ? `${String(game.steamLibraryPath).replace(/\/$/, "")}/steamapps/compatdata/${game.launcherId}/pfx`
+      : null;
+
   return invoke(
     "get_runtime_dependency_report",
     {
@@ -38,6 +44,13 @@ export async function getRuntimeDependencyReport(
       architecture:
         local?.executable
           ?.architecture
+        ?? null,
+
+      protonPrefix:
+        game?.protonPrefix
+        ?? game?.winePrefix
+        ?? game?.prefixPath
+        ?? inferredSteamPrefix
         ?? null,
     }
   );

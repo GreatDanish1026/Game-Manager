@@ -6,13 +6,12 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
-    process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::Manager;
 
 #[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
+use std::{os::windows::process::CommandExt, process::Command};
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -157,20 +156,45 @@ fn format_name(path: &Path) -> String {
         "toml" => "TOML",
         "yaml" | "yml" => "YAML",
         "txt" => "Text",
+        _ if is_extensionless_config(path) => "Text configuration",
         _ => "Configuration",
     }
     .to_string()
 }
 
-fn is_config_extension(path: &Path) -> bool {
+fn is_extensionless_config(path: &Path) -> bool {
+    if path.extension().is_some() {
+        return false;
+    }
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    let normalized = normalized_key(name);
     matches!(
-        path.extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-        "ini" | "json" | "xml" | "cfg" | "conf" | "toml" | "yaml" | "yml" | "txt"
+        normalized.as_str(),
+        "config"
+            | "configuration"
+            | "settings"
+            | "enginesettings"
+            | "gamesettings"
+            | "graphicssettings"
+            | "usersettings"
+            | "preferences"
+            | "options"
     )
+}
+
+fn is_config_extension(path: &Path) -> bool {
+    is_extensionless_config(path)
+        || matches!(
+            path.extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+                .as_str(),
+            "ini" | "json" | "xml" | "cfg" | "conf" | "toml" | "yaml" | "yml" | "txt"
+        )
 }
 
 fn likely_install_config(path: &Path) -> bool {
@@ -340,7 +364,38 @@ fn process_is_running(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn process_is_running(name: &str) -> bool {
+    let wanted = name.to_ascii_lowercase();
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return false;
+    };
+
+    entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_string_lossy().parse::<u32>().ok())
+        .any(|pid| {
+            let comm_matches = fs::read_to_string(format!("/proc/{pid}/comm"))
+                .ok()
+                .is_some_and(|comm| comm.trim().eq_ignore_ascii_case(&wanted));
+            if comm_matches {
+                return true;
+            }
+            fs::read(format!("/proc/{pid}/cmdline"))
+                .ok()
+                .is_some_and(|cmdline| {
+                    cmdline.split(|byte| *byte == 0).any(|argument| {
+                        let normalized = String::from_utf8_lossy(argument).replace('\\', "/");
+                        Path::new(&normalized)
+                            .file_name()
+                            .and_then(|value| value.to_str())
+                            .is_some_and(|value| value.eq_ignore_ascii_case(&wanted))
+                    })
+                })
+        })
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn process_is_running(_name: &str) -> bool {
     false
 }
@@ -360,6 +415,7 @@ fn resolve_configuration_root(
     install_path: &str,
     config_path: Option<&str>,
     resolved_config_path: Option<&str>,
+    proton_prefix: Option<&str>,
 ) -> Result<ConfigurationRoot, String> {
     let install = PathBuf::from(install_path.trim().trim_matches('"'));
     let resolved = resolved_config_path
@@ -367,10 +423,19 @@ fn resolve_configuration_root(
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .filter(|path| path.exists())
+        .filter(|path| !is_broad_configuration_root(path, proton_prefix))
         .or_else(|| {
             config_path
                 .filter(|value| !value.trim().is_empty())
-                .and_then(|raw| crate::local_paths::resolve_game_path(raw, install.to_str()).ok())
+                .and_then(|raw| {
+                    crate::local_paths::resolve_game_path_with_context(
+                        raw,
+                        install.to_str(),
+                        proton_prefix,
+                    )
+                    .ok()
+                })
+                .filter(|path| !is_broad_configuration_root(path, proton_prefix))
         });
 
     if let Some(path) = resolved {
@@ -386,6 +451,54 @@ fn resolve_configuration_root(
         });
     }
     Err("No existing configuration or installation folder is available.".to_string())
+}
+
+fn same_existing_path(left: &Path, right: &Path) -> bool {
+    let left = fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
+    let right = fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
+    #[cfg(target_os = "windows")]
+    {
+        return left
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy());
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        left == right
+    }
+}
+
+fn is_broad_configuration_root(path: &Path, proton_prefix: Option<&str>) -> bool {
+    let mut protected = Vec::new();
+    for variable in ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA"] {
+        if let Some(value) = std::env::var_os(variable) {
+            protected.push(PathBuf::from(value));
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        protected.push(home.join(".config"));
+        protected.push(home.join(".local/share"));
+    }
+    if let Some(value) = std::env::var_os("XDG_CONFIG_HOME") {
+        protected.push(PathBuf::from(value));
+    }
+    if let Some(value) = std::env::var_os("XDG_DATA_HOME") {
+        protected.push(PathBuf::from(value));
+    }
+    if let Some(prefix) = proton_prefix
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+    {
+        protected.push(prefix.clone());
+        protected.push(prefix.join("drive_c"));
+        protected.push(prefix.join("drive_c/users/steamuser"));
+        protected.push(prefix.join("drive_c/users/steamuser/AppData"));
+    }
+    protected
+        .iter()
+        .filter(|candidate| candidate.exists())
+        .any(|candidate| same_existing_path(path, candidate))
 }
 
 fn file_hash(path: &Path) -> Result<String, String> {
@@ -801,6 +914,52 @@ fn validate_ini(
     }
 }
 
+fn validate_loose_settings(
+    text: &str,
+    file_name: &str,
+    settings: &mut Vec<ConfigurationSetting>,
+    issues: &mut Vec<ConfigurationIssue>,
+) {
+    for (index, raw_line) in text.lines().enumerate() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with(['{', '}', '#', ';']) || line.starts_with("//") {
+            continue;
+        }
+        let values = line.split_whitespace().collect::<Vec<_>>();
+        if values.len() < 2 {
+            continue;
+        }
+        let line_number = Some(index + 1);
+        if normalized_key(values[0]) == "resolution" && values.len() >= 3 {
+            record_setting(
+                "resolutionx",
+                values[1],
+                file_name,
+                line_number,
+                settings,
+                issues,
+            );
+            record_setting(
+                "resolutiony",
+                values[2],
+                file_name,
+                line_number,
+                settings,
+                issues,
+            );
+        } else {
+            record_setting(
+                values[0],
+                &values[1..].join(" "),
+                file_name,
+                line_number,
+                settings,
+                issues,
+            );
+        }
+    }
+}
+
 fn validate_json(
     text: &str,
     file_name: &str,
@@ -885,24 +1044,18 @@ fn inspect_report(
     install_path: String,
     config_path: Option<String>,
     resolved_config_path: Option<String>,
+    proton_prefix: Option<String>,
 ) -> Result<ConfigurationValidationReport, String> {
-    let install = PathBuf::from(install_path.trim().trim_matches('"'));
     let mut issues = Vec::new();
-    let resolved = resolved_config_path
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .filter(|path| path.exists())
-        .or_else(|| {
-            config_path
-                .as_deref()
-                .and_then(|raw| crate::local_paths::resolve_game_path(raw, install.to_str()).ok())
-        });
-
-    let (root, used_install_fallback) = if let Some(path) = resolved {
-        (path, false)
-    } else {
+    let configuration_root = resolve_configuration_root(
+        &install_path,
+        config_path.as_deref(),
+        resolved_config_path.as_deref(),
+        proton_prefix.as_deref(),
+    )?;
+    let root = configuration_root.path;
+    let used_install_fallback = configuration_root.used_install_fallback;
+    if used_install_fallback {
         if config_path
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty())
@@ -910,17 +1063,13 @@ fn inspect_report(
             issues.push(issue(
                 "info",
                 "Reported configuration location not found",
-                "The PCGamingWiki-reported location did not resolve to an existing folder for this Windows account.",
+                "The PCGamingWiki-reported location did not resolve to a safe existing folder for this operating-system account or compatibility prefix.",
                 None,
                 None,
                 Some("Launch the game once and save its settings, then run the validator again."),
             ));
         }
-        if !install.is_dir() {
-            return Err("The game's installation folder is unavailable.".to_string());
-        }
-        (install.clone(), true)
-    };
+    }
 
     let (paths, scan_truncated) = collect_files(&root, used_install_fallback);
     let mut files = Vec::new();
@@ -949,7 +1098,7 @@ fn inspect_report(
             issues.push(issue(
                 "warning",
                 "Configuration file could not be read",
-                "Windows denied access or the file disappeared during validation.",
+                "The operating system denied access or the file disappeared during validation.",
                 Some(&file_name),
                 None,
                 Some("Close the game and try again. Check the file's permissions if the problem continues."),
@@ -996,6 +1145,9 @@ fn inspect_report(
                         "cfg" | "conf" | "toml" | "yaml" | "yml" | "txt" => {
                             validate_ini(&text, &file_name, false, &mut settings, &mut issues)
                         }
+                        _ if is_extensionless_config(&path) => {
+                            validate_loose_settings(&text, &file_name, &mut settings, &mut issues)
+                        }
                         _ => {}
                     },
                     Err(error) => {
@@ -1015,7 +1167,7 @@ fn inspect_report(
                     issues.push(issue(
                         "warning",
                         "Configuration file could not be read",
-                        format!("Windows could not read this file: {error}"),
+                        format!("The operating system could not read this file: {error}"),
                         Some(&file_name),
                         None,
                         Some("Close the game and try again. Check the file's permissions if the problem continues."),
@@ -1119,9 +1271,15 @@ pub async fn get_game_configuration_validation_report(
     install_path: String,
     config_path: Option<String>,
     resolved_config_path: Option<String>,
+    proton_prefix: Option<String>,
 ) -> Result<ConfigurationValidationReport, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        inspect_report(install_path, config_path, resolved_config_path)
+        inspect_report(
+            install_path,
+            config_path,
+            resolved_config_path,
+            proton_prefix,
+        )
     })
     .await
     .map_err(|error| format!("Configuration Validator worker failed: {error}"))?
@@ -1137,7 +1295,7 @@ pub fn get_game_configuration_backup_status(
     let directory = configuration_backup_directory(&app, &game_name, game_id.as_deref())?;
     let name = executable_name(executable_path.as_deref());
     Ok(ConfigurationBackupStatus {
-        supported: cfg!(target_os = "windows"),
+        supported: cfg!(any(target_os = "windows", target_os = "linux")),
         backup_directory: directory.to_string_lossy().to_string(),
         backups: list_configuration_backups(&directory)?,
         game_running: name.as_deref().map(process_is_running).unwrap_or(false),
@@ -1154,6 +1312,7 @@ pub async fn create_game_configuration_backup(
     config_path: Option<String>,
     resolved_config_path: Option<String>,
     executable_path: Option<String>,
+    proton_prefix: Option<String>,
 ) -> Result<ConfigurationRecoveryResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         require_game_closed(executable_path.as_deref())?;
@@ -1161,6 +1320,7 @@ pub async fn create_game_configuration_backup(
             &install_path,
             config_path.as_deref(),
             resolved_config_path.as_deref(),
+            proton_prefix.as_deref(),
         )?;
         let backup = create_configuration_backup_blocking(
             &app,
@@ -1192,6 +1352,7 @@ pub async fn safely_reset_game_configuration(
     config_path: Option<String>,
     resolved_config_path: Option<String>,
     executable_path: Option<String>,
+    proton_prefix: Option<String>,
 ) -> Result<ConfigurationRecoveryResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         require_game_closed(executable_path.as_deref())?;
@@ -1199,6 +1360,7 @@ pub async fn safely_reset_game_configuration(
             &install_path,
             config_path.as_deref(),
             resolved_config_path.as_deref(),
+            proton_prefix.as_deref(),
         )?;
         if root.used_install_fallback {
             return Err(
@@ -1272,6 +1434,7 @@ pub async fn restore_game_configuration_backup(
     config_path: Option<String>,
     resolved_config_path: Option<String>,
     executable_path: Option<String>,
+    proton_prefix: Option<String>,
 ) -> Result<ConfigurationRecoveryResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         require_game_closed(executable_path.as_deref())?;
@@ -1283,7 +1446,14 @@ pub async fn restore_game_configuration_backup(
             &install_path,
             config_path.as_deref(),
             resolved_config_path.as_deref(),
+            proton_prefix.as_deref(),
         )?;
+        if root.used_install_fallback {
+            return Err(
+                "Restore requires a resolved configuration folder. GameAtlas will not write backup files into an install-folder guess."
+                    .to_string(),
+            );
+        }
 
         let mut restore_files = Vec::<(PathBuf, PathBuf)>::new();
         for entry in &manifest.files {
@@ -1468,5 +1638,22 @@ mod tests {
         assert!(!issues
             .iter()
             .any(|item| item.title == "Duplicate INI setting"));
+    }
+
+    #[test]
+    fn parses_extensionless_engine_settings() {
+        let mut settings = Vec::new();
+        let mut issues = Vec::new();
+        validate_loose_settings(
+            "{Video\n  Windowed 1\n  Resolution 3840 2160\n  VSync 0\n}\n",
+            "ENGINESETTINGS",
+            &mut settings,
+            &mut issues,
+        );
+        assert_eq!(settings.len(), 4);
+        assert!(settings
+            .iter()
+            .any(|setting| setting.name == "Resolution width" && setting.value == "3840"));
+        assert!(issues.is_empty());
     }
 }

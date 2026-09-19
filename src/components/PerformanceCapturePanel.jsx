@@ -1069,6 +1069,31 @@ export default function PerformanceCapturePanel({
   );
 
 
+  useEffect(
+    () => {
+      if (capturing) {
+        return undefined;
+      }
+
+      const timer =
+        window.setInterval(
+          refreshStatus,
+          3000
+        );
+
+      return () =>
+        window.clearInterval(
+          timer
+        );
+    },
+    [
+      capturing,
+      game?.id,
+      game?.installPath,
+    ]
+  );
+
+
   async function startCapture() {
     const currentRequest =
       requestId.current
@@ -1157,6 +1182,7 @@ export default function PerformanceCapturePanel({
   const canCapture =
     status?.providerReady
     && status?.executableName
+    && status?.gameRunning
     && !capturing;
 
 
@@ -1276,7 +1302,11 @@ export default function PerformanceCapturePanel({
         <div className="border-b border-emerald-400/10 bg-emerald-400/[0.025] px-4 py-3">
           <div className="flex items-center gap-2 text-xs text-emerald-100/60">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            Capturing {status?.executableName ?? "game frames"}… approximately {remaining ?? duration} seconds remaining
+            {
+              remaining === 0
+                ? "Finalizing capture…"
+                : `Capturing ${status?.executableName ?? "game frames"}… approximately ${remaining ?? duration} seconds remaining`
+            }
           </div>
           <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.06]">
             <div
@@ -1320,7 +1350,7 @@ export default function PerformanceCapturePanel({
             {status.detail}
           </div>
           <div className="shrink-0 text-[10px] text-white/22">
-            {status.providerName} {status.providerVersion ?? ""} · integrity verified
+            {status.providerName} {status.providerVersion ?? ""} · capture provider
           </div>
         </div>
       ) : null}
@@ -1445,7 +1475,7 @@ export default function PerformanceCapturePanel({
       ) : (
         !capturing ? (
           <div className="p-4 text-xs leading-relaxed text-white/28">
-            Performance Capture is read-only. It uses Windows ETW through PresentMon, does not inject into the game, and stores the raw CSV locally for repeatable comparisons.
+            Performance Capture is read-only. It uses {status?.providerName ?? "the platform capture provider"}, does not modify game files, and stores the raw CSV locally for repeatable comparisons.
           </div>
         ) : null
       )}

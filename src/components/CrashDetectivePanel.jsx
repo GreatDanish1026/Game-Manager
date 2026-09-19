@@ -65,6 +65,7 @@ function formatDate(value) {
 
 function CrashEventCard({
   event,
+  isLinux,
 }) {
   return (
     <div className="rounded-lg border border-white/[0.07] bg-black/10 p-3">
@@ -91,17 +92,23 @@ function CrashEventCard({
       <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
         <div className="rounded-md bg-white/[0.025] px-3 py-2">
           <div className="text-[10px] uppercase tracking-wide text-white/22">
-            Faulting module
+            {isLinux
+              ? "Executable"
+              : "Faulting module"}
           </div>
           <div className="mt-1 break-all text-white/48">
-            {event.faultingModule
+            {(isLinux
+              ? event.applicationPath
+              : event.faultingModule)
             ?? "Not recorded"}
           </div>
         </div>
 
         <div className="rounded-md bg-white/[0.025] px-3 py-2">
           <div className="text-[10px] uppercase tracking-wide text-white/22">
-            Exception code
+            {isLinux
+              ? "Signal"
+              : "Exception code"}
           </div>
           <div className="mt-1 break-all font-mono text-white/48">
             {event.exceptionCode
@@ -111,7 +118,9 @@ function CrashEventCard({
       </div>
 
       <div className="mt-2 text-[10px] text-white/20">
-        Windows event {event.eventId} · {event.provider}
+        {isLinux
+          ? `${event.provider}${event.reportId ? ` · PID ${event.reportId}` : ""}`
+          : `Windows event ${event.eventId} · ${event.provider}`}
       </div>
     </div>
   );
@@ -120,6 +129,7 @@ function CrashEventCard({
 
 export default function CrashDetectivePanel({
   game,
+  isLinux = false,
 }) {
   const requestId =
     useRef(
@@ -249,7 +259,9 @@ export default function CrashDetectivePanel({
               Crash Detective
             </div>
             <div className="mt-1 max-w-3xl text-xs leading-relaxed text-white/35">
-              Checks recent Windows Application log records for crashes or hangs matching this game's executable, then explains useful evidence without claiming a single cause.
+              {isLinux
+                ? "Checks recent systemd coredump records for crashes matching this game's executable, then explains useful evidence without claiming a single cause."
+                : "Checks recent Windows Application log records for crashes or hangs matching this game's executable, then explains useful evidence without claiming a single cause."}
             </div>
 
             {report ? (
@@ -280,7 +292,9 @@ export default function CrashDetectivePanel({
 
       {error ? (
         <div className="border-b border-red-500/10 bg-red-500/[0.04] px-4 py-3 text-xs text-red-200/70">
-          Crash Detective could not read the Windows Application log: {error}
+          Crash Detective could not read {isLinux
+            ? "Linux coredump records"
+            : "the Windows Application log"}: {error}
         </div>
       ) : null}
 
@@ -289,7 +303,9 @@ export default function CrashDetectivePanel({
       && !report ? (
         <div className="flex items-center gap-3 p-4 text-sm text-white/35">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Matching recent Windows crash and hang records…
+          {isLinux
+            ? "Matching recent Linux coredump records…"
+            : "Matching recent Windows crash and hang records…"}
         </div>
       ) : null}
 
@@ -329,7 +345,9 @@ export default function CrashDetectivePanel({
           {report.events.length > 0 ? (
             <details className="border-t border-white/[0.06] p-4">
               <summary className="cursor-pointer text-xs font-semibold text-white/58">
-                View matched Windows records ({report.events.length})
+                View matched {isLinux
+                  ? "Linux"
+                  : "Windows"} records ({report.events.length})
               </summary>
 
               <div className="mt-3 space-y-2">
@@ -341,6 +359,7 @@ export default function CrashDetectivePanel({
                     <CrashEventCard
                       key={`${event.occurredAt}-${event.eventId}-${index}`}
                       event={event}
+                      isLinux={isLinux}
                     />
                   )
                 )}
@@ -349,7 +368,9 @@ export default function CrashDetectivePanel({
           ) : null}
 
           <div className="border-t border-white/[0.06] px-4 py-3 text-[11px] leading-relaxed text-white/24">
-            Crash Detective is read-only. It checks up to {report.lookbackDays} days of Windows Application Error and Application Hang records and does not enable crash dumps or send diagnostic data anywhere.
+            Crash Detective is read-only. It checks up to {report.lookbackDays} days of {isLinux
+              ? "existing systemd-coredump metadata"
+              : "Windows Application Error and Application Hang records"} and does not enable crash dumps or send diagnostic data anywhere.
           </div>
         </>
       ) : (

@@ -1,8 +1,7 @@
-use std::{
-    env,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::{env, path::PathBuf, process::Command};
+
+#[cfg(target_os = "windows")]
+use std::path::Path;
 
 use serde::Serialize;
 
@@ -65,7 +64,29 @@ fn protocol_registered(protocol: &str) -> bool {
     hkcr.open_subkey(protocol).is_ok()
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn protocol_registered(protocol: &str) -> bool {
+    let mime = format!("x-scheme-handler/{protocol}");
+    let query = |host: bool| {
+        let mut command = if host {
+            let mut command = Command::new("distrobox-host-exec");
+            command.arg("xdg-mime");
+            command
+        } else {
+            Command::new("xdg-mime")
+        };
+        command
+            .args(["query", "default", &mime])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| !String::from_utf8_lossy(&output.stdout).trim().is_empty())
+            .unwrap_or(false)
+    };
+    query(false) || query(true)
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn protocol_registered(_protocol: &str) -> bool {
     false
 }
@@ -95,7 +116,32 @@ fn steam_candidates() -> Vec<PathBuf> {
     candidates
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn steam_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(path) = env::var_os("PATH") {
+        candidates.extend(env::split_paths(&path).map(|directory| directory.join("steam")));
+    }
+
+    candidates.extend([
+        PathBuf::from("/usr/bin/steam"),
+        PathBuf::from("/usr/local/bin/steam"),
+        PathBuf::from("/var/lib/flatpak/exports/bin/com.valvesoftware.Steam"),
+    ]);
+
+    if let Some(home) = env::var_os("HOME") {
+        candidates.push(
+            PathBuf::from(home).join(".local/share/flatpak/exports/bin/com.valvesoftware.Steam"),
+        );
+    }
+
+    candidates.sort();
+    candidates.dedup();
+    candidates
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn steam_candidates() -> Vec<PathBuf> {
     Vec::new()
 }
@@ -240,11 +286,11 @@ fn launcher_status(
 
     let message = if installed {
         if path.is_some() && protocol_ok {
-            "Launcher executable and Windows protocol handler detected.".to_string()
+            "Launcher executable and protocol handler detected.".to_string()
         } else if path.is_some() {
             "Launcher executable detected.".to_string()
         } else {
-            "Windows launcher protocol handler detected.".to_string()
+            "Launcher protocol handler detected.".to_string()
         }
     } else {
         format!(
@@ -474,18 +520,46 @@ fn open_protocol(uri: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn open_protocol(uri: &str) -> Result<(), String> {
+    let open = |host: bool| {
+        let mut command = if host {
+            let mut command = Command::new("distrobox-host-exec");
+            command.arg("xdg-open");
+            command
+        } else {
+            Command::new("xdg-open")
+        };
+        command
+            .arg(uri)
+            .env_remove("LD_LIBRARY_PATH")
+            .env_remove("PYTHONHOME")
+            .env_remove("PYTHONPATH")
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    };
+
+    if !open(false) && !open(true) {
+        return Err(
+            "The Linux desktop could not hand the launcher URI to its registered application."
+                .to_string(),
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn open_protocol(uri: &str) -> Result<(), String> {
     let status = Command::new("xdg-open")
         .arg(uri)
         .status()
-        .map_err(|error| format!("Failed to open launcher URI: {}", error))?;
-
-    if !status.success() {
-        return Err("The launcher URI could not be opened.".to_string());
-    }
-
-    Ok(())
+        .map_err(|error| format!("Failed to open launcher URI: {error}"))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "The launcher URI could not be opened.".to_string())
 }
 
 fn clean_launcher_id(launcher_id: Option<&str>) -> Option<String> {

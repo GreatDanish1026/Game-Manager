@@ -108,7 +108,8 @@ function correlatedFindings(
   lifecycle,
   crashResult,
   runtimeResult,
-  configurationResult
+  configurationResult,
+  isLinux
 ) {
   const findings =
     [];
@@ -133,9 +134,11 @@ function correlatedFindings(
         source:
           "Crash Detective",
         title:
-          `Windows recorded ${String(event.eventType ?? "a crash").toLowerCase()}`,
+          `${isLinux ? "Linux" : "Windows"} recorded ${String(event.eventType ?? "a crash").toLowerCase()}`,
         detail:
-          `The event matches this launch window${event.faultingModule ? ` and names ${event.faultingModule} as the faulting module` : ""}${event.exceptionCode ? ` with exception ${event.exceptionCode}` : ""}.`,
+          isLinux
+            ? `The systemd-coredump event matches this launch window${event.exceptionCode ? ` and reports ${event.exceptionCode}` : ""}.`
+            : `The event matches this launch window${event.faultingModule ? ` and names ${event.faultingModule} as the faulting module` : ""}${event.exceptionCode ? ` with exception ${event.exceptionCode}` : ""}.`,
         suggestion:
           crashResult.value.findings?.find(
             (item) =>
@@ -151,11 +154,13 @@ function correlatedFindings(
         source:
           "Crash Detective",
         title:
-          "No matching Windows crash event",
+          `No matching ${isLinux ? "Linux coredump" : "Windows crash event"}`,
         detail:
-          "Windows did not write a matching crash or hang record during this launch window. A clean early exit, launcher handoff, DRM, anti-cheat, or configuration issue can still stop startup without creating one.",
+          isLinux
+            ? "Linux did not expose a matching coredump during this launch window. A clean early exit, Proton or launcher handoff, DRM, anti-cheat, or configuration issue can still stop startup without creating one."
+            : "Windows did not write a matching crash or hang record during this launch window. A clean early exit, launcher handoff, DRM, anti-cheat, or configuration issue can still stop startup without creating one.",
         suggestion:
-          "If the problem repeats, scan Crash Detective again after a short delay because Windows can publish events late.",
+          `If the problem repeats, scan Crash Detective again after a short delay because ${isLinux ? "systemd" : "Windows"} can publish events late.`,
       });
     }
   }
@@ -279,6 +284,7 @@ function metric(
 
 export default function LaunchFailureAnalyzerPanel({
   game,
+  isLinux = false,
 }) {
   const runId =
     useRef(0);
@@ -562,7 +568,8 @@ export default function LaunchFailureAnalyzerPanel({
           nextLifecycle,
           crashResult,
           runtimeResult,
-          configurationResult
+          configurationResult,
+          isLinux
         )
       );
 
@@ -635,7 +642,7 @@ export default function LaunchFailureAnalyzerPanel({
               Launch Failure Analyzer
             </div>
             <div className="mt-1 max-w-3xl text-xs leading-relaxed text-white/35">
-              Starts the normal launch profile under observation, checks whether the game process appears and survives startup, then correlates existing diagnostics when it exits early.
+              Starts the normal launch profile under observation, checks whether the {isLinux ? "native or Proton" : "game"} process appears and survives startup, then correlates existing diagnostics when it exits early.
             </div>
 
             <div className="mt-2 text-[10px] leading-relaxed text-white/25">

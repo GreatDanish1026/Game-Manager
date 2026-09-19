@@ -99,6 +99,45 @@ fn expand_known_placeholders(value: &str, install_path: Option<&str>) -> String 
         }
     }
 
+    #[cfg(target_os = "linux")]
+    if let Ok(home) = env::var("HOME") {
+        let config_home = env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
+            Path::new(&home)
+                .join(".config")
+                .to_string_lossy()
+                .to_string()
+        });
+        let data_home = env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
+            Path::new(&home)
+                .join(".local/share")
+                .to_string_lossy()
+                .to_string()
+        });
+
+        for (token, replacement) in [
+            ("<xdgconfighome>", config_home.as_str()),
+            ("<xdg-config-home>", config_home.as_str()),
+            ("{xdgconfighome}", config_home.as_str()),
+            ("${XDG_CONFIG_HOME}", config_home.as_str()),
+            ("$XDG_CONFIG_HOME", config_home.as_str()),
+            ("<xdgdatahome>", data_home.as_str()),
+            ("<xdg-data-home>", data_home.as_str()),
+            ("{xdgdatahome}", data_home.as_str()),
+            ("${XDG_DATA_HOME}", data_home.as_str()),
+            ("$XDG_DATA_HOME", data_home.as_str()),
+            ("<home>", home.as_str()),
+            ("{home}", home.as_str()),
+            ("${HOME}", home.as_str()),
+            ("$HOME", home.as_str()),
+        ] {
+            output = replace_case_insensitive(&output, token, replacement);
+        }
+
+        if output == "~" || output.starts_with("~/") || output.starts_with("~\\") {
+            output = format!("{}{}", home, &output[1..]);
+        }
+    }
+
     if let Ok(user_profile) = env::var("USERPROFILE") {
         let documents = Path::new(&user_profile)
             .join("Documents")

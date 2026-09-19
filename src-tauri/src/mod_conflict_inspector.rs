@@ -76,6 +76,7 @@ pub struct ModConflictFinding {
 #[serde(rename_all = "camelCase")]
 pub struct ModConflictReport {
     pub supported: bool,
+    pub platform: String,
     pub install_path: String,
     pub executable_path: Option<String>,
     pub executable_architecture: Option<String>,
@@ -139,12 +140,51 @@ fn read_pe_architecture(path: &Path) -> Option<String> {
     }
 }
 
-fn is_dll_like(name: &str) -> bool {
+fn read_elf_architecture(path: &Path) -> Option<String> {
+    let mut file = fs::File::open(path).ok()?;
+    let mut header = [0u8; 20];
+    file.read_exact(&mut header).ok()?;
+    if &header[0..4] != b"\x7fELF" {
+        return None;
+    }
+
+    let machine = match header[5] {
+        1 => u16::from_le_bytes([header[18], header[19]]),
+        2 => u16::from_be_bytes([header[18], header[19]]),
+        _ => return None,
+    };
+    match machine {
+        0x0003 => Some("x86".to_string()),
+        0x003e => Some("x64".to_string()),
+        0x0028 => Some("ARM".to_string()),
+        0x00b7 => Some("ARM64".to_string()),
+        0x00f3 => Some("RISC-V".to_string()),
+        _ => Some(match header[4] {
+            1 => "ELF32".to_string(),
+            2 => "ELF64".to_string(),
+            _ => "ELF".to_string(),
+        }),
+    }
+}
+
+fn binary_architecture(path: &Path) -> Option<(String, &'static str)> {
+    if let Some(architecture) = read_pe_architecture(path) {
+        return Some((architecture, "PE"));
+    }
+    read_elf_architecture(path).map(|architecture| (architecture, "ELF"))
+}
+
+fn is_shared_object(name: &str) -> bool {
+    name.ends_with(".so") || name.contains(".so.")
+}
+
+fn is_binary_like(name: &str) -> bool {
     name.ends_with(".dll")
         || name.ends_with(".asi")
         || name.ends_with(".addon")
         || name.ends_with(".addon32")
         || name.ends_with(".addon64")
+        || is_shared_object(name)
 }
 
 fn is_proxy_name(name: &str) -> bool {
@@ -171,6 +211,8 @@ fn known_mod_binary(name: &str) -> bool {
         "optiscaler",
         "scripthook",
         "ultimate-asi-loader",
+        "doorstop",
+        "native_mod_loader",
     ]
     .iter()
     .any(|marker| name.contains(marker))
@@ -190,13 +232,23 @@ fn is_runtime_name(name: &str) -> bool {
         "steam_api",
         "eossdk",
         "galaxy",
+        "libc.so",
+        "libm.so",
+        "libdl.so",
+        "libgcc_s.so",
+        "libstdc++.so",
+        "libsteam_api.so",
+        "libsteamnetworkingsockets.so",
+        "libvulkan.so",
+        "libopenal.so",
+        "libsdl",
     ]
     .iter()
     .any(|marker| name.starts_with(marker))
 }
 
 fn category(name: &str, relative_path: &str, executable_directory: bool) -> String {
-    if is_proxy_name(name) && executable_directory {
+    if name.ends_with(".dll") && is_proxy_name(name) && executable_directory {
         return "Proxy / injector".to_string();
     }
     if name.ends_with(".addon") || name.ends_with(".addon32") || name.ends_with(".addon64") {
@@ -220,7 +272,11 @@ fn category(name: &str, relative_path: &str, executable_directory: bool) -> Stri
             ],
         )
     {
-        return "Mod / plug-in".to_string();
+        return if is_shared_object(name) {
+            "Native mod / plug-in".to_string()
+        } else {
+            "Mod / plug-in".to_string()
+        };
     }
     if is_runtime_name(name) {
         return "Runtime / platform".to_string();
@@ -305,7 +361,7 @@ fn scan_files(root: &Path) -> Result<(Vec<ScannedFile>, usize, bool), String> {
                 || lower_relative_path.contains("reshade-shaders")
                 || lower_relative_path.contains("rtx-remix");
 
-            if !is_dll_like(&lower_name) && !keep_indicator {
+            if !is_binary_like(&lower_name) && !keep_indicator {
                 continue;
             }
 
@@ -446,10 +502,7 @@ fn duplicate_groups(
     root: &Path,
 ) -> Vec<DuplicateDllGroup> {
     let mut groups: BTreeMap<String, Vec<&ScannedFile>> = BTreeMap::new();
-    for file in files
-        .iter()
-        .filter(|file| file.lower_name.ends_with(".dll"))
-    {
+    for file in files.iter().filter(|file| is_binary_like(&file.lower_name)) {
         groups
             .entry(file.lower_name.clone())
             .or_default()
@@ -538,7 +591,11 @@ pub async fn inspect_mod_conflicts(
             .filter(|value| !value.is_empty())
             .map(|value| PathBuf::from(value.trim_matches('"')))
             .filter(|path| path.is_file());
-        let executable_architecture = executable.as_deref().and_then(read_pe_architecture);
+        let executable_binary = executable.as_deref().and_then(binary_architecture);
+        let executable_architecture = executable_binary
+            .as_ref()
+            .map(|(architecture, _)| architecture.clone());
+        let executable_format = executable_binary.map(|(_, format)| format);
         let (files, files_visited, scan_truncated) = scan_files(&root)?;
         let frameworks = detect_frameworks(&files);
         let duplicates = duplicate_groups(&files, executable.as_deref(), &root);
@@ -547,13 +604,15 @@ pub async fn inspect_mod_conflicts(
         let mut dll_count = 0usize;
         let mut proxy_count = 0usize;
         let mut mod_dll_count = 0usize;
-        for file in files.iter().filter(|file| is_dll_like(&file.lower_name)) {
+        for file in files.iter().filter(|file| is_binary_like(&file.lower_name)) {
             dll_count += 1;
             let executable_directory = executable
                 .as_deref()
                 .map(|path| same_directory(&file.path, path))
                 .unwrap_or_else(|| file.path.parent() == Some(root.as_path()));
-            let proxy_name = is_proxy_name(&file.lower_name) && executable_directory;
+            let proxy_name = file.lower_name.ends_with(".dll")
+                && is_proxy_name(&file.lower_name)
+                && executable_directory;
             let file_category = category(&file.lower_name, &file.relative_path, executable_directory);
             let mod_related = file_category != "Game library" && file_category != "Runtime / platform";
             if proxy_name {
@@ -565,10 +624,15 @@ pub async fn inspect_mod_conflicts(
             if dlls.len() >= MAX_DLLS_RETURNED {
                 continue;
             }
-            let architecture = read_pe_architecture(&file.path);
+            let file_binary = binary_architecture(&file.path);
+            let architecture = file_binary
+                .as_ref()
+                .map(|(architecture, _)| architecture.clone());
+            let file_format = file_binary.map(|(_, format)| format);
             let architecture_mismatch = mod_related
                 && architecture.is_some()
                 && executable_architecture.is_some()
+                && file_format == executable_format
                 && architecture != executable_architecture;
             dlls.push(InspectedDll {
                 file_name: file.file_name.clone(),
@@ -601,9 +665,9 @@ pub async fn inspect_mod_conflicts(
         if !mismatches.is_empty() {
             findings.push(finding(
                 "warning",
-                "Mod DLL architecture does not match the game",
+                "Mod binary architecture does not match the game",
                 format!(
-                    "{} mod or injector file{} use a different PE architecture than the primary executable.",
+                    "{} mod or injector file{} use a different architecture than the primary executable.",
                     mismatches.len(),
                     if mismatches.len() == 1 { "" } else { "s" }
                 ),
@@ -623,7 +687,7 @@ pub async fn inspect_mod_conflicts(
         if !zero_length.is_empty() {
             findings.push(finding(
                 "warning",
-                "Empty DLL or plug-in files found",
+                "Empty mod binary or plug-in files found",
                 "Zero-byte binary files cannot be loaded and usually indicate an interrupted install, failed extraction, or placeholder file.",
                 Some("Reinstall the affected mod or verify the game files after backing up intentional custom files."),
                 zero_length.iter().take(6).map(|dll| dll.relative_path.clone()).collect(),
@@ -637,9 +701,9 @@ pub async fn inspect_mod_conflicts(
         if !conflicting_duplicates.is_empty() {
             findings.push(finding(
                 "warning",
-                "Different copies of mod DLLs were found",
+                "Different copies of mod binaries were found",
                 format!(
-                    "{} duplicated mod DLL name{} have different contents and may be selected differently by loaders or deployment order.",
+                    "{} duplicated mod binary name{} have different contents and may be selected differently by loaders or deployment order.",
                     conflicting_duplicates.len(),
                     if conflicting_duplicates.len() == 1 { "" } else { "s" }
                 ),
@@ -686,9 +750,9 @@ pub async fn inspect_mod_conflicts(
         if scan_truncated || dll_count > MAX_DLLS_RETURNED {
             findings.push(finding(
                 "info",
-                "The DLL inventory was limited",
+                "The mod binary inventory was limited",
                 format!(
-                    "GameAtlas visited {files_visited} entries and returned details for {} of {dll_count} DLL or plug-in files.",
+                    "GameAtlas visited {files_visited} entries and returned details for {} of {dll_count} mod binary, shared-library, or plug-in files.",
                     dlls.len()
                 ),
                 Some("The highest-risk injector and mod files are prioritized. Very large installations may not show every game library."),
@@ -701,8 +765,8 @@ pub async fn inspect_mod_conflicts(
                 0,
                 finding(
                     "good",
-                    "No high-confidence DLL conflict found",
-                    "The scan did not find an architecture mismatch, empty binary, conflicting duplicate, or multiple proxy entry points.",
+                    "No high-confidence mod binary conflict found",
+                    "The scan did not find an architecture mismatch, empty binary, conflicting duplicate, or multiple Windows proxy entry points.",
                     Some("This does not guarantee that every mod is compatible; script-level and load-order conflicts require mod-specific knowledge."),
                     Vec::new(),
                 ),
@@ -715,14 +779,14 @@ pub async fn inspect_mod_conflicts(
             .count();
         let summary = if warning_count > 0 {
             format!(
-                "Found {warning_count} potential conflict{} across {dll_count} DLL and plug-in files.",
+                "Found {warning_count} potential conflict{} across {dll_count} mod binary and plug-in files.",
                 if warning_count == 1 { "" } else { "s" }
             )
         } else if frameworks.is_empty() {
-            format!("Inspected {dll_count} DLL files; no recognized mod framework or high-confidence conflict was found.")
+            format!("Inspected {dll_count} mod binary and shared-library files; no recognized mod framework or high-confidence conflict was found.")
         } else {
             format!(
-                "Detected {} mod framework{} across {dll_count} DLL and plug-in files with no high-confidence conflict.",
+                "Detected {} mod framework{} across {dll_count} mod binary and plug-in files with no high-confidence conflict.",
                 frameworks.len(),
                 if frameworks.len() == 1 { "" } else { "s" }
             )
@@ -730,6 +794,7 @@ pub async fn inspect_mod_conflicts(
 
         Ok(ModConflictReport {
             supported: true,
+            platform: std::env::consts::OS.to_string(),
             install_path: path_string(&root),
             executable_path: executable.as_deref().map(path_string),
             executable_architecture,
@@ -770,11 +835,32 @@ mod tests {
             "Mod / plug-in"
         );
         assert_eq!(category("example.asi", "example.asi", true), "ASI plug-in");
+        assert_eq!(
+            category("example.so", "mods/example.so", false),
+            "Native mod / plug-in"
+        );
     }
 
     #[test]
     fn proxy_names_are_specific() {
         assert!(is_proxy_name("dinput8.dll"));
         assert!(!is_proxy_name("gameplay.dll"));
+    }
+
+    #[test]
+    fn reads_elf_architecture() {
+        let path = std::env::temp_dir().join(format!(
+            "gameatlas-mod-inspector-{}.elf",
+            std::process::id()
+        ));
+        let mut header = [0u8; 20];
+        header[0..4].copy_from_slice(b"\x7fELF");
+        header[4] = 2;
+        header[5] = 1;
+        header[18..20].copy_from_slice(&0x003eu16.to_le_bytes());
+        fs::write(&path, header).expect("write ELF fixture");
+        let architecture = read_elf_architecture(&path);
+        let _ = fs::remove_file(path);
+        assert_eq!(architecture.as_deref(), Some("x64"));
     }
 }
