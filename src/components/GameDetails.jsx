@@ -40,6 +40,7 @@ import CollapsibleSection from "./CollapsibleSection";
 import CompactFeatureGrid from "./CompactFeatureGrid";
 import ModDashboard from "./ModDashboard";
 import ModConflictInspectorPanel from "./ModConflictInspectorPanel";
+import LinuxModDeploymentPanel from "./LinuxModDeploymentPanel";
 import QuickStatusBar from "./QuickStatusBar";
 import LaunchProfilesPanel from "./LaunchProfilesPanel";
 import PlayStatusNotesPanel from "./PlayStatusNotesPanel";
@@ -1293,6 +1294,17 @@ export default function GameDetails({
             }
           />
 
+          {isLinux ? (
+            <LinuxModDeploymentPanel
+              game={
+                game
+              }
+              isLinux={
+                isLinux
+              }
+            />
+          ) : null}
+
           <ModConflictInspectorPanel
             game={
               game
@@ -1530,7 +1542,11 @@ export default function GameDetails({
             id="diagnostic-background-apps"
             className="scroll-mt-20"
           >
-            <BackgroundConflictPanel />
+            <BackgroundConflictPanel
+              isLinux={
+                isLinux
+              }
+            />
           </div>
 
           <CleanLaunchPanel

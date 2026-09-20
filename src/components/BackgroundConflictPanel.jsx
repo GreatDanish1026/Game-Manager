@@ -73,6 +73,21 @@ function AppCard({
     app.impact
     === "monitoring";
 
+  const impactLabel =
+    {
+      "hook-capable":
+        "Hook-capable",
+      capture:
+        "Capture",
+      monitoring:
+        "Monitoring",
+      input:
+        "Input",
+    }[
+      app.impact
+    ]
+    ?? "Background";
+
   return (
     <div
       className={`
@@ -160,12 +175,7 @@ function AppCard({
             }
           `}
         >
-          {hookCapable
-            ? "Hook-capable"
-            : monitoring
-              ? "Monitoring"
-              : "Background"
-          }
+          {impactLabel}
         </span>
       </div>
     </div>
@@ -173,7 +183,9 @@ function AppCard({
 }
 
 
-export default function BackgroundConflictPanel() {
+export default function BackgroundConflictPanel({
+  isLinux = false,
+}) {
   const [
     report,
     setReport,
@@ -424,7 +436,9 @@ export default function BackgroundConflictPanel() {
             "
           />
 
-          Inspecting running Windows background applications…
+          Inspecting running {isLinux
+            ? "Linux"
+            : "Windows"} background applications…
         </div>
       ) : null}
 

@@ -3,6 +3,9 @@ use serde::Serialize;
 #[cfg(target_os = "windows")]
 use std::{collections::BTreeSet, os::windows::process::CommandExt, process::Command};
 
+#[cfg(target_os = "linux")]
+use std::{collections::BTreeSet, fs, path::Path};
+
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -30,6 +33,7 @@ pub struct BackgroundConflictFinding {
 #[serde(rename_all = "camelCase")]
 pub struct BackgroundConflictReport {
     pub supported: bool,
+    pub platform: String,
     pub running_apps: Vec<BackgroundAppInfo>,
     pub findings: Vec<BackgroundConflictFinding>,
     pub hook_capable_count: usize,
@@ -358,7 +362,6 @@ fn detect_apps(processes: &BTreeSet<String>) -> Vec<BackgroundAppInfo> {
     found
 }
 
-#[cfg(target_os = "windows")]
 fn build_findings(apps: &[BackgroundAppInfo]) -> Vec<BackgroundConflictFinding> {
     let mut findings = Vec::new();
 
@@ -578,6 +581,388 @@ fn build_findings(apps: &[BackgroundAppInfo]) -> Vec<BackgroundConflictFinding> 
     findings
 }
 
+#[cfg(target_os = "linux")]
+#[derive(Debug, Default)]
+struct LinuxProcessSnapshot {
+    processes: Vec<LinuxProcessInfo>,
+    mango_hud_loaded: bool,
+    vk_basalt_loaded: bool,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+struct LinuxProcessInfo {
+    aliases: BTreeSet<String>,
+}
+
+#[cfg(target_os = "linux")]
+fn normalized_process_name(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_matches('\0');
+
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let file_name = Path::new(trimmed)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| trimmed.to_string());
+
+    let normalized = file_name.trim().to_ascii_lowercase();
+
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_snapshot() -> LinuxProcessSnapshot {
+    let mut snapshot = LinuxProcessSnapshot::default();
+
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return snapshot;
+    };
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+
+        if !file_name
+            .to_string_lossy()
+            .chars()
+            .all(|character| character.is_ascii_digit())
+        {
+            continue;
+        }
+
+        let process_root = entry.path();
+        let mut aliases = BTreeSet::new();
+
+        if let Ok(comm) = fs::read_to_string(process_root.join("comm")) {
+            if let Some(name) = normalized_process_name(&comm) {
+                aliases.insert(name);
+            }
+        }
+
+        if let Ok(executable) = fs::read_link(process_root.join("exe")) {
+            if let Some(name) = normalized_process_name(&executable.to_string_lossy()) {
+                aliases.insert(name);
+            }
+        }
+
+        if let Ok(command_line) = fs::read(process_root.join("cmdline")) {
+            for argument in command_line.split(|byte| *byte == 0).take(1) {
+                if argument.is_empty() {
+                    continue;
+                }
+
+                if let Some(name) = normalized_process_name(&String::from_utf8_lossy(argument)) {
+                    aliases.insert(name);
+                }
+            }
+        }
+
+        if !snapshot.mango_hud_loaded || !snapshot.vk_basalt_loaded {
+            if let Ok(maps) = fs::read_to_string(process_root.join("maps")) {
+                let maps = maps.to_ascii_lowercase();
+
+                snapshot.mango_hud_loaded |= maps.contains("libmangohud");
+                snapshot.vk_basalt_loaded |= maps.contains("libvkbasalt");
+            }
+        }
+
+        if aliases.is_empty() {
+            continue;
+        }
+
+        snapshot.processes.push(LinuxProcessInfo { aliases });
+    }
+
+    snapshot
+}
+
+#[cfg(target_os = "linux")]
+fn linux_running_process(processes: &[LinuxProcessInfo], candidates: &[&str]) -> Option<String> {
+    let candidates = candidates
+        .iter()
+        .map(|candidate| candidate.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+
+    processes.iter().find_map(|process| {
+        process.aliases.iter().find_map(|alias| {
+            candidates
+                .iter()
+                .any(|candidate| alias == candidate)
+                .then(|| alias.clone())
+        })
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_detect_apps(snapshot: &LinuxProcessSnapshot) -> Vec<BackgroundAppInfo> {
+    struct Definition {
+        name: &'static str,
+        processes: &'static [&'static str],
+        category: &'static str,
+        impact: &'static str,
+        note: &'static str,
+    }
+
+    let definitions = [
+        Definition {
+            name: "OBS Studio",
+            processes: &["obs", "obs-studio"],
+            category: "Capture / streaming",
+            impact: "capture",
+            note: "Active capture or streaming can add GPU, encoder, compositor, and memory-copy work.",
+        },
+        Definition {
+            name: "GPU Screen Recorder",
+            processes: &[
+                "gpu-screen-recorder",
+                "gpu-screen-recorder-gtk",
+                "gpu-screen-recorder-ui",
+                "gsr-ui",
+            ],
+            category: "Capture / clipping",
+            impact: "capture",
+            note: "GPU capture or replay recording can interact with the graphics and encoder paths.",
+        },
+        Definition {
+            name: "Sunshine",
+            processes: &["sunshine"],
+            category: "Game streaming",
+            impact: "capture",
+            note: "Game streaming can add capture, encoding, and network work while a game is running.",
+        },
+        Definition {
+            name: "ReplaySorcery",
+            processes: &["replay-sorcery", "replaysorcery"],
+            category: "Capture / clipping",
+            impact: "capture",
+            note: "Background replay capture continuously uses part of the graphics or encoding pipeline.",
+        },
+        Definition {
+            name: "Kooha",
+            processes: &["kooha"],
+            category: "Screen capture",
+            impact: "capture",
+            note: "A desktop capture session may add compositor and encoder overhead.",
+        },
+        Definition {
+            name: "SimpleScreenRecorder",
+            processes: &["simplescreenrecorder"],
+            category: "Screen capture",
+            impact: "capture",
+            note: "A desktop capture session may add graphics, copy, and encoder overhead.",
+        },
+        Definition {
+            name: "wf-recorder",
+            processes: &["wf-recorder"],
+            category: "Screen capture",
+            impact: "capture",
+            note: "Wayland screen recording can add compositor and encoder overhead.",
+        },
+        Definition {
+            name: "Discord",
+            processes: &["discord", "discordcanary", "discordptb", "vesktop", "webcord"],
+            category: "Communication / streaming",
+            impact: "background",
+            note: "Voice, video, screen sharing, and hardware acceleration can consume resources while gaming.",
+        },
+        Definition {
+            name: "CoreCtrl",
+            processes: &["corectrl"],
+            category: "GPU monitoring / tuning",
+            impact: "monitoring",
+            note: "GPU monitoring and tuning profiles can affect clocks, power limits, and fan behavior.",
+        },
+        Definition {
+            name: "LACT",
+            processes: &["lact", "lact-daemon"],
+            category: "GPU monitoring / tuning",
+            impact: "monitoring",
+            note: "GPU monitoring and tuning settings can affect clocks, power limits, and fan behavior.",
+        },
+        Definition {
+            name: "Mission Center",
+            processes: &["missioncenter", "io.missioncenter.missioncenter"],
+            category: "System monitoring",
+            impact: "monitoring",
+            note: "Frequent system and GPU polling is worth isolating when diagnosing intermittent stutter.",
+        },
+        Definition {
+            name: "Resources",
+            processes: &["resources", "net.nokyan.resources"],
+            category: "System monitoring",
+            impact: "monitoring",
+            note: "Frequent process and hardware polling is worth isolating when diagnosing intermittent stutter.",
+        },
+        Definition {
+            name: "nvtop",
+            processes: &["nvtop"],
+            category: "GPU monitoring",
+            impact: "monitoring",
+            note: "GPU polling is normally harmless but can be removed as a variable during troubleshooting.",
+        },
+        Definition {
+            name: "OpenRGB",
+            processes: &["openrgb"],
+            category: "RGB / device control",
+            impact: "background",
+            note: "RGB and device-control polling can remain active while gaming.",
+        },
+        Definition {
+            name: "Input Remapper",
+            processes: &[
+                "input-remapper",
+                "input-remapper-gtk",
+                "input-remapper-service",
+            ],
+            category: "Input remapping",
+            impact: "input",
+            note: "Input remapping can overlap with Steam Input or a game's own controller handling.",
+        },
+        Definition {
+            name: "AntiMicroX",
+            processes: &["antimicrox"],
+            category: "Input remapping",
+            impact: "input",
+            note: "Controller-to-keyboard mapping can overlap with Steam Input or native controller support.",
+        },
+        Definition {
+            name: "SC Controller",
+            processes: &["sc-controller", "scc-daemon", "scc-osd-daemon"],
+            category: "Input remapping",
+            impact: "input",
+            note: "An additional controller remapping layer can cause duplicated or unexpected input.",
+        },
+        Definition {
+            name: "Linux Wallpaper Engine",
+            processes: &["linux-wallpaperengine", "linux-wallpaper-engine"],
+            category: "Animated desktop background",
+            impact: "background",
+            note: "Animated wallpapers can consume GPU resources if they do not pause while gaming.",
+        },
+        Definition {
+            name: "mpvpaper",
+            processes: &["mpvpaper"],
+            category: "Animated desktop background",
+            impact: "background",
+            note: "Video wallpapers can consume decode and GPU resources if they continue while gaming.",
+        },
+    ];
+
+    let mut found = definitions
+        .into_iter()
+        .filter_map(|definition| {
+            let process_name = linux_running_process(&snapshot.processes, definition.processes)?;
+
+            Some(BackgroundAppInfo {
+                name: definition.name.to_string(),
+                process_name,
+                category: definition.category.to_string(),
+                impact: definition.impact.to_string(),
+                running: true,
+                note: definition.note.to_string(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    if snapshot.mango_hud_loaded {
+        found.push(BackgroundAppInfo {
+            name: "MangoHud".to_string(),
+            process_name: "libMangoHud graphics layer".to_string(),
+            category: "Overlay / monitoring".to_string(),
+            impact: "hook-capable".to_string(),
+            running: true,
+            note: "The MangoHud graphics layer is loaded into a running process.".to_string(),
+        });
+    }
+
+    if snapshot.vk_basalt_loaded {
+        found.push(BackgroundAppInfo {
+            name: "vkBasalt".to_string(),
+            process_name: "libvkbasalt graphics layer".to_string(),
+            category: "Post-processing layer".to_string(),
+            impact: "hook-capable".to_string(),
+            running: true,
+            note: "The vkBasalt Vulkan post-processing layer is loaded into a running process."
+                .to_string(),
+        });
+    }
+
+    found.sort_by(|left, right| {
+        left.category
+            .cmp(&right.category)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+
+    found
+}
+
+#[cfg(target_os = "linux")]
+fn linux_findings(apps: &[BackgroundAppInfo]) -> Vec<BackgroundConflictFinding> {
+    let mut findings = build_findings(apps);
+
+    let capture_apps = apps
+        .iter()
+        .filter(|app| app.impact == "capture")
+        .collect::<Vec<_>>();
+
+    if capture_apps.len() >= 2 {
+        findings.insert(
+            0,
+            BackgroundConflictFinding {
+                severity: "warning".to_string(),
+                title: "Multiple capture or streaming tools are active".to_string(),
+                detail: format!(
+                    "Running capture tools: {}.",
+                    capture_apps
+                        .iter()
+                        .map(|app| app.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                suggestion: Some(
+                    "Stop optional capture, replay, or streaming sessions one at a time when comparing performance or investigating presentation problems."
+                        .to_string(),
+                ),
+            },
+        );
+    }
+
+    let input_apps = apps
+        .iter()
+        .filter(|app| app.impact == "input")
+        .collect::<Vec<_>>();
+
+    if input_apps.len() >= 2 {
+        findings.insert(
+            0,
+            BackgroundConflictFinding {
+                severity: "warning".to_string(),
+                title: "Multiple input remappers are active".to_string(),
+                detail: format!(
+                    "Running input tools: {}.",
+                    input_apps
+                        .iter()
+                        .map(|app| app.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                suggestion: Some(
+                    "Use only the remapping layer required by the game and check whether Steam Input is also translating the same controller."
+                        .to_string(),
+                ),
+            },
+        );
+    }
+
+    if findings.iter().any(|finding| finding.severity == "warning") {
+        findings.retain(|finding| finding.severity != "good");
+    }
+
+    findings
+}
+
 fn build_background_conflict_report() -> BackgroundConflictReport {
     #[cfg(target_os = "windows")]
     {
@@ -620,6 +1005,8 @@ fn build_background_conflict_report() -> BackgroundConflictReport {
         return BackgroundConflictReport {
             supported: true,
 
+            platform: "windows".to_string(),
+
             running_apps,
 
             findings,
@@ -630,10 +1017,52 @@ fn build_background_conflict_report() -> BackgroundConflictReport {
         };
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    {
+        let snapshot = linux_process_snapshot();
+        let running_apps = linux_detect_apps(&snapshot);
+        let hook_capable_count = running_apps
+            .iter()
+            .filter(|app| app.impact == "hook-capable")
+            .count();
+        let findings = linux_findings(&running_apps);
+        let warning_count = findings
+            .iter()
+            .filter(|finding| finding.severity == "warning")
+            .count();
+
+        let summary = if warning_count > 0 {
+            format!(
+                "{} potential Linux background conflict{} detected.",
+                warning_count,
+                if warning_count == 1 { "" } else { "s" }
+            )
+        } else if running_apps.is_empty() {
+            "No recognized Linux overlay or background conflict tools are running.".to_string()
+        } else {
+            format!(
+                "{} recognized Linux background application{} running; no high-confidence conflict pattern detected.",
+                running_apps.len(),
+                if running_apps.len() == 1 { " is" } else { "s are" }
+            )
+        };
+
+        return BackgroundConflictReport {
+            supported: true,
+            platform: "linux".to_string(),
+            running_apps,
+            findings,
+            hook_capable_count,
+            summary,
+        };
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         BackgroundConflictReport {
             supported: false,
+
+            platform: std::env::consts::OS.to_string(),
 
             running_apps: Vec::new(),
 
@@ -641,7 +1070,7 @@ fn build_background_conflict_report() -> BackgroundConflictReport {
 
             hook_capable_count: 0,
 
-            summary: "Overlay/background conflict detection is currently available on Windows."
+            summary: "Overlay/background conflict detection is available on Windows and Linux."
                 .to_string(),
         }
     }
@@ -652,4 +1081,70 @@ pub async fn get_background_conflict_report() -> Result<BackgroundConflictReport
     tauri::async_runtime::spawn_blocking(build_background_conflict_report)
         .await
         .map_err(|error| format!("Background conflict worker failed: {error}"))
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests {
+    use super::{
+        linux_detect_apps, linux_findings, linux_running_process, normalized_process_name,
+        LinuxProcessInfo, LinuxProcessSnapshot,
+    };
+    use std::collections::BTreeSet;
+
+    fn process(aliases: &[&str]) -> LinuxProcessInfo {
+        LinuxProcessInfo {
+            aliases: aliases
+                .iter()
+                .map(|alias| alias.to_string())
+                .collect::<BTreeSet<_>>(),
+        }
+    }
+
+    #[test]
+    fn normalizes_executable_paths_and_case() {
+        assert_eq!(
+            normalized_process_name("/usr/bin/OBS\n").as_deref(),
+            Some("obs")
+        );
+        assert_eq!(normalized_process_name("\0\n"), None);
+    }
+
+    #[test]
+    fn matches_an_untruncated_process_alias() {
+        let processes = vec![process(&["gpu-screen-reco", "gpu-screen-recorder"])];
+
+        assert_eq!(
+            linux_running_process(&processes, &["gpu-screen-recorder"]).as_deref(),
+            Some("gpu-screen-recorder")
+        );
+    }
+
+    #[test]
+    fn reports_loaded_graphics_layers_as_active_tools() {
+        let snapshot = LinuxProcessSnapshot {
+            processes: Vec::new(),
+            mango_hud_loaded: true,
+            vk_basalt_loaded: true,
+        };
+
+        let apps = linux_detect_apps(&snapshot);
+
+        assert!(apps.iter().any(|app| app.name == "MangoHud"));
+        assert!(apps.iter().any(|app| app.name == "vkBasalt"));
+    }
+
+    #[test]
+    fn multiple_capture_tools_produce_a_warning_without_a_good_finding() {
+        let snapshot = LinuxProcessSnapshot {
+            processes: vec![process(&["obs"]), process(&["sunshine"])],
+            mango_hud_loaded: false,
+            vk_basalt_loaded: false,
+        };
+
+        let apps = linux_detect_apps(&snapshot);
+        let findings = linux_findings(&apps);
+
+        assert!(findings.iter().any(|finding| finding.severity == "warning"));
+        assert!(!findings.iter().any(|finding| finding.severity == "good"));
+    }
 }

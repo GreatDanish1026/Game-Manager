@@ -12,6 +12,14 @@ export async function getShaderCacheReport(
       installPath:
         game?.installPath
         ?? null,
+
+      launcherId:
+        game?.launcherId
+        ?? null,
+
+      steamLibraryPath:
+        game?.steamLibraryPath
+        ?? null,
     }
   );
 }
@@ -28,6 +36,14 @@ export async function clearShaderCacheTargets(
         ids,
         installPath:
           game?.installPath
+          ?? null,
+
+        launcherId:
+          game?.launcherId
+          ?? null,
+
+        steamLibraryPath:
+          game?.steamLibraryPath
           ?? null,
       },
     }

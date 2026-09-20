@@ -208,12 +208,17 @@ export default function CleanLaunchPanel({
           selected
         );
 
-      if (
+      const failed =
         result.failures
           ?.length
-      ) {
-        setMessage(
-          result.message
+        ?? 0;
+
+      if (failed > 0) {
+        setError(
+          result.failures
+            .join(
+              " • "
+            )
         );
       }
 
@@ -227,8 +232,12 @@ export default function CleanLaunchPanel({
         ?? 0;
 
       setMessage(
-        stopped > 0
+        stopped > 0 && failed > 0
+          ? `Game launch requested after closing ${stopped} selected background app${stopped === 1 ? "" : "s"}; ${failed} close request${failed === 1 ? "" : "s"} did not complete.`
+          : stopped > 0
           ? `Game launch requested after closing ${stopped} selected background app${stopped === 1 ? "" : "s"}. Restore them from this card when you are finished testing.`
+          : failed > 0
+            ? `Game launch requested, but ${failed} selected background-app close request${failed === 1 ? "" : "s"} did not complete.`
           : "Game launch requested. No selected background apps needed to be closed."
       );
 
@@ -711,7 +720,7 @@ export default function CleanLaunchPanel({
               "
             >
               Selected: {selectedCount}. GameAtlas never targets
-              arbitrary Windows processes; only the recognized
+              arbitrary operating-system processes; only the recognized
               applications listed above can be closed.
             </div>
 
@@ -835,7 +844,7 @@ export default function CleanLaunchPanel({
             protocols do not provide GameAtlas with a reliable game-exit
             signal. Some apps may also restart themselves through their
             own services. Clean Launch is a troubleshooting mode, not a
-            permanent Windows configuration change.
+            permanent system configuration change.
           </div>
         </>
       ) : null}

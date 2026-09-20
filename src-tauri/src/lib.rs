@@ -15,6 +15,7 @@ mod heroic_games;
 mod installed_games;
 mod launch_failure_analyzer;
 mod launch_profiles;
+mod linux_mod_deployment;
 mod linux_performance;
 mod linux_steam;
 mod local_installation;
@@ -63,6 +64,11 @@ pub fn run() {
             clean_launch::get_clean_launch_status,
             clean_launch::prepare_clean_launch,
             clean_launch::restore_clean_launch_apps,
+            linux_mod_deployment::get_linux_mod_deployment_status,
+            linux_mod_deployment::pick_linux_mod_source,
+            linux_mod_deployment::prepare_linux_staged_mod,
+            linux_mod_deployment::deploy_linux_mod,
+            linux_mod_deployment::remove_linux_mod_deployment,
             configuration_validator::get_game_configuration_validation_report,
             configuration_validator::get_game_configuration_backup_status,
             configuration_validator::create_game_configuration_backup,

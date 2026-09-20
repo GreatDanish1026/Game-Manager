@@ -405,8 +405,8 @@ export default function ShaderCachePanel({
                 text-white/35
               "
             >
-              Detect and clear known Windows, GPU-driver, and
-              clearly named game-local shader/pipeline caches.
+              Detect and clear known platform, GPU-driver, Steam,
+              and clearly named game-local shader/pipeline caches.
             </div>
 
             {report ? (
@@ -766,7 +766,8 @@ export default function ShaderCachePanel({
                             onClick={
                               () =>
                                 handleOpen(
-                                  target.path
+                                  target.openPath
+                                  ?? target.path
                                 )
                             }
                             className="
