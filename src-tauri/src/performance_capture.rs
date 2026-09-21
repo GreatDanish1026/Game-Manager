@@ -784,20 +784,148 @@ fn linux_tool_available(program: &str) -> bool {
 
 #[cfg(target_os = "linux")]
 fn linux_tool_output(program: &str, arguments: &[&str]) -> Result<std::process::Output, String> {
+    let mut command = linux_tool_command(program)?;
+    command
+        .args(arguments)
+        .output()
+        .map_err(|error| format!("Could not run {program}: {error}"))
+}
+
+#[cfg(target_os = "linux")]
+fn linux_tool_command(program: &str) -> Result<Command, String> {
     if let Some(path) = executable_in_path(program) {
-        return Command::new(path)
-            .args(arguments)
-            .output()
-            .map_err(|error| format!("Could not run {program}: {error}"));
+        return Ok(Command::new(path));
     }
     if let Some(host) = executable_in_path("distrobox-host-exec") {
-        return Command::new(host)
-            .arg(program)
-            .args(arguments)
-            .output()
-            .map_err(|error| format!("Could not run {program} on the host: {error}"));
+        let mut command = Command::new(host);
+        command.arg(program);
+        return Ok(command);
     }
     Err(format!("{program} is not installed."))
+}
+
+#[cfg(target_os = "linux")]
+struct YdotoolCaptureControl {
+    daemon: Option<std::process::Child>,
+    daemon_pid: Option<u32>,
+    socket_path: PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for YdotoolCaptureControl {
+    fn drop(&mut self) {
+        if let Some(pid) = self.daemon_pid {
+            let pid = pid.to_string();
+            let _ = linux_tool_output("kill", &[&pid]);
+        }
+        if let Some(daemon) = self.daemon.as_mut() {
+            let _ = daemon.kill();
+            let _ = daemon.wait();
+        }
+        let _ = fs::remove_file(&self.socket_path);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn ydotool_output(socket_path: &Path, arguments: &[&str]) -> Result<std::process::Output, String> {
+    let mut command = if let Some(path) = executable_in_path("ydotool") {
+        let mut command = Command::new(path);
+        command.env("YDOTOOL_SOCKET", socket_path);
+        command
+    } else if let Some(host) = executable_in_path("distrobox-host-exec") {
+        let mut command = Command::new(host);
+        command
+            .arg("env")
+            .arg(format!("YDOTOOL_SOCKET={}", socket_path.to_string_lossy()))
+            .arg("ydotool");
+        command
+    } else {
+        return Err("ydotool is not installed.".to_string());
+    };
+    command
+        .args(arguments)
+        .output()
+        .map_err(|error| format!("Could not run ydotool: {error}"))
+}
+
+#[cfg(target_os = "linux")]
+fn ydotool_daemon_pid(socket_path: &Path) -> Option<u32> {
+    let expected = socket_path.to_string_lossy();
+    fs::read_dir("/proc")
+        .ok()?
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_string_lossy().parse::<u32>().ok())
+        .find(|pid| {
+            fs::read(format!("/proc/{pid}/cmdline"))
+                .ok()
+                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                .is_some_and(|command| {
+                    command.contains("ydotoold") && command.contains(expected.as_ref())
+                })
+        })
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_ydotool_capture() -> Result<YdotoolCaptureControl, String> {
+    if !linux_tool_available("ydotool") || !linux_tool_available("ydotoold") {
+        return Err("ydotool and ydotoold are not installed.".to_string());
+    }
+
+    let socket_path = env::temp_dir().join(format!(
+        "gameatlas-ydotool-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+
+    let mut command = linux_tool_command("ydotoold")?;
+    command.arg("--socket-path").arg(&socket_path);
+    let mut daemon = command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|error| format!("Could not start ydotoold: {error}"))?;
+    for _ in 0..25 {
+        if ydotool_output(&socket_path, &["key", "0:0"]).is_ok_and(|output| output.status.success())
+        {
+            return Ok(YdotoolCaptureControl {
+                daemon: Some(daemon),
+                daemon_pid: ydotool_daemon_pid(&socket_path),
+                socket_path,
+            });
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let _ = daemon.kill();
+    let _ = daemon.wait();
+    let _ = fs::remove_file(&socket_path);
+    Err("ydotoold did not create its user input socket.".to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn send_mangohud_hotkey(control: &YdotoolCaptureControl) -> Result<(), String> {
+    let press = ydotool_output(&control.socket_path, &["key", "42:1", "60:1"])?;
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let release = ydotool_output(&control.socket_path, &["key", "60:0", "42:0"])?;
+    if press.status.success() && release.status.success() {
+        return Ok(());
+    }
+
+    let detail = format!(
+        "{} {}",
+        String::from_utf8_lossy(&press.stderr),
+        String::from_utf8_lossy(&release.stderr)
+    )
+    .trim()
+    .to_string();
+    Err(if detail.is_empty() {
+        "The MangoHud logging hotkey could not be sent.".to_string()
+    } else {
+        format!("The MangoHud logging hotkey could not be sent: {detail}")
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -837,10 +965,27 @@ fn matching_linux_processes(name: &str) -> Vec<u32> {
         .flatten()
         .filter_map(|entry| entry.file_name().to_string_lossy().parse::<u32>().ok())
         .filter(|pid| {
-            fs::read(format!("/proc/{pid}/cmdline"))
+            let command_matches = fs::read(format!("/proc/{pid}/cmdline"))
                 .ok()
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_ascii_lowercase())
-                .is_some_and(|command| command.contains(&wanted) || command.contains(&stem))
+                .and_then(|bytes| {
+                    bytes
+                        .split(|byte| *byte == 0)
+                        .next()
+                        .filter(|value| !value.is_empty())
+                        .map(|value| String::from_utf8_lossy(value).to_ascii_lowercase())
+                })
+                .is_some_and(|command| {
+                    let executable = command.rsplit(['/', '\\']).next().unwrap_or(&command);
+                    let executable_stem = executable.strip_suffix(".exe").unwrap_or(executable);
+                    executable == wanted || executable_stem == stem
+                });
+            let comm_matches = fs::read_to_string(format!("/proc/{pid}/comm"))
+                .ok()
+                .map(|value| value.trim().to_ascii_lowercase())
+                .is_some_and(|comm| {
+                    comm == wanted || comm == stem || (comm.len() >= 15 && stem.starts_with(&comm))
+                });
+            command_matches || comm_matches
         })
         .collect()
 }
@@ -869,22 +1014,40 @@ fn process_has_mangohud(pid: u32) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn capture_csv_files(directory: &Path) -> HashMap<PathBuf, SystemTime> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CaptureFileState {
+    modified: Option<SystemTime>,
+    length: u64,
+}
+
+#[cfg(target_os = "linux")]
+fn is_mangohud_data_csv(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".csv") && !lower.ends_with("_summary.csv")
+}
+
+#[cfg(target_os = "linux")]
+fn capture_csv_files(directory: &Path) -> HashMap<PathBuf, CaptureFileState> {
     fs::read_dir(directory)
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|entry| {
             let path = entry.path();
-            (path.extension().and_then(|value| value.to_str()) == Some("csv"))
-                .then(|| {
-                    entry
-                        .metadata()
-                        .ok()
-                        .and_then(|metadata| metadata.modified().ok())
-                        .map(|modified| (path, modified))
+            is_mangohud_data_csv(&path).then(|| {
+                entry.metadata().ok().map(|metadata| {
+                    (
+                        path,
+                        CaptureFileState {
+                            modified: metadata.modified().ok(),
+                            length: metadata.len(),
+                        },
+                    )
                 })
-                .flatten()
+            })?
         })
         .collect()
 }
@@ -892,13 +1055,45 @@ fn capture_csv_files(directory: &Path) -> HashMap<PathBuf, SystemTime> {
 #[cfg(target_os = "linux")]
 fn newest_capture_file(
     directory: &Path,
-    previous: &HashMap<PathBuf, SystemTime>,
-) -> Option<PathBuf> {
+    previous: &HashMap<PathBuf, CaptureFileState>,
+) -> Option<(PathBuf, CaptureFileState)> {
     capture_csv_files(directory)
         .into_iter()
-        .filter(|(path, modified)| previous.get(path).is_none_or(|before| modified > before))
-        .max_by_key(|(_, modified)| *modified)
-        .map(|(path, _)| path)
+        .filter(|(path, state)| previous.get(path) != Some(state))
+        .max_by_key(|(_, state)| (state.modified, state.length))
+}
+
+#[cfg(target_os = "linux")]
+fn wait_for_finalized_capture(
+    directory: &Path,
+    previous: &HashMap<PathBuf, CaptureFileState>,
+) -> Result<PathBuf, String> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    let mut last_observation: Option<(PathBuf, CaptureFileState, u8)> = None;
+
+    while std::time::Instant::now() < deadline {
+        if let Some((path, state)) = newest_capture_file(directory, previous) {
+            let stable_checks = match &last_observation {
+                Some((last_path, last_state, checks))
+                    if last_path == &path && last_state == &state && state.length > 0 =>
+                {
+                    checks.saturating_add(1)
+                }
+                _ if state.length > 0 => 1,
+                _ => 0,
+            };
+            if stable_checks >= 3 {
+                return Ok(path);
+            }
+            last_observation = Some((path, state, stable_checks));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+
+    Err(format!(
+        "MangoHud did not finalize a capture file in {}. Confirm the Steam launch options use this output folder, then fully exit and relaunch the game.",
+        directory.to_string_lossy()
+    ))
 }
 
 #[cfg(target_os = "linux")]
@@ -942,7 +1137,69 @@ fn send_mangohud_logging(socket_name: &str, enabled: bool) -> Result<(), String>
     stream
         .write_all(command)
         .and_then(|_| stream.flush())
-        .map_err(|error| format!("Could not send the MangoHud logging command: {error}"))
+        .map_err(|error| format!("Could not send the MangoHud logging command: {error}"))?;
+
+    if enabled {
+        return Ok(());
+    }
+
+    // MangoHud flushes the CSV asynchronously after logging is disabled. Its
+    // control client keeps this connection open until the renderer confirms
+    // that the file is complete, so do the same before looking for the CSV.
+    // Some games stop presenting frames as soon as they lose focus. MangoHud
+    // services its control socket from the render loop, so allow time for the
+    // user to return to the game after seeing the finalization prompt.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut response = Vec::new();
+    let mut buffer = [0u8; 4096];
+    while std::time::Instant::now() < deadline {
+        match stream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => {
+                response.extend_from_slice(&buffer[..read]);
+                if response
+                    .windows(b"LoggingFinished".len())
+                    .any(|window| window == b"LoggingFinished")
+                {
+                    return Ok(());
+                }
+                if response.len() > 16 * 1024 {
+                    response.drain(..response.len() - 4096);
+                }
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            Err(error) => {
+                return Err(format!(
+                    "Could not receive MangoHud's logging completion response: {error}"
+                ));
+            }
+        }
+    }
+
+    Err(
+        "MangoHud did not confirm that the capture file finished writing. Keep the game foregrounded and actively rendering through finalization."
+            .to_string(),
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn set_mangohud_logging_with_cli(enabled: bool) -> Result<(), String> {
+    let value = if enabled { "true" } else { "false" };
+    let output = linux_tool_output("mangohudctl", &["set", "log_session", value])?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(if detail.is_empty() {
+        format!("mangohudctl exited with status {}.", output.status)
+    } else {
+        format!("mangohudctl failed: {detail}")
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -963,6 +1220,9 @@ fn mangohud_control_targets(preferred_pids: &[u32]) -> Result<Vec<String>, Strin
     targets.sort();
     targets.dedup();
     if targets.is_empty() {
+        if linux_tool_available("mangohudctl") {
+            return Ok(targets);
+        }
         return Err(
             "No MangoHud control endpoint was found. Save the current Linux Performance launch options to Steam, fully exit the game, and relaunch it."
                 .to_string(),
@@ -977,6 +1237,14 @@ fn mangohud_control_targets(preferred_pids: &[u32]) -> Result<Vec<String>, Strin
 
 #[cfg(target_os = "linux")]
 fn set_mangohud_logging(enabled: bool, targets: &[String]) -> Result<(), String> {
+    // In-game Vulkan/OpenGL layers expose per-renderer sockets. mangohudctl
+    // controls mangoapp through a separate message queue and can exit
+    // successfully without affecting those renderers, so only use it when a
+    // socket is unavailable (for example, a Game Mode mangoapp capture).
+    if targets.is_empty() {
+        return set_mangohud_logging_with_cli(enabled);
+    }
+
     let (sender, receiver) = std::sync::mpsc::channel();
     for target in targets {
         let sender = sender.clone();
@@ -990,7 +1258,12 @@ fn set_mangohud_logging(enabled: bool, targets: &[String]) -> Result<(), String>
 
     let mut errors = Vec::new();
     let mut sent = 0usize;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let deadline = std::time::Instant::now()
+        + if enabled {
+            std::time::Duration::from_secs(2)
+        } else {
+            std::time::Duration::from_secs(21)
+        };
     while sent + errors.len() < targets.len() {
         let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) else {
             break;
@@ -1026,15 +1299,39 @@ fn parse_mangohud_capture(
         .map_err(|error| format!("Could not read the MangoHud capture: {error}"))?;
     let mut frame_times = Vec::new();
     let mut timestamps = Vec::new();
+    let mut fps_index = Some(0usize);
+    let mut frame_time_index = None;
+    let mut elapsed_index = Some(3usize);
+    let mut elapsed_is_nanoseconds = false;
 
     for line in text.lines() {
         let values = csv_line(line);
-        let Some(fps) = numeric_at(&values, Some(0)) else {
+        if let Some(index) = values
+            .iter()
+            .position(|value| value.eq_ignore_ascii_case("fps"))
+        {
+            fps_index = Some(index);
+            frame_time_index = values
+                .iter()
+                .position(|value| value.eq_ignore_ascii_case("frametime"));
+            elapsed_index = values
+                .iter()
+                .position(|value| value.eq_ignore_ascii_case("elapsed"));
+            elapsed_is_nanoseconds = elapsed_index.is_some();
             continue;
-        };
-        if fps.is_finite() && fps > 0.0 && fps <= 10_000.0 {
-            frame_times.push(1000.0 / fps);
-            if let Some(timestamp) = numeric_at(&values, Some(3)).filter(|value| value.is_finite())
+        }
+
+        let frame_time = numeric_at(&values, frame_time_index)
+            .filter(|value| value.is_finite() && *value > 0.0 && *value <= 1_000.0)
+            .or_else(|| {
+                numeric_at(&values, fps_index)
+                    .filter(|value| value.is_finite() && *value > 0.0 && *value <= 10_000.0)
+                    .map(|fps| 1000.0 / fps)
+            });
+        if let Some(frame_time) = frame_time {
+            frame_times.push(frame_time);
+            if let Some(timestamp) =
+                numeric_at(&values, elapsed_index).filter(|value| value.is_finite())
             {
                 timestamps.push(timestamp);
             }
@@ -1113,8 +1410,13 @@ fn parse_mangohud_capture(
         .map(|(first, last)| (last - first).max(0.0))
         .filter(|duration| *duration > 0.0)
         .map(|duration| {
+            if elapsed_is_nanoseconds {
+                return duration / 1_000_000_000.0;
+            }
             let average_step = duration / timestamps.len().saturating_sub(1).max(1) as f64;
-            if average_step > 1_000.0 {
+            if average_step > 100_000.0 {
+                duration / 1_000_000_000.0
+            } else if average_step > 100.0 {
                 duration / 1_000_000.0
             } else {
                 duration / 1_000.0
@@ -1200,7 +1502,8 @@ pub fn get_performance_capture_status(
             .unwrap_or_default();
         let running = !processes.is_empty();
         let mango_loaded = processes.into_iter().any(process_has_mangohud);
-        let control_ready = !mangohud_control_names().is_empty();
+        let control_ready =
+            linux_tool_available("mangohudctl") || !mangohud_control_names().is_empty();
         let tools_ready = linux_tool_available("mangohud");
         let provider_ready = tools_ready;
         return PerformanceCaptureStatus {
@@ -1389,27 +1692,37 @@ pub async fn run_performance_capture(
         let worker_root = capture_root.clone();
         let worker_pids = processes;
         let source_path = tauri::async_runtime::spawn_blocking(move || {
+            let hotkey_control = prepare_ydotool_capture().ok();
             std::thread::sleep(std::time::Duration::from_secs(3));
-            let control_targets = mangohud_control_targets(&worker_pids)?;
-            set_mangohud_logging(true, &control_targets)?;
+            let control_targets = if hotkey_control.is_some() {
+                Vec::new()
+            } else {
+                mangohud_control_targets(&worker_pids)?
+            };
+            if let Some(control) = hotkey_control.as_ref() {
+                send_mangohud_hotkey(control)?;
+            } else {
+                set_mangohud_logging(true, &control_targets)?;
+            }
             let started = std::time::Instant::now();
             while started.elapsed() < std::time::Duration::from_secs(duration_seconds as u64)
                 && !CAPTURE_CANCEL_REQUESTED.load(Ordering::Acquire)
             {
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
-            let stop_result = set_mangohud_logging(false, &control_targets);
-            for _ in 0..50 {
-                if let Some(path) = newest_capture_file(&worker_root, &previous) {
-                    // A stop acknowledgement can time out after MangoHud has
-                    // already closed and flushed a perfectly valid capture.
-                    return Ok(path);
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
+            let stop_result = if let Some(control) = hotkey_control.as_ref() {
+                send_mangohud_hotkey(control)
+            } else {
+                set_mangohud_logging(false, &control_targets)
+            };
+            let capture_result = wait_for_finalized_capture(&worker_root, &previous);
+            if let Ok(path) = capture_result {
+                // A stop acknowledgement can time out after MangoHud has
+                // already closed and flushed a perfectly valid capture.
+                return Ok(path);
             }
             stop_result?;
-            Err("MangoHud did not create a capture file. Confirm the GameAtlas launch options include its output folder."
-                .to_string())
+            capture_result
         })
         .await
         .map_err(|error| format!("Performance capture worker failed: {error}"))??;
@@ -1634,8 +1947,6 @@ pub async fn cancel_performance_capture(app: tauri::AppHandle) -> Result<bool, S
             return Ok(false);
         }
         CAPTURE_CANCEL_REQUESTED.store(true, Ordering::Release);
-        let control_targets = mangohud_control_targets(&[])?;
-        set_mangohud_logging(false, &control_targets)?;
         return Ok(true);
     }
 
@@ -1650,6 +1961,16 @@ pub async fn cancel_performance_capture(app: tauri::AppHandle) -> Result<bool, S
 mod linux_tests {
     use super::*;
 
+    fn unique_test_directory(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "gameatlas-{name}-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
+    }
+
     #[test]
     fn mangohud_parser_calculates_frame_summary() {
         let path = std::env::temp_dir().join(format!(
@@ -1660,11 +1981,15 @@ mod linux_tests {
                 .as_nanos()
         ));
         let mut csv = String::from(
-            "os,cpu,gpu,ram,kernel,driver\nLinux,Test CPU,Test GPU,1024,6.0,Test Driver\n",
+            "os,cpu,gpu,ram,kernel,driver\nLinux,Test CPU,Test GPU,1024,6.0,Test Driver\nfps,frametime,cpu_load,cpu_power,gpu_load,cpu_temp,gpu_temp,gpu_core_clock,gpu_mem_clock,gpu_vram_used,gpu_power,ram_used,swap_used,process_rss,cpu_mhz,elapsed\n",
         );
         for index in 0..120 {
             let fps = if index == 119 { 20.0 } else { 60.0 };
-            csv.push_str(&format!("{fps},25,80,{}\n", index * 16_667));
+            let frame_time = 1000.0 / fps;
+            csv.push_str(&format!(
+                "{fps},{frame_time},25,0,80,50,60,2000,7000,4,100,8,0,1,4500,{}\n",
+                index * 16_666_667
+            ));
         }
         fs::write(&path, csv).expect("write fixture");
         let report =
@@ -1676,6 +2001,93 @@ mod linux_tests {
         assert!(report.one_percent_low_fps < report.average_fps);
         assert_eq!(report.spike_count, 1);
         assert_eq!(report.frame_time_metric, "MangoHud FPS samples");
+        assert!(report.measured_duration_seconds > 1.9);
+        assert!(report.measured_duration_seconds < 2.1);
+    }
+
+    #[test]
+    fn capture_discovery_ignores_mangohud_summary_files() {
+        let directory = unique_test_directory("mangohud-summary-filter");
+        fs::create_dir_all(&directory).expect("create fixture directory");
+        fs::write(directory.join("capture.csv"), "60,1\n").expect("write data fixture");
+        fs::write(directory.join("capture_summary.csv"), "summary\n")
+            .expect("write summary fixture");
+
+        let files = capture_csv_files(&directory);
+        let _ = fs::remove_dir_all(&directory);
+
+        assert_eq!(files.len(), 1);
+        assert!(files.keys().any(|path| path.ends_with("capture.csv")));
+    }
+
+    #[test]
+    fn capture_discovery_detects_rewritten_existing_file() {
+        let directory = unique_test_directory("mangohud-rewritten-file");
+        fs::create_dir_all(&directory).expect("create fixture directory");
+        let path = directory.join("capture.csv");
+        fs::write(&path, "60,1\n").expect("write initial fixture");
+        let previous = capture_csv_files(&directory);
+        fs::write(&path, "60,1\n59,2\n").expect("rewrite fixture");
+
+        let discovered = newest_capture_file(&directory, &previous);
+        let _ = fs::remove_dir_all(&directory);
+
+        assert_eq!(discovered.map(|(path, _)| path), Some(path));
+    }
+
+    #[test]
+    fn stop_logging_waits_for_mangohud_completion_response() {
+        use std::os::unix::net::UnixListener;
+
+        let socket_name = format!(
+            "gameatlas-mangohud-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let address = std::os::unix::net::SocketAddr::from_abstract_name(socket_name.as_bytes())
+            .expect("create abstract address");
+        let listener = UnixListener::bind_addr(&address).expect("bind abstract socket");
+        let server = std::thread::spawn(move || {
+            let (mut connection, _) = listener.accept().expect("accept control client");
+            connection
+                .write_all(b":MangoHudControl=1;")
+                .expect("write protocol header");
+            let mut command = [0u8; 11];
+            connection
+                .read_exact(&mut command)
+                .expect("read logging command");
+            assert_eq!(&command, b":logging=0;");
+            connection
+                .write_all(b":LoggingFinished;")
+                .expect("write completion response");
+        });
+
+        send_mangohud_logging(&socket_name, false).expect("stop and finalize logging");
+        server.join().expect("join mock control server");
+    }
+
+    #[test]
+    fn process_matching_does_not_treat_helper_arguments_as_the_game() {
+        let wanted = "APlagueTaleInnocence_x64.exe";
+        let actual = r"S:\steamapps\common\A Plague Tale Innocence\APlagueTaleInnocence_x64.exe";
+        let helper = r"c:\windows\system32\steam.exe APlagueTaleInnocence_x64.exe";
+
+        let executable_name = |command: &str| {
+            command
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(command)
+                .split_whitespace()
+                .next()
+                .unwrap_or(command)
+                .to_ascii_lowercase()
+        };
+
+        assert_eq!(executable_name(actual), wanted.to_ascii_lowercase());
+        assert_ne!(executable_name(helper), wanted.to_ascii_lowercase());
     }
 }
 

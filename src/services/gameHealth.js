@@ -592,16 +592,16 @@ export function summarizeGameHealth(
 export async function runGameHealthCheck(
   game,
   {
-    includeWindows = true,
+    isWindows = true,
     onProgress = () => {},
   } = {}
 ) {
   const findings = [];
   const scans = [];
   const totalScans =
-    includeWindows
+    isWindows
       ? 9
-      : 1;
+      : 7;
   let completedScans =
     0;
 
@@ -701,19 +701,21 @@ export async function runGameHealthCheck(
     );
   }
 
-  if (includeWindows) {
-    updateProgress(
-      "Checking performance, graphics drivers, and displays…"
-    );
+  updateProgress(
+    isWindows
+      ? "Checking performance, graphics drivers, and displays…"
+      : "Checking Linux performance and displays…"
+  );
 
-    const firstBatch =
-      await Promise.all([
+  const firstChecks = [
         settleCheck({
           id:
             "performance",
 
           label:
-            "Windows performance",
+            isWindows
+              ? "Windows performance"
+              : "Linux performance",
 
           sectionIds: [
             "technical-troubleshooting",
@@ -730,36 +732,6 @@ export async function runGameHealthCheck(
 
           map:
             performanceFindings,
-        }),
-        settleCheck({
-          id:
-            "graphics-driver",
-
-          label:
-            "Graphics drivers",
-
-          sectionIds: [
-            "technical-troubleshooting",
-          ],
-
-          targetId:
-            "diagnostic-graphics-drivers",
-
-          task:
-            getGraphicsDriverDiagnostics,
-
-          map:
-            (report) =>
-              reportFindings(
-                report,
-                {
-                  id:
-                    "graphics-driver",
-
-                  label:
-                    "Graphics drivers",
-                }
-              ),
         }),
         settleCheck({
           id:
@@ -794,7 +766,49 @@ export async function runGameHealthCheck(
                 }
               ),
         }),
-      ]);
+      ];
+
+  if (isWindows) {
+    firstChecks.splice(
+      1,
+      0,
+        settleCheck({
+          id:
+            "graphics-driver",
+
+          label:
+            "Graphics drivers",
+
+          sectionIds: [
+            "technical-troubleshooting",
+          ],
+
+          targetId:
+            "diagnostic-graphics-drivers",
+
+          task:
+            getGraphicsDriverDiagnostics,
+
+          map:
+            (report) =>
+              reportFindings(
+                report,
+                {
+                  id:
+                    "graphics-driver",
+
+                  label:
+                    "Graphics drivers",
+                }
+              ),
+        })
+    );
+  }
+
+  const firstBatch =
+    await Promise.all(
+      firstChecks
+    );
 
     firstBatch.forEach(
       (result) => {
@@ -808,15 +822,15 @@ export async function runGameHealthCheck(
       }
     );
 
-    completedScans +=
-      firstBatch.length;
+  completedScans +=
+    firstBatch.length;
 
-    updateProgress(
-      "Checking crashes, runtime dependencies, and game configuration…"
-    );
+  updateProgress(
+    "Checking crashes, runtime dependencies, and game configuration…"
+  );
 
-    const stabilityBatch =
-      await Promise.all([
+  const stabilityBatch =
+    await Promise.all([
         settleCheck({
           id:
             "crash-detective",
@@ -906,7 +920,7 @@ export async function runGameHealthCheck(
           map:
             configurationFindings,
         }),
-      ]);
+    ]);
 
     stabilityBatch.forEach(
       (result) => {
@@ -920,15 +934,16 @@ export async function runGameHealthCheck(
       }
     );
 
-    completedScans +=
-      stabilityBatch.length;
+  completedScans +=
+    stabilityBatch.length;
 
-    updateProgress(
-      "Checking background apps and controllers…"
-    );
+  updateProgress(
+    isWindows
+      ? "Checking background apps and controllers…"
+      : "Checking background apps…"
+  );
 
-    const secondBatch =
-      await Promise.all([
+  const finalChecks = [
         settleCheck({
           id:
             "background-apps",
@@ -962,6 +977,10 @@ export async function runGameHealthCheck(
                 }
               ),
         }),
+      ];
+
+  if (isWindows) {
+    finalChecks.push(
         settleCheck({
           id:
             "controllers",
@@ -995,8 +1014,14 @@ export async function runGameHealthCheck(
                     "recommendation",
                 }
               ),
-        }),
-      ]);
+        })
+    );
+  }
+
+  const secondBatch =
+    await Promise.all(
+      finalChecks
+    );
 
     secondBatch.forEach(
       (result) => {
@@ -1010,9 +1035,8 @@ export async function runGameHealthCheck(
       }
     );
 
-    completedScans +=
-      secondBatch.length;
-  }
+  completedScans +=
+    secondBatch.length;
 
   updateProgress(
     "Finalizing diagnostic summary…"

@@ -276,6 +276,7 @@ export function buildLinuxLaunchOptions(settings) {
       "output_folder=${XDG_DATA_HOME:-$HOME/.local/share}/com.greatdanish.gamemanager/performance-captures",
       "log_interval=0",
       "control=mangohud-%p",
+      "toggle_logging=Shift_L+F2",
     ];
 
     if (

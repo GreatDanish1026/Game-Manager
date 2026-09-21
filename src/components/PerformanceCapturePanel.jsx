@@ -26,6 +26,10 @@ import {
 } from "react";
 
 import {
+  getCurrentWindow,
+} from "@tauri-apps/api/window";
+
+import {
   cancelPerformanceCapture,
   getPerformanceCaptureHistory,
   getPerformanceCaptureStatus,
@@ -1111,7 +1115,28 @@ export default function PerformanceCapturePanel({
       null
     );
 
+    let captureWindow =
+      null;
+    let restoreWindow =
+      false;
+
     try {
+      if (
+        status?.providerName
+        === "MangoHud"
+      ) {
+        try {
+          captureWindow =
+            getCurrentWindow();
+          await captureWindow.minimize();
+          restoreWindow =
+            true;
+        } catch {
+          captureWindow =
+            null;
+        }
+      }
+
       const next =
         await runPerformanceCapture(
           game,
@@ -1154,6 +1179,19 @@ export default function PerformanceCapturePanel({
           null
         );
         refreshStatus();
+      }
+
+      if (
+        restoreWindow
+        && captureWindow
+      ) {
+        try {
+          await captureWindow.unminimize();
+          await captureWindow.setFocus();
+        } catch {
+          // The capture result is still valid if the desktop declines the
+          // window activation request.
+        }
       }
     }
   }
@@ -1202,7 +1240,7 @@ export default function PerformanceCapturePanel({
               Records presented frames for a running game and calculates average FPS, 1% lows, frame-time percentiles, and large spikes.
             </div>
             <div className="mt-2 text-[11px] text-white/24">
-              Launch the game and reach a repeatable scene first. Capture starts after a 3-second preparation delay.
+              Launch the game and reach a repeatable scene first. On Linux, GameAtlas minimizes during capture so the game can keep rendering, then restores after MangoHud finalizes the CSV.
             </div>
           </div>
         </div>
@@ -1304,8 +1342,10 @@ export default function PerformanceCapturePanel({
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
             {
               remaining === 0
-                ? "Finalizing capture…"
-                : `Capturing ${status?.executableName ?? "game frames"}… approximately ${remaining ?? duration} seconds remaining`
+                ? "Finalizing capture… return to the game and keep it actively rendering until this message clears."
+                : remaining > duration
+                  ? `Return to the game now… capture begins in ${remaining - duration} seconds`
+                  : `Capturing ${status?.executableName ?? "game frames"}… keep the game active for approximately ${remaining ?? duration} more seconds`
             }
           </div>
           <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.06]">
