@@ -65,6 +65,9 @@ pub struct ManagedModDeployment {
     pub website: String,
     pub notes: String,
     pub updated_unix: u64,
+    pub nexus_game_domain: String,
+    pub nexus_mod_id: Option<u64>,
+    pub nexus_file_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -120,6 +123,20 @@ pub struct DeployModRequest {
     pub install_path: String,
     pub source_path: String,
     pub name: String,
+    #[serde(default)]
+    pub version: String,
+    #[serde(default)]
+    pub author: String,
+    #[serde(default)]
+    pub website: String,
+    #[serde(default)]
+    pub notes: String,
+    #[serde(default)]
+    pub nexus_game_domain: String,
+    #[serde(default)]
+    pub nexus_mod_id: Option<u64>,
+    #[serde(default)]
+    pub nexus_file_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -163,6 +180,20 @@ pub struct UpgradeModRequest {
     pub install_path: String,
     pub deployment_id: String,
     pub source_path: String,
+    #[serde(default)]
+    pub version: String,
+    #[serde(default)]
+    pub author: String,
+    #[serde(default)]
+    pub website: String,
+    #[serde(default)]
+    pub notes: String,
+    #[serde(default)]
+    pub nexus_game_domain: String,
+    #[serde(default)]
+    pub nexus_mod_id: Option<u64>,
+    #[serde(default)]
+    pub nexus_file_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -289,6 +320,12 @@ struct DeploymentManifest {
     notes: String,
     #[serde(default)]
     updated_unix: u64,
+    #[serde(default)]
+    nexus_game_domain: String,
+    #[serde(default)]
+    nexus_mod_id: Option<u64>,
+    #[serde(default)]
+    nexus_file_id: Option<u64>,
     files: Vec<ManifestFile>,
 }
 
@@ -664,7 +701,7 @@ fn safe_folder_name(value: &str) -> String {
 }
 
 #[cfg(target_os = "linux")]
-fn staging_directory(game_name: &str) -> Result<PathBuf, String> {
+pub(crate) fn staging_directory(game_name: &str) -> Result<PathBuf, String> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or_else(|| "The home directory could not be resolved.".to_string())?;
@@ -710,10 +747,14 @@ fn staged_items(staging: &Path) -> Result<Vec<StagedModItem>, String> {
             && extension.is_some_and(|value| value.eq_ignore_ascii_case("rar"))
         {
             "rar"
+        } else if file_type.is_file()
+            && extension.is_some_and(|value| value.eq_ignore_ascii_case("7z"))
+        {
+            "7z"
         } else {
             continue;
         };
-        let name = if matches!(kind, "zip" | "rar") {
+        let name = if matches!(kind, "zip" | "rar" | "7z") {
             path.file_stem()
         } else {
             path.file_name()
@@ -1336,16 +1377,19 @@ fn metadata_truthy(value: Option<&serde_json::Value>) -> bool {
 #[cfg(target_os = "linux")]
 fn rar_entry_size(entry: &LsarEntry) -> Result<u64, String> {
     match entry.properties.get("XADFileSize") {
-        Some(serde_json::Value::Number(value)) => value
-            .as_u64()
-            .ok_or_else(|| format!("RAR entry {} has an invalid file size.", entry.file_name)),
+        Some(serde_json::Value::Number(value)) => value.as_u64().ok_or_else(|| {
+            format!(
+                "Archive entry {} has an invalid file size.",
+                entry.file_name
+            )
+        }),
         None if metadata_truthy(entry.properties.get("XADIsDirectory")) => Ok(0),
         None => Err(format!(
-            "RAR entry {} does not report an unpacked size.",
+            "Archive entry {} does not report an unpacked size.",
             entry.file_name
         )),
         Some(_) => Err(format!(
-            "RAR entry {} has an invalid file size.",
+            "Archive entry {} has an invalid file size.",
             entry.file_name
         )),
     }
@@ -1355,7 +1399,7 @@ fn rar_entry_size(entry: &LsarEntry) -> Result<u64, String> {
 fn validate_rar_listing(listing: &LsarListing) -> Result<(), String> {
     if listing.contents.len() > MAX_FILES {
         return Err(format!(
-            "The RAR archive exceeds the {MAX_FILES}-entry safety limit."
+            "The archive exceeds the {MAX_FILES}-entry safety limit."
         ));
     }
 
@@ -1380,40 +1424,43 @@ fn validate_rar_listing(listing: &LsarListing) -> Result<(), String> {
                 .next()
                 .is_some_and(|component| component.ends_with(':'))
         {
-            return Err(format!("RAR entry {} has an unsafe path.", entry.file_name));
+            return Err(format!(
+                "Archive entry {} has an unsafe path.",
+                entry.file_name
+            ));
         }
         let relative = Path::new(name);
         let relative_text = safe_relative_text(relative)
-            .map_err(|_| format!("RAR entry {} has an unsafe path.", entry.file_name))?;
+            .map_err(|_| format!("Archive entry {} has an unsafe path.", entry.file_name))?;
         if relative.components().count() > MAX_DEPTH {
             return Err(format!(
-                "RAR entry {relative_text} exceeds the {MAX_DEPTH}-level depth limit."
+                "Archive entry {relative_text} exceeds the {MAX_DEPTH}-level depth limit."
             ));
         }
         if !seen.insert(relative_text.to_ascii_lowercase()) {
             return Err(format!(
-                "The RAR contains duplicate or case-conflicting paths: {relative_text}"
+                "The archive contains duplicate or case-conflicting paths: {relative_text}"
             ));
         }
         if metadata_truthy(entry.properties.get("XADIsEncrypted")) {
             return Err(format!(
-                "Password-protected RAR archives are not supported: {relative_text}"
+                "Password-protected archives are not supported: {relative_text}"
             ));
         }
         for (property, label) in &unsafe_kinds {
             if metadata_truthy(entry.properties.get(*property)) {
                 return Err(format!(
-                    "The RAR contains an unsupported {label}: {relative_text}"
+                    "The archive contains an unsupported {label}: {relative_text}"
                 ));
             }
         }
         total_size = total_size.saturating_add(rar_entry_size(entry)?);
         if total_size > MAX_TOTAL_BYTES {
-            return Err("The extracted RAR would exceed the 32 GiB safety limit.".to_string());
+            return Err("The extracted archive would exceed the 32 GiB safety limit.".to_string());
         }
     }
     if listing.contents.is_empty() {
-        return Err("The RAR archive does not contain any entries.".to_string());
+        return Err("The archive does not contain any entries.".to_string());
     }
     Ok(())
 }
@@ -1422,7 +1469,7 @@ fn validate_rar_listing(listing: &LsarListing) -> Result<(), String> {
 fn extract_rar_archive(archive_path: &Path, staging: &Path) -> Result<PathBuf, String> {
     let Some(tools) = rar_tools() else {
         return Err(
-            "RAR extraction requires the lsar and unar tools. Install the unar package and refresh."
+            "RAR and 7z extraction requires the lsar and unar tools. Install the unar package and refresh."
                 .to_string(),
         );
     };
@@ -1432,16 +1479,15 @@ fn extract_rar_archive(archive_path: &Path, staging: &Path) -> Result<PathBuf, S
         .arg(archive_path)
         .stdin(Stdio::null())
         .output()
-        .map_err(|error| format!("Could not inspect the RAR archive with lsar: {error}"))?;
+        .map_err(|error| format!("Could not inspect the archive with lsar: {error}"))?;
     if !listing_output.status.success() {
         let detail = String::from_utf8_lossy(&listing_output.stderr)
             .trim()
             .to_string();
         return Err(if detail.is_empty() {
-            "The RAR archive could not be read. It may be damaged or password-protected."
-                .to_string()
+            "The archive could not be read. It may be damaged or password-protected.".to_string()
         } else {
-            format!("The RAR archive could not be read: {detail}")
+            format!("The archive could not be read: {detail}")
         });
     }
     let listing: LsarListing = serde_json::from_slice(&listing_output.stdout)
@@ -1486,11 +1532,11 @@ fn extract_rar_archive(archive_path: &Path, staging: &Path) -> Result<PathBuf, S
 
     if let Err(error) = extraction {
         let _ = fs::remove_dir_all(&temporary);
-        return Err(format!("RAR extraction was rolled back: {error}"));
+        return Err(format!("Archive extraction was rolled back: {error}"));
     }
     fs::rename(&temporary, &destination).map_err(|error| {
         let _ = fs::remove_dir_all(&temporary);
-        format!("Could not finalize RAR extraction: {error}")
+        format!("Could not finalize archive extraction: {error}")
     })?;
     Ok(destination)
 }
@@ -1521,11 +1567,17 @@ fn prepare_staged_for(
     } else if metadata.is_file() && extension.is_some_and(|value| value.eq_ignore_ascii_case("zip"))
     {
         extract_zip_archive(&selected, &staging)?
-    } else if metadata.is_file() && extension.is_some_and(|value| value.eq_ignore_ascii_case("rar"))
+    } else if metadata.is_file()
+        && extension.is_some_and(|value| {
+            value.eq_ignore_ascii_case("rar") || value.eq_ignore_ascii_case("7z")
+        })
     {
         extract_rar_archive(&selected, &staging)?
     } else {
-        return Err("Only folders, ZIP archives, and RAR archives can be prepared.".to_string());
+        return Err(
+            "Only folders, ZIP archives, RAR archives, and 7z archives can be prepared."
+                .to_string(),
+        );
     };
     preview_for(app, install_path, &source.to_string_lossy())
 }
@@ -1653,6 +1705,9 @@ fn status_for(
                 website: manifest.website.clone(),
                 notes: manifest.notes.clone(),
                 updated_unix: manifest.updated_unix,
+                nexus_game_domain: manifest.nexus_game_domain.clone(),
+                nexus_mod_id: manifest.nexus_mod_id,
+                nexus_file_id: manifest.nexus_file_id,
             }
         })
         .collect::<Vec<_>>();
@@ -1759,6 +1814,26 @@ fn deploy_for(
     let source = canonical_directory(&request.source_path, "mod source")?;
     validate_source_relationship(&source, &install)?;
     let name = clean_name(&request.name)?;
+    let version = clean_metadata_field(&request.version, "version", 80)?;
+    let author = clean_metadata_field(&request.author, "author", 120)?;
+    let website = clean_metadata_field(&request.website, "source page", 500)?;
+    let notes = clean_metadata_field(&request.notes, "notes", 2_000)?;
+    let nexus_game_domain =
+        clean_metadata_field(&request.nexus_game_domain, "Nexus game domain", 120)?;
+    let (nexus_mod_id, nexus_file_id) = if nexus_game_domain.is_empty() {
+        (None, None)
+    } else {
+        if request.nexus_mod_id.is_none() || request.nexus_file_id.is_none() {
+            return Err("Nexus provenance is missing its mod or file identifier.".to_string());
+        }
+        if !nexus_game_domain
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        {
+            return Err("The Nexus game domain is invalid.".to_string());
+        }
+        (request.nexus_mod_id, request.nexus_file_id)
+    };
     let plan = deployment_plan(&install, scan_source(&source)?)?;
     let files = plan.files;
     let storage = game_storage_root(app, &install)?;
@@ -1869,11 +1944,14 @@ fn deploy_for(
         deployed_unix: installed.as_secs(),
         priority_order: u64::try_from(installed.as_millis()).unwrap_or(u64::MAX),
         enabled: true,
-        version: String::new(),
-        author: String::new(),
-        website: String::new(),
-        notes: String::new(),
+        version,
+        author,
+        website,
+        notes,
         updated_unix: installed.as_secs(),
+        nexus_game_domain,
+        nexus_mod_id,
+        nexus_file_id,
         files: manifest_files,
     };
     let json = match serde_json::to_vec_pretty(&manifest) {
@@ -2608,6 +2686,34 @@ fn upgrade_mod_for(
     validate_install_root(&install)?;
     let source = canonical_directory(&request.source_path, "mod source")?;
     validate_source_relationship(&source, &install)?;
+    let nexus_update = if request.nexus_game_domain.trim().is_empty() {
+        None
+    } else {
+        let domain = clean_metadata_field(&request.nexus_game_domain, "Nexus game domain", 120)?;
+        if !domain
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        {
+            return Err("The Nexus game domain is invalid.".to_string());
+        }
+        let mod_id = request
+            .nexus_mod_id
+            .filter(|value| *value > 0)
+            .ok_or_else(|| "The Nexus mod identifier is missing.".to_string())?;
+        let file_id = request
+            .nexus_file_id
+            .filter(|value| *value > 0)
+            .ok_or_else(|| "The Nexus file identifier is missing.".to_string())?;
+        Some((
+            clean_metadata_field(&request.version, "version", 80)?,
+            clean_metadata_field(&request.author, "author", 120)?,
+            clean_metadata_field(&request.website, "source page", 500)?,
+            clean_metadata_field(&request.notes, "notes", 2_000)?,
+            domain,
+            mod_id,
+            file_id,
+        ))
+    };
     let plan = deployment_plan(&install, scan_source(&source)?)?;
     let storage = game_storage_root(app, &install)?;
     let state = read_library_state(&storage)?;
@@ -2731,6 +2837,15 @@ fn upgrade_mod_for(
         found[target_index].source_path = source.to_string_lossy().to_string();
         found[target_index].updated_unix = upgraded_at;
         found[target_index].files = replacement_files.clone();
+        if let Some((version, author, website, notes, domain, mod_id, file_id)) = &nexus_update {
+            found[target_index].version = version.clone();
+            found[target_index].author = author.clone();
+            found[target_index].website = website.clone();
+            found[target_index].notes = notes.clone();
+            found[target_index].nexus_game_domain = domain.clone();
+            found[target_index].nexus_mod_id = Some(*mod_id);
+            found[target_index].nexus_file_id = Some(*file_id);
+        }
         if actively_deployed {
             for index in &affected_indices {
                 activate_layer(
@@ -2769,11 +2884,16 @@ fn upgrade_mod_for(
         },
         bytes_changed: replacement_files.iter().map(|file| file.size_bytes).sum(),
         message: format!(
-            "Upgraded {} from {} to {} files using {}. Its enabled state, profiles, metadata, and priority were preserved.{}",
+            "Upgraded {} from {} to {} files using {}. Its enabled state, profiles, and priority were preserved.{}{}",
             found[target_index].name,
             previous_file_count,
             replacement_files.len(),
             plan.mode,
+            if nexus_update.is_some() {
+                " Nexus version and file tracking were updated."
+            } else {
+                " Metadata was preserved."
+            },
             if previous_source == found[target_index].source_path {
                 ""
             } else {
@@ -4022,6 +4142,9 @@ mod tests {
             website: String::new(),
             notes: String::new(),
             updated_unix: 1,
+            nexus_game_domain: String::new(),
+            nexus_mod_id: None,
+            nexus_file_id: None,
             files: vec![ManifestFile {
                 relative_path: "shared.txt".to_string(),
                 size_bytes: 3,

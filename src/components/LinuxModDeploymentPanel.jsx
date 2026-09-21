@@ -3,6 +3,7 @@ import {
   ArrowDown,
   ArrowUp,
   CheckCircle2,
+  Download,
   FileArchive,
   Folder,
   FolderInput,
@@ -15,6 +16,9 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
+import {
+  openUrl,
+} from "@tauri-apps/plugin-opener";
 
 import {
   useEffect,
@@ -44,6 +48,13 @@ import {
 import {
   openGamePath,
 } from "../services/pathActions";
+
+import NexusIntegrationPanel from "./NexusIntegrationPanel";
+
+import {
+  checkNexusModUpdates,
+  downloadNexusFile,
+} from "../services/nexusIntegration";
 
 
 function formatBytes(
@@ -98,6 +109,84 @@ function formatDate(
 }
 
 
+function NexusUpdateStatus({
+  deployment,
+  update,
+  isPremium,
+  busy,
+  action,
+  onSelect,
+}) {
+  if (!update) {
+    return null;
+  }
+  if (update.status === "current") {
+    return (
+      <div className="mt-2 text-[10px] text-emerald-100/38">
+        Nexus check: no newer compatible files found.
+      </div>
+    );
+  }
+  if (update.status === "current-file-missing") {
+    return (
+      <div className="mt-2 rounded-md border border-amber-400/10 bg-amber-400/[0.035] px-2.5 py-2 text-[10px] leading-relaxed text-amber-100/45">
+        {update.message}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 rounded-lg border border-violet-400/15 bg-violet-400/[0.04] p-2.5">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-violet-100/55">
+        Nexus update candidates
+      </div>
+      <div className="mt-1 text-[10px] leading-relaxed text-white/30">
+        Review the filename and category before replacing the current payload. GameAtlas does not assume that every newer upload is the same mod variant.
+      </div>
+      <div className="mt-2 space-y-1.5">
+        {update.candidates.slice(0, 3).map((candidate) => (
+          <div
+            key={candidate.fileId}
+            className="flex min-w-0 flex-col gap-2 rounded-md border border-white/[0.06] bg-black/10 px-2.5 py-2"
+          >
+            <div className="min-w-0">
+              <div className="truncate text-[10px] font-semibold text-white/50">
+                {candidate.name || candidate.fileName}
+              </div>
+              <div className="mt-0.5 text-[9px] text-white/25">
+                {candidate.categoryName || "Uncategorized"} · {candidate.version ? `v${candidate.version} · ` : ""}{formatBytes(candidate.sizeBytes)} · {formatDate(candidate.uploadedUnix)}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onSelect(deployment, candidate)}
+              disabled={busy}
+              className="inline-flex min-w-0 w-full items-center justify-center gap-1.5 rounded-md border border-violet-300/15 bg-violet-300/[0.06] px-2.5 py-1.5 text-center text-[9px] font-semibold leading-tight text-violet-100/60 hover:bg-violet-300/[0.10] disabled:opacity-35"
+            >
+              {action === `upgrade-${deployment.id}-${candidate.fileId}` ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : isPremium ? (
+                <Download className="h-3 w-3" />
+              ) : (
+                <FolderOpen className="h-3 w-3" />
+              )}
+              <span className="min-w-0 whitespace-normal break-words">
+                {isPremium ? "Download & prepare" : "Open download"}
+              </span>
+            </button>
+          </div>
+        ))}
+      </div>
+      {update.candidates.length > 3 ? (
+        <div className="mt-1.5 text-[9px] text-white/22">
+          {update.candidates.length - 3} additional candidate{update.candidates.length - 3 === 1 ? "" : "s"} available on the Nexus file page.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+
 export default function LinuxModDeploymentPanel({
   game,
   isLinux = false,
@@ -114,6 +203,10 @@ export default function LinuxModDeploymentPanel({
     modName,
     setModName,
   ] = useState("");
+  const [
+    pendingNexusMetadata,
+    setPendingNexusMetadata,
+  ] = useState(null);
   const [
     loading,
     setLoading,
@@ -196,6 +289,22 @@ export default function LinuxModDeploymentPanel({
     error,
     setError,
   ] = useState(null);
+  const [
+    nexusUpdateReport,
+    setNexusUpdateReport,
+  ] = useState(null);
+  const [
+    nexusUpdateAction,
+    setNexusUpdateAction,
+  ] = useState(null);
+  const [
+    nexusAccountStatus,
+    setNexusAccountStatus,
+  ] = useState(null);
+  const [
+    nexusAutoCheckKey,
+    setNexusAutoCheckKey,
+  ] = useState("");
 
 
   async function loadStatus() {
@@ -229,12 +338,14 @@ export default function LinuxModDeploymentPanel({
     () => {
       setPreview(null);
       setModName("");
+      setPendingNexusMetadata(null);
       setSelectedPaths([]);
       setUpgradeTargetId(null);
       setEditingMetadataId(null);
       setVerification(null);
       setMessage(null);
       setError(null);
+      setNexusUpdateReport(null);
       loadStatus();
     },
     [
@@ -242,6 +353,46 @@ export default function LinuxModDeploymentPanel({
       game?.id,
       game?.name,
       game?.installPath,
+    ]
+  );
+
+
+  useEffect(
+    () => {
+      const trackedKey = status?.deployments
+        ?.filter(
+          (deployment) => deployment.nexusGameDomain
+            && deployment.nexusModId
+            && deployment.nexusFileId
+        )
+        .map(
+          (deployment) => `${deployment.id}:${deployment.nexusFileId}`
+        )
+        .sort()
+        .join("|")
+        ?? "";
+      if (
+        nexusAccountStatus?.connected
+        && trackedKey
+        && nexusAutoCheckKey !== trackedKey
+      ) {
+        setNexusAutoCheckKey(trackedKey);
+        checkNexusUpdates();
+      }
+      if (!nexusAccountStatus?.connected) {
+        if (nexusUpdateReport) {
+          setNexusUpdateReport(null);
+        }
+        if (nexusAutoCheckKey) {
+          setNexusAutoCheckKey("");
+        }
+      }
+    },
+    [
+      nexusAccountStatus?.connected,
+      status?.deployments,
+      nexusUpdateReport,
+      nexusAutoCheckKey,
     ]
   );
 
@@ -275,6 +426,9 @@ export default function LinuxModDeploymentPanel({
 
       if (next) {
         setPreview(next);
+        if (!upgradeTargetId) {
+          setPendingNexusMetadata(null);
+        }
         setModName(
           next.suggestedName
           ?? ""
@@ -316,6 +470,9 @@ export default function LinuxModDeploymentPanel({
           item.path
         );
       setPreview(next);
+      if (!upgradeTargetId) {
+        setPendingNexusMetadata(null);
+      }
       setModName(
         next.suggestedName
         ?? item.name
@@ -329,7 +486,7 @@ export default function LinuxModDeploymentPanel({
               next.sourcePath,
             ]
       );
-      if (item.kind === "zip" || item.kind === "rar") {
+      if (item.kind === "zip" || item.kind === "rar" || item.kind === "7z") {
         setMessage(
           `The ${item.kind.toUpperCase()} archive was safely extracted. Review its deployment preview before continuing.`
         );
@@ -343,6 +500,168 @@ export default function LinuxModDeploymentPanel({
       );
     } finally {
       setPreparingPath(null);
+    }
+  }
+
+
+  async function prepareNexusArchive({
+    download,
+    mod,
+    file,
+    upgradeDeployment = null,
+  }) {
+    setPreparingPath(download.path);
+    setMessage(null);
+    setError(null);
+    try {
+      const next = await prepareLinuxStagedMod(
+        game,
+        download.path
+      );
+      setPreview(next);
+      setModName(
+        (
+          mod.name
+          || next.suggestedName
+          || file.name
+          || "Nexus Mod"
+        ).slice(0, 120)
+      );
+      setPendingNexusMetadata({
+        version:
+          (
+            file.version
+            || mod.version
+            || ""
+          ).slice(0, 80),
+        author: (mod.author ?? "").slice(0, 120),
+        website: mod.modPageUrl ?? "",
+        notes: `Nexus Mods file ${file.fileId}${file.categoryName ? ` • ${file.categoryName}` : ""}`,
+        nexusGameDomain: mod.gameDomain,
+        nexusModId: mod.modId,
+        nexusFileId: file.fileId,
+      });
+      setUpgradeTargetId(
+        upgradeDeployment?.id
+        ?? null
+      );
+      setSelectedPaths(
+        (current) => current.includes(next.sourcePath)
+          ? current
+          : [
+              ...current,
+              next.sourcePath,
+            ]
+      );
+      setMessage(
+        upgradeDeployment
+          ? `${download.fileName} was downloaded and safely extracted. Review the preview, then apply the transactional upgrade to ${upgradeDeployment.name}.`
+          : `${download.fileName} was downloaded and safely extracted. Review the deployment preview; its Nexus metadata will be saved when installed.`
+      );
+    } catch (prepareError) {
+      setError(
+        `The Nexus archive was downloaded, but preparation failed: ${String(prepareError)}`
+      );
+      throw prepareError;
+    } finally {
+      await loadStatus();
+      setPreparingPath(null);
+    }
+  }
+
+
+  async function checkNexusUpdates() {
+    const tracked = status?.deployments?.filter(
+      (deployment) => deployment.nexusGameDomain
+        && deployment.nexusModId
+        && deployment.nexusFileId
+    ) ?? [];
+    if (tracked.length === 0) {
+      return;
+    }
+    setNexusUpdateAction("check");
+    setMessage(null);
+    setError(null);
+    try {
+      const report = await checkNexusModUpdates(tracked);
+      setNexusUpdateReport(report);
+      setMessage(
+        report.updateCount > 0
+          ? `Checked ${report.checkedCount} Nexus mod${report.checkedCount === 1 ? "" : "s"}; ${report.updateCount} ${report.updateCount === 1 ? "has" : "have"} newer file candidates.`
+          : `Checked ${report.checkedCount} Nexus mod${report.checkedCount === 1 ? "" : "s"}; no newer compatible files were found.`
+      );
+    } catch (updateError) {
+      setError(String(updateError));
+    } finally {
+      setNexusUpdateAction(null);
+    }
+  }
+
+
+  async function prepareNexusUpdate(
+    deployment,
+    candidate
+  ) {
+    const tracked = nexusUpdateReport?.results?.find(
+      (result) => result.deploymentId === deployment.id
+    );
+    if (!tracked) {
+      return;
+    }
+    const metadata = {
+      version: (candidate.version || deployment.version || "").slice(0, 80),
+      author: (deployment.author ?? "").slice(0, 120),
+      website: deployment.website
+        || `https://www.nexusmods.com/${tracked.gameDomain}/mods/${tracked.modId}`,
+      notes: `Nexus Mods file ${candidate.fileId}${candidate.categoryName ? ` • ${candidate.categoryName}` : ""}`,
+      nexusGameDomain: tracked.gameDomain,
+      nexusModId: tracked.modId,
+      nexusFileId: candidate.fileId,
+    };
+    if (!nexusUpdateReport?.isPremium) {
+      try {
+        await openUrl(
+          `https://www.nexusmods.com/${tracked.gameDomain}/mods/${tracked.modId}?tab=files&file_id=${candidate.fileId}`
+        );
+        setUpgradeTargetId(deployment.id);
+        setPreview(null);
+        setPendingNexusMetadata(metadata);
+        setMessage(
+          `Download ${candidate.fileName || candidate.name} in your browser, place it in VortexMods, select Refresh, then Extract & Preview. GameAtlas will retain this update selection for the transactional upgrade.`
+        );
+      } catch (openError) {
+        setError(String(openError));
+      }
+      return;
+    }
+
+    setNexusUpdateAction(`upgrade-${deployment.id}-${candidate.fileId}`);
+    setMessage(null);
+    setError(null);
+    try {
+      const downloadMetadata = {
+        name: deployment.name,
+        author: metadata.author,
+        version: metadata.version,
+        modPageUrl: metadata.website,
+        gameDomain: tracked.gameDomain,
+        modId: tracked.modId,
+      };
+      const download = await downloadNexusFile(
+        game,
+        downloadMetadata,
+        candidate
+      );
+      await prepareNexusArchive({
+        download,
+        mod: downloadMetadata,
+        file: candidate,
+        upgradeDeployment: deployment,
+      });
+    } catch (updateError) {
+      setError(String(updateError));
+    } finally {
+      setNexusUpdateAction(null);
     }
   }
 
@@ -362,7 +681,7 @@ export default function LinuxModDeploymentPanel({
     const confirmed =
       window.confirm(
         upgradeTarget
-          ? `Upgrade “${upgradeTarget.name}” with this ${preview.fileCount}-file payload?\n\nIts metadata, enabled state, profiles, and priority will be preserved. Fully exit the game before continuing.`
+          ? `Upgrade “${upgradeTarget.name}” with this ${preview.fileCount}-file payload?\n\n${pendingNexusMetadata ? "Its Nexus version and file identity will advance after the transaction succeeds." : "Its metadata will be preserved."} Its enabled state, profiles, and priority will be preserved. Fully exit the game before continuing.`
           : `Deploy “${modName.trim()}” into this game?${overwriteText}\n\nFully exit the game before continuing.`
       );
 
@@ -377,20 +696,24 @@ export default function LinuxModDeploymentPanel({
     try {
       const result = upgradeTarget
         ? await upgradeLinuxMod(
-            game,
-            upgradeTarget.id,
-            preview.sourcePath
+          game,
+          upgradeTarget.id,
+            preview.sourcePath,
+            pendingNexusMetadata
           )
         : await deployLinuxMod(
             game,
             preview.sourcePath,
-            modName.trim()
+            modName.trim(),
+            pendingNexusMetadata
           );
       setMessage(
         result.message
       );
       setPreview(null);
       setModName("");
+      setPendingNexusMetadata(null);
+      setNexusUpdateReport(null);
       setUpgradeTargetId(null);
       setSelectedPaths(
         (current) => current.filter(
@@ -416,6 +739,7 @@ export default function LinuxModDeploymentPanel({
     setUpgradeTargetId(deployment.id);
     setPreview(null);
     setModName("");
+    setPendingNexusMetadata(null);
     setMessage(
       `Upgrading ${deployment.name}: preview an extracted folder or archive from the staging area, or select another folder.`
     );
@@ -888,6 +1212,9 @@ export default function LinuxModDeploymentPanel({
     )
     || Boolean(
       savingMetadataId
+    )
+    || Boolean(
+      nexusUpdateAction
     );
   const selectedCount =
     selectedPaths.filter(
@@ -921,7 +1248,7 @@ export default function LinuxModDeploymentPanel({
             </div>
 
             <div className="mt-1 max-w-3xl text-xs leading-relaxed text-white/35">
-              Drop mod folders, ZIP archives, or RAR archives into this game's VortexMods staging folder. GameAtlas preserves installed payloads so mods can be enabled and disabled safely.
+              Drop mod folders, ZIP archives, RAR archives, or 7z archives into this game's VortexMods staging folder. GameAtlas preserves installed payloads so mods can be enabled and disabled safely.
             </div>
 
             {status ? (
@@ -987,6 +1314,13 @@ export default function LinuxModDeploymentPanel({
       ) : null}
 
 
+      <NexusIntegrationPanel
+        game={game}
+        onArchiveReady={prepareNexusArchive}
+        onAccountStatusChange={setNexusAccountStatus}
+      />
+
+
       {status ? (
         <div className="border-b border-white/[0.06] p-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -1003,6 +1337,7 @@ export default function LinuxModDeploymentPanel({
                     type="button"
                     onClick={() => {
                       setUpgradeTargetId(null);
+                      setPendingNexusMetadata(null);
                       setPreview(null);
                     }}
                     disabled={deploying}
@@ -1039,7 +1374,7 @@ export default function LinuxModDeploymentPanel({
           </div>
 
           <div className="mt-2 text-[10px] text-white/25">
-            RAR support: {status.rarSupported ? status.rarProvider : "Unavailable — install the unar package"}
+            RAR/7z support: {status.rarSupported ? status.rarProvider : "Unavailable — install the unar package"}
           </div>
 
           {status.stagedItems.length > 0 ? (
@@ -1054,7 +1389,7 @@ export default function LinuxModDeploymentPanel({
                 return (
                 <div key={item.path} className={`flex items-center justify-between gap-3 rounded-lg border p-3 ${selected ? "border-emerald-400/20 bg-emerald-400/[0.035]" : "border-white/[0.07] bg-black/10"}`}>
                   <div className="flex min-w-0 items-center gap-2.5">
-                    {item.kind === "zip" || item.kind === "rar" ? (
+                    {item.kind === "zip" || item.kind === "rar" || item.kind === "7z" ? (
                       <FileArchive className="h-4 w-4 shrink-0 text-violet-300/65" />
                     ) : (
                       <Folder className="h-4 w-4 shrink-0 text-cyan-300/65" />
@@ -1064,7 +1399,7 @@ export default function LinuxModDeploymentPanel({
                         {item.name}
                       </div>
                       <div className="mt-0.5 text-[10px] uppercase tracking-wide text-white/25">
-                        {item.kind === "zip" || item.kind === "rar"
+                        {item.kind === "zip" || item.kind === "rar" || item.kind === "7z"
                           ? `${item.kind.toUpperCase()} archive • ${formatBytes(item.sizeBytes)}`
                           : "Extracted folder"
                         }
@@ -1087,17 +1422,17 @@ export default function LinuxModDeploymentPanel({
                     <button
                       type="button"
                       onClick={() => prepareStaged(item)}
-                      disabled={busy || (installed && !upgradeTargetId) || (item.kind === "rar" && !status.rarSupported)}
+                      disabled={busy || (installed && !upgradeTargetId) || ((item.kind === "rar" || item.kind === "7z") && !status.rarSupported)}
                       className="inline-flex items-center gap-2 rounded-lg border border-cyan-400/15 bg-cyan-400/[0.05] px-2.5 py-1.5 text-[10px] font-semibold text-cyan-100/65 hover:bg-cyan-400/[0.10] disabled:opacity-35"
                     >
                       {preparingPath === item.path ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : item.kind === "zip" || item.kind === "rar" ? (
+                      ) : item.kind === "zip" || item.kind === "rar" || item.kind === "7z" ? (
                         <FileArchive className="h-3.5 w-3.5" />
                       ) : (
                         <ShieldCheck className="h-3.5 w-3.5" />
                       )}
-                      {item.kind === "zip" || item.kind === "rar"
+                      {item.kind === "zip" || item.kind === "rar" || item.kind === "7z"
                         ? "Extract & Preview"
                         : "Preview"
                       }
@@ -1132,6 +1467,7 @@ export default function LinuxModDeploymentPanel({
                 type="button"
                 onClick={() => {
                   setUpgradeTargetId(null);
+                  setPendingNexusMetadata(null);
                   setPreview(null);
                 }}
                 disabled={deploying}
@@ -1269,6 +1605,17 @@ export default function LinuxModDeploymentPanel({
           </div>
           {status?.deployments?.length > 0 ? (
             <div className="flex flex-wrap gap-2">
+              {status.deployments.some((deployment) => deployment.nexusModId && deployment.nexusFileId) ? (
+                <button
+                  type="button"
+                  onClick={checkNexusUpdates}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-violet-400/15 bg-violet-400/[0.05] px-2.5 py-1.5 text-[10px] font-semibold text-violet-100/60 hover:bg-violet-400/[0.10] disabled:opacity-30"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${nexusUpdateAction === "check" ? "animate-spin" : ""}`} />
+                  Check Nexus Updates
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={verifyLibrary}
@@ -1427,6 +1774,11 @@ export default function LinuxModDeploymentPanel({
                           Legacy
                         </span>
                       ) : null}
+                      {deployment.nexusModId ? (
+                        <span className="rounded-full border border-violet-400/15 bg-violet-400/[0.05] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-violet-100/55">
+                          Nexus #{deployment.nexusModId}
+                        </span>
+                      ) : null}
                     </div>
                     <div className="mt-1 text-[10px] text-white/27">
                       {deployment.fileCount.toLocaleString()} files
@@ -1461,6 +1813,14 @@ export default function LinuxModDeploymentPanel({
                         {deployment.notes ? <div className="mt-1 whitespace-pre-wrap text-white/30">{deployment.notes}</div> : null}
                       </div>
                     ) : null}
+                    <NexusUpdateStatus
+                      deployment={deployment}
+                      update={nexusUpdateReport?.results?.find((result) => result.deploymentId === deployment.id)}
+                      isPremium={nexusUpdateReport?.isPremium}
+                      busy={busy}
+                      action={nexusUpdateAction}
+                      onSelect={prepareNexusUpdate}
+                    />
                     {deployment.updatedUnix > deployment.deployedUnix ? (
                       <div className="mt-1 text-[10px] text-white/22">
                         Last upgraded {formatDate(deployment.updatedUnix)}
@@ -1671,7 +2031,7 @@ export default function LinuxModDeploymentPanel({
 
 
       <div className="border-t border-white/[0.06] px-4 py-3 text-[10px] leading-relaxed text-white/22">
-        ZIP and RAR extraction is local and rejects unsafe paths, links, special files, password protection, excessive size, and case-only duplicates. RAR support uses the detected system lsar/unar tools. GameAtlas does not download mods, resolve mod-specific installation rules, run installers, or guarantee compatibility. Confirm that the preview has the layout expected at the game root.
+        ZIP, RAR, and 7z extraction is local and rejects unsafe paths, links, special files, password protection, excessive size, and case-only duplicates. RAR and 7z support use the detected system lsar/unar tools. GameAtlas can download eligible Nexus archives but does not resolve mod-specific installation rules, run installers, or guarantee compatibility. Confirm that the preview has the layout expected at the game root.
       </div>
     </div>
   );

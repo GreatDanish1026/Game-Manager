@@ -61,7 +61,8 @@ export async function prepareLinuxStagedMod(
 export async function deployLinuxMod(
   game,
   sourcePath,
-  name
+  name,
+  metadata = null
 ) {
   return invoke(
     "deploy_linux_mod",
@@ -72,6 +73,13 @@ export async function deployLinuxMod(
           ?? "",
         sourcePath,
         name,
+        version: metadata?.version ?? "",
+        author: metadata?.author ?? "",
+        website: metadata?.website ?? "",
+        notes: metadata?.notes ?? "",
+        nexusGameDomain: metadata?.nexusGameDomain ?? "",
+        nexusModId: metadata?.nexusModId ?? null,
+        nexusFileId: metadata?.nexusFileId ?? null,
       },
     }
   );
@@ -163,7 +171,8 @@ export async function updateLinuxModMetadata(
 export async function upgradeLinuxMod(
   game,
   deploymentId,
-  sourcePath
+  sourcePath,
+  metadata = null
 ) {
   return invoke(
     "upgrade_linux_mod",
@@ -174,6 +183,13 @@ export async function upgradeLinuxMod(
           ?? "",
         deploymentId,
         sourcePath,
+        version: metadata?.version ?? "",
+        author: metadata?.author ?? "",
+        website: metadata?.website ?? "",
+        notes: metadata?.notes ?? "",
+        nexusGameDomain: metadata?.nexusGameDomain ?? "",
+        nexusModId: metadata?.nexusModId ?? null,
+        nexusFileId: metadata?.nexusFileId ?? null,
       },
     }
   );

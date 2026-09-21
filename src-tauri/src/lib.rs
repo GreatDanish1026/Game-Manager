@@ -24,6 +24,7 @@ mod logging;
 mod lutris_games;
 mod manual_games;
 mod mod_conflict_inspector;
+mod nexus_integration;
 mod pcgamingwiki;
 mod pcgw_issues;
 mod performance_capture;
@@ -152,6 +153,13 @@ pub fn run() {
             launch_failure_analyzer::monitor_game_launch,
             launch_failure_analyzer::cancel_launch_failure_monitor,
             mod_conflict_inspector::inspect_mod_conflicts,
+            nexus_integration::get_nexus_account_status,
+            nexus_integration::connect_nexus_account,
+            nexus_integration::refresh_nexus_account,
+            nexus_integration::disconnect_nexus_account,
+            nexus_integration::lookup_nexus_mod,
+            nexus_integration::download_nexus_file,
+            nexus_integration::check_nexus_mod_updates,
             launch_profiles::get_installed_proton_tools,
             game_launcher::get_launcher_status,
             local_installation::inspect_local_installation,
