@@ -2,6 +2,9 @@ const SETTINGS_KEY =
   "game-manager-settings-v1";
 
 export const DEFAULT_SETTINGS = {
+  appearanceTheme:
+    "dark",
+
   startupView:
     "library",
 
@@ -38,6 +41,11 @@ function sanitizeSettings(
       : {};
 
   return {
+    appearanceTheme:
+      source.appearanceTheme === "light"
+        ? "light"
+        : "dark",
+
     startupView:
       source.startupView ===
       "settings"

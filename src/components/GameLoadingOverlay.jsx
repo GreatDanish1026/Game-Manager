@@ -1,4 +1,10 @@
 import {
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+} from "lucide-react";
+
+import {
   useEffect,
   useMemo,
   useState,
@@ -34,7 +40,7 @@ function statusLabel(
   }
 
   if (status === "error") {
-    return "Loaded with issue";
+    return "Could not load";
   }
 
   if (status === "loading") {
@@ -103,9 +109,16 @@ export default function GameLoadingOverlay({
   ] =
     useState(false);
 
+  const [
+    expanded,
+    setExpanded,
+  ] =
+    useState(true);
+
   useEffect(
     () => {
       setSourceProgress({});
+      setStartedAt(null);
     },
     [
       game?.id,
@@ -164,6 +177,25 @@ export default function GameLoadingOverlay({
         game.vortexLoading
       )
     );
+
+  useEffect(
+    () => {
+      if (!isLoading) {
+        setSourceProgress({});
+        return undefined;
+      }
+
+      setExpanded(true);
+
+      const timer = window.setTimeout(
+        () => setExpanded(false),
+        5000
+      );
+
+      return () => window.clearTimeout(timer);
+    },
+    [game?.id, isLoading]
+  );
 
 
   useEffect(
@@ -317,22 +349,11 @@ export default function GameLoadingOverlay({
               step.status === "error"
           ).length;
 
-        const active =
-          steps.some(
+        const failed =
+          steps.filter(
             (step) =>
-              step.status === "loading"
-          );
-
-        const percent =
-          active
-            ? Math.max(
-                8,
-                Math.round(
-                  (finished / steps.length)
-                  * 100
-                )
-              )
-            : 100;
+              step.status === "error"
+          ).length;
 
         const elapsedSeconds =
           startedAt
@@ -348,7 +369,7 @@ export default function GameLoadingOverlay({
         return {
           steps,
           finished,
-          percent,
+          failed,
           elapsedSeconds,
         };
       },
@@ -373,10 +394,8 @@ export default function GameLoadingOverlay({
 
   return (
     <div
-      aria-live="polite"
-      aria-busy="true"
       className={
-        `pointer-events-none fixed bottom-4 right-4 z-[60] w-[min(26rem,calc(100vw-2rem))] transition-opacity duration-200 ease-out ${
+        `pointer-events-none fixed bottom-4 right-4 z-[60] transition-all duration-200 ease-out ${expanded ? "w-[min(26rem,calc(100vw-2rem))]" : "w-[min(20rem,calc(100vw-2rem))]"} ${
           visible
             ? "opacity-100"
             : "opacity-0"
@@ -387,8 +406,8 @@ export default function GameLoadingOverlay({
         className={
           `w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-900/95 shadow-2xl shadow-black/50 ring-1 ring-white/[0.035] transition-all duration-200 ease-out ${
             visible
-              ? "translate-y-0 scale-100"
-              : "translate-y-2 scale-[0.985]"
+              ? "pointer-events-auto translate-y-0 scale-100"
+              : "pointer-events-none translate-y-2 scale-[0.985]"
           }`
         }
       >
@@ -396,8 +415,25 @@ export default function GameLoadingOverlay({
           className="h-1 w-full bg-gradient-to-r from-blue-400 via-cyan-300 to-emerald-400"
         />
 
+        {!expanded ? (
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            aria-label={`Show loading details for ${game.name}`}
+            className="flex w-full items-center gap-3 p-3 text-left hover:bg-white/[0.04] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"
+          >
+            <Loader2 className="h-5 w-5 shrink-0 animate-spin text-cyan-300" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold text-white/85">Loading {game.name}</span>
+              <span className="mt-0.5 block text-xs text-slate-400">
+                {view.finished} of {view.steps.length} sources finished{view.failed > 0 ? ` · ${view.failed} issue${view.failed === 1 ? "" : "s"}` : ""}
+              </span>
+            </span>
+            <ChevronUp className="h-4 w-4 shrink-0 text-slate-400" />
+          </button>
+        ) : (
         <div
-          className="p-6"
+          className="p-5"
         >
           <div
             className="flex items-start gap-4"
@@ -432,38 +468,25 @@ export default function GameLoadingOverlay({
               </div>
             </div>
 
-            <div
-              className="rounded-full border border-white/10 bg-white/[0.045] px-2.5 py-1 text-xs font-semibold tabular-nums text-slate-300"
+            <button
+              type="button"
+              onClick={() => setExpanded(false)}
+              aria-label="Minimize loading details"
+              className="rounded-lg border border-white/10 p-1.5 text-slate-400 hover:bg-white/[0.06] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"
             >
-              {view.percent}
-              {"%"}
-            </div>
+              <ChevronDown className="h-4 w-4" />
+            </button>
           </div>
 
           <div
-            className="mt-6 h-2.5 overflow-hidden rounded-full bg-black/30 ring-1 ring-white/[0.045]"
+            className="mt-5 flex items-center justify-between text-xs text-slate-400"
           >
-            <div
-              className="relative h-full overflow-hidden rounded-full bg-gradient-to-r from-blue-400 via-cyan-300 to-emerald-400 shadow-[0_0_18px_rgba(96,165,250,0.28)] transition-[width] duration-500 ease-out"
-              style={{
-                width:
-                  `${view.percent}%`,
-              }}
-            >
-              <div
-                className="absolute inset-y-0 right-0 w-12 animate-pulse bg-gradient-to-r from-transparent to-white/30"
-              />
-            </div>
-          </div>
-
-          <div
-            className="mt-2 flex items-center justify-between text-xs text-slate-400"
-          >
-            <span>
+            <span aria-live="polite">
               {view.finished}
-              {" / "}
+              {" of "}
               {view.steps.length}
-              {" sources loaded"}
+              {" sources finished"}
+              {view.failed > 0 ? ` · ${view.failed} could not load` : ""}
             </span>
 
             <span
@@ -556,6 +579,7 @@ export default function GameLoadingOverlay({
             Game details remain available while analysis finishes.
           </div>
         </div>
+        )}
       </div>
     </div>
   );

@@ -119,8 +119,17 @@ function openDiagnostic(
   scan
 ) {
   const sectionIds =
-    scan?.sectionIds
-    ?? [];
+    [
+      ...(scan?.sectionIds ?? []),
+    ];
+
+  if (
+    sectionIds.includes("technical-troubleshooting")
+    && scan?.targetId?.startsWith("diagnostic-")
+    && !sectionIds.includes("advanced-diagnostics")
+  ) {
+    sectionIds.push("advanced-diagnostics");
+  }
 
   sectionIds.forEach(
     (

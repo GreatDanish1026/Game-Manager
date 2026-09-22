@@ -2696,6 +2696,7 @@ export default function Sidebar({
           <>
             <button
               type="button"
+              aria-expanded={filtersExpanded}
               onClick={
                 () =>
                   setFiltersExpanded(

@@ -103,7 +103,7 @@ function StatCard({
           className="
             mt-1
             text-xs
-            text-white/25
+          text-white/45
           "
         >
           {detail}
@@ -475,6 +475,17 @@ export default function LibraryDashboard({
         )
       : [];
 
+  function showUnassessedGames() {
+    setHealthFilter("unassessed");
+
+    window.setTimeout(() => {
+      document.getElementById("installation-health-results")?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }, 0);
+  }
+
   return (
     <main
       className="
@@ -637,22 +648,22 @@ export default function LibraryDashboard({
             icon={
               Activity
             }
-            label="Fresh Analysis"
+            label="Game Data Fresh"
             value={
               `${data.analysis.coverage}%`
             }
-            detail={`${data.analysis.full} of ${data.analysis.total} games`}
+            detail={`${data.analysis.full} of ${data.analysis.total} game profiles`}
           />
 
           <StatCard
             icon={
-              TriangleAlert
+              HeartPulse
             }
-            label="Needs Attention"
+            label="Health Assessed"
             value={
-              data.health["needs-attention"]
+              `${data.health.assessed}/${data.health.total}`
             }
-            detail={`${data.health.unassessed} not assessed`}
+            detail={`${data.health.unassessed} not yet checked`}
           />
 
           <StatCard
@@ -695,7 +706,7 @@ export default function LibraryDashboard({
                   text-white/80
                 "
               >
-                Library Analysis
+                Game Data Analysis
               </div>
 
               <div
@@ -705,7 +716,7 @@ export default function LibraryDashboard({
                   text-white/35
                 "
               >
-                Fresh coverage is based on your Analysis freshness setting.
+                Shows whether external game data is current. This does not assess installation health below.
               </div>
             </div>
 
@@ -890,6 +901,7 @@ export default function LibraryDashboard({
 
 
         <section
+          id="installation-health"
           className="
             mt-6
             rounded-2xl
@@ -906,13 +918,33 @@ export default function LibraryDashboard({
 
             <div>
               <div className="text-base font-semibold text-white/80">
-                Installation Health
+                Game Health Checks
               </div>
               <div className="mt-1 text-xs text-white/35">
-                {data.health.assessed} of {data.health.total} games assessed. Click a category to filter.
+                {data.health.assessed} of {data.health.total} games checked with Diagnostics Center. Game-data freshness above is separate. Click a category to filter.
               </div>
             </div>
           </div>
+
+          {data.health.unassessed > 0 ? (
+            <div className="mt-4 flex flex-col gap-3 rounded-xl border border-amber-300/20 bg-amber-300/[0.055] p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-sm font-semibold text-amber-100/85">
+                  {data.health.unassessed} {data.health.unassessed === 1 ? "game has" : "games have"} not been checked
+                </div>
+                <div className="mt-0.5 text-xs leading-relaxed text-white/60">
+                  The Needs Attention count covers checked games only. Open an unchecked game to run its full diagnostic.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={showUnassessedGames}
+                className="shrink-0 rounded-lg border border-amber-300/25 bg-amber-300/[0.08] px-3 py-2 text-xs font-semibold text-amber-100/85 hover:bg-amber-300/[0.14] focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-200"
+              >
+                Review unchecked games
+              </button>
+            </div>
+          ) : null}
 
           <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-5">
             {[
@@ -925,6 +957,7 @@ export default function LibraryDashboard({
               <button
                 key={category}
                 type="button"
+                aria-pressed={healthFilter === category}
                 onClick={
                   () =>
                     setHealthFilter(
@@ -959,7 +992,7 @@ export default function LibraryDashboard({
           </div>
 
           {healthFilter ? (
-            <div className="mt-4 overflow-hidden rounded-xl border border-white/[0.07]">
+            <div id="installation-health-results" className="mt-4 scroll-mt-20 overflow-hidden rounded-xl border border-white/[0.07]">
               <div className="flex items-center justify-between border-b border-white/[0.06] bg-white/[0.02] px-4 py-2.5">
                 <div className="text-xs font-semibold text-white/55">
                   {healthFilter === "unassessed"
@@ -990,7 +1023,7 @@ export default function LibraryDashboard({
                         type="button"
                         onClick={
                           () =>
-                            onSelectGame?.(game)
+                            onSelectGame?.(game, record ? undefined : { focus: "health" })
                         }
                         className="flex w-full items-center justify-between gap-4 border-b border-white/[0.045] px-4 py-3 text-left transition last:border-b-0 hover:bg-white/[0.025]"
                       >
@@ -1012,7 +1045,7 @@ export default function LibraryDashboard({
                           <div className="text-[9px] uppercase tracking-wide text-white/20">
                             {record
                               ? `${record.warnings} attention`
-                              : "Open to assess"}
+                              : "Open health check"}
                           </div>
                         </div>
                       </button>
@@ -1031,8 +1064,8 @@ export default function LibraryDashboard({
 
         <CollapsibleSection
           id="dashboard-health-scan"
-          title="Library Health Scan"
-          description="Run a local, library-wide check of install paths and executable detection."
+          title="Local Install-Path Scan"
+          description="Batch-check install paths and executable detection. This is separate from the per-game health assessments above."
           icon={HeartPulse}
           defaultOpen={false}
           summary="Advanced local scan"

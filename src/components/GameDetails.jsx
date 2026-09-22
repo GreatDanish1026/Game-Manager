@@ -94,6 +94,7 @@ import RuntimeDependencyDoctorPanel from "./RuntimeDependencyDoctorPanel";
 import PerformanceCapturePanel from "./PerformanceCapturePanel";
 import ConfigurationValidatorPanel from "./ConfigurationValidatorPanel";
 import LaunchFailureAnalyzerPanel from "./LaunchFailureAnalyzerPanel";
+import TroubleshootingGuide from "./TroubleshootingGuide";
 
 
 import RenoDxManagerPanel from "./RenoDxManagerPanel";
@@ -643,6 +644,7 @@ function modSummary(
 
 export default function GameDetails({
   game,
+  focusTarget = null,
   libraryGames = [],
   onAnalyzeRemaining,
   onRefreshStale,
@@ -680,6 +682,40 @@ export default function GameDetails({
     getGameCoverArt(
       game
     );
+
+  useEffect(() => {
+    if (!game || focusTarget !== "health") {
+      return undefined;
+    }
+
+    let scrollTimer;
+    let attempts = 0;
+    const openTimer = window.setTimeout(() => {
+      window.dispatchEvent(
+        new CustomEvent("game-manager-open-section", {
+          detail: { id: "compatibility-performance" },
+        })
+      );
+
+      const scrollToCheck = () => {
+        const target = document.getElementById("game-health-check");
+
+        if (target) {
+          target.scrollIntoView({ behavior: "smooth", block: "start" });
+        } else if (attempts < 10) {
+          attempts += 1;
+          scrollTimer = window.setTimeout(scrollToCheck, 50);
+        }
+      };
+
+      scrollTimer = window.setTimeout(scrollToCheck, 50);
+    }, 0);
+
+    return () => {
+      window.clearTimeout(openTimer);
+      window.clearTimeout(scrollTimer);
+    };
+  }, [game?.id, focusTarget]);
 
 
   useEffect(
@@ -1085,10 +1121,11 @@ export default function GameDetails({
 
         <CollapsibleSection
           id="overview"
+          persistOpen={false}
           title="Overview"
           description="Core game information and the currently detected game version."
           icon={Info}
-          defaultOpen
+          defaultOpen={false}
           summary={
             game.developer
               ? game.developer
@@ -1149,6 +1186,7 @@ export default function GameDetails({
 
         <CollapsibleSection
           id="my-game"
+          persistOpen={false}
           title="My Game"
           description="Your play status, rating, tags, launch profiles, notes, and recent activity."
           icon={UserRoundCog}
@@ -1195,6 +1233,7 @@ export default function GameDetails({
 
         <CollapsibleSection
           id="compatibility-performance"
+          persistOpen={false}
           title="Compatibility & Performance"
           description="System fit, verified settings, hardware capability, and installation readiness."
           icon={MonitorCog}
@@ -1215,7 +1254,7 @@ export default function GameDetails({
             />
           </div>
 
-          <div className="mt-5">
+          <div id="game-health-check" className="mt-5 scroll-mt-20">
             <GameHealthPanel
               game={
                 game
@@ -1240,6 +1279,7 @@ export default function GameDetails({
 
         <CollapsibleSection
           id="pc-features"
+          persistOpen={false}
           title="Graphics & PC Features"
           description="Graphics, display, frame-rate, widescreen, and controller capabilities from PCGamingWiki."
           icon={Monitor}
@@ -1260,6 +1300,7 @@ export default function GameDetails({
 
           <CollapsibleSection
             id="controller-support"
+            persistOpen={false}
             title="Controller Support"
             description="Controller families, prompts, connection modes, hotplugging, and DualSense features."
             icon={Gamepad2}
@@ -1278,6 +1319,7 @@ export default function GameDetails({
 
         <CollapsibleSection
           id="mods"
+          persistOpen={false}
           title="Mods & Enhancements"
           description="Enhancement support, mod managers, local mod evidence, tools, and mod-change history."
           icon={Puzzle}
@@ -1328,18 +1370,28 @@ export default function GameDetails({
             />
           </div>
 
-          <div className="mt-5">
+          <CollapsibleSection
+            id="mod-tools-shortcuts"
+            persistOpen={false}
+            title="Tool launchers & shortcuts"
+            description="Launch installed mod managers, open game folders, and inspect additional local tools."
+            icon={Wrench}
+            defaultOpen={false}
+            summary="Apps, folders & tables"
+            className="mt-5"
+          >
             <ExternalToolsPanel
               game={
                 game
               }
             />
-          </div>
+          </CollapsibleSection>
         </CollapsibleSection>
 
 
         <CollapsibleSection
           id="files-installation"
+          persistOpen={false}
           title="Files & Installation"
           description="Local game-binary details, storage usage, file utilities, and installation-change history."
           icon={HardDrive}
@@ -1389,6 +1441,7 @@ export default function GameDetails({
 
         <CollapsibleSection
           id="saves-screenshots"
+          persistOpen={false}
           title="Saves & Screenshots"
           description="Browse live save data, manage backups, and open detected screenshots."
           icon={HardDrive}
@@ -1421,6 +1474,7 @@ export default function GameDetails({
 
         <CollapsibleSection
           id="technical-troubleshooting"
+          persistOpen={false}
           title="Technical & Troubleshooting"
           description="Recommended fixes, known issues, diagnostics, technical details, and advanced tools."
           icon={Settings2}
@@ -1432,19 +1486,34 @@ export default function GameDetails({
             ?? "Technical details & fixes"
           }
         >
-          <EssentialImprovements
-            game={
-              game
-            }
-          />
+          <TroubleshootingGuide key={game.id} />
 
           <div className="mt-5">
+            <EssentialImprovements
+              game={
+                game
+              }
+            />
+          </div>
+
+          <div id="troubleshooting-known-issues" className="mt-5 scroll-mt-20">
             <KnownIssuesPanel
               game={
                 game
               }
             />
           </div>
+
+          <CollapsibleSection
+            id="advanced-diagnostics"
+            persistOpen={false}
+            title="All troubleshooting tools"
+            description="Open the full collection of diagnostic checks and technical details. The guide above links directly to recommended tools."
+            icon={Wrench}
+            defaultOpen={false}
+            summary="Advanced tools"
+            className="mt-5"
+          >
 
           <div
             id="diagnostic-crash-detective"
@@ -1549,11 +1618,13 @@ export default function GameDetails({
             />
           </div>
 
-          <CleanLaunchPanel
-            game={
-              game
-            }
-          />
+          <div id="diagnostic-clean-launch" className="scroll-mt-20">
+            <CleanLaunchPanel
+              game={
+                game
+              }
+            />
+          </div>
 
           <ShaderCachePanel
             game={
@@ -1593,6 +1664,7 @@ export default function GameDetails({
               }
             />
           </div>
+          </CollapsibleSection>
         </CollapsibleSection>
 
 

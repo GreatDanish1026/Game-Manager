@@ -1535,9 +1535,31 @@ export default function SettingsScreen({
             "appearance" ? (
               <SectionCard
                 title="Appearance"
-                description="Adjust GameAtlas's interface density."
+                description="Choose a comfortable color theme and interface density."
                 icon={Sparkles}
               >
+                <SettingRow
+                  title="Color theme"
+                  description="Switch between dark and light throughout GameAtlas. Your choice is saved and applied immediately."
+                >
+                  <div className="inline-flex rounded-lg border border-white/10 bg-black/10 p-1" role="group" aria-label="Color theme">
+                    {[
+                      ["dark", "Dark"],
+                      ["light", "Light"],
+                    ].map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-pressed={settings.appearanceTheme === value}
+                        onClick={() => changeSetting("appearanceTheme", value)}
+                        className={`rounded-md px-3 py-1.5 text-xs font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300 ${settings.appearanceTheme === value ? "bg-cyan-500/15 text-cyan-100" : "text-white/55 hover:bg-white/[0.05] hover:text-white/80"}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </SettingRow>
+
                 <SettingRow
                   title="Compact game list"
                   description="Reduce game-row spacing in the sidebar so more titles fit on screen at once."

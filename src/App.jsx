@@ -1843,6 +1843,12 @@ export default function App() {
   ] =
     useState(null);
 
+  const [
+    gamePageFocus,
+    setGamePageFocus,
+  ] =
+    useState(null);
+
 
   const [
     search,
@@ -3624,7 +3630,8 @@ function hideGame(
 
 
   async function selectGame(
-    game
+    game,
+    options = {}
   ) {
     /*
      * GAME_SELECTION_PROGRESSIVE_HYDRATION_PHASE1
@@ -3635,6 +3642,10 @@ function hideGame(
      */
     const analysisStarted =
       performance.now();
+
+    setGamePageFocus(
+      options?.focus ?? null
+    );
 
     setSelectedGame(
       game
@@ -4143,6 +4154,9 @@ function hideGame(
             }
             game={
               selectedGame
+            }
+            focusTarget={
+              gamePageFocus
             }
 onAnalyzeRemaining={
               () =>

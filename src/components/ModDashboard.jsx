@@ -1,10 +1,8 @@
 import {
-  CheckCircle2,
-  CircleOff,
+  ChevronDown,
   ExternalLink,
   FileCode2,
   Loader2,
-  PackageCheck,
   Puzzle,
   RefreshCcw,
   Settings2,
@@ -291,6 +289,12 @@ export default function ModDashboard({
     setError,
   ] =
     useState(null);
+
+  const [
+    detailsOpen,
+    setDetailsOpen,
+  ] =
+    useState(false);
 
 
   async function load({
@@ -594,7 +598,7 @@ export default function ModDashboard({
                 text-white/85
               "
             >
-              {enhancementCount} enhancement{enhancementCount === 1 ? "" : "s"} detected
+              {enhancementCount} supported or detected item{enhancementCount === 1 ? "" : "s"}
             </div>
 
             {localEvidenceCount > 0 ? (
@@ -690,6 +694,18 @@ export default function ModDashboard({
       ) : null}
 
 
+      <button
+        type="button"
+        aria-expanded={detailsOpen}
+        onClick={() => setDetailsOpen((current) => !current)}
+        className="mt-4 flex w-full items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-white/[0.025] px-4 py-3 text-left text-sm font-semibold text-white/65 hover:border-cyan-300/20 hover:bg-white/[0.045] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"
+      >
+        <span>{detailsOpen ? "Hide" : "View"} compatibility and local evidence</span>
+        <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${detailsOpen ? "rotate-180" : ""}`} />
+      </button>
+
+      {detailsOpen ? (
+      <>
       <div
         className="
           mt-5
@@ -984,154 +1000,30 @@ export default function ModDashboard({
               )
           }
         />
+
+        <ModCard
+          icon={Puzzle}
+          title={modManagers.genericManagerName ?? "Other Mod Manager"}
+          description={
+            genericManagerDetected
+              ? "Another recognized mod manager executable was found in the game installation. Open Tool launchers & shortcuts to launch it."
+              : "No additional recognized mod manager was detected in the game installation."
+          }
+          badges={[
+            {
+              label: genericManagerDetected ? "Detected" : "Not Detected",
+              state: genericManagerDetected ? "detected" : "neutral",
+            },
+          ]}
+        />
       </div>
 
 
-      <div
-        className="
-          mt-4
-          rounded-xl
-          border
-          border-white/[0.08]
-          bg-black/10
-          p-4
-        "
-      >
-        <div
-          className="
-            flex
-            items-center
-            gap-2
-          "
-        >
-          <PackageCheck
-            className="
-              h-4
-              w-4
-              text-cyan-300/70
-            "
-          />
-
-          <div
-            className="
-              text-sm
-              font-semibold
-              text-white/70
-            "
-          >
-            Local Mod Evidence
-          </div>
-        </div>
-
-        <div
-          className="
-            mt-3
-            grid
-            grid-cols-1
-            gap-2
-            md:grid-cols-2
-            xl:grid-cols-3
-          "
-        >
-          {[
-            {
-              label:
-                "Vortex deployment",
-              active:
-                vortexDetected,
-            },
-            {
-              label:
-                "Fluffy / Mod Manager",
-              active:
-                fluffyDetected,
-            },
-            {
-              label:
-                "ReShade",
-              active:
-                reshadeDetected,
-            },
-            {
-              label:
-                "Special K",
-              active:
-                specialKDetected,
-            },
-            {
-              label:
-                modManagers
-                  .genericManagerName
-                ?? "Other mod manager",
-              active:
-                genericManagerDetected,
-            },
-          ].map(
-            (
-              item
-            ) => (
-              <div
-                key={
-                  item.label
-                }
-                className="
-                  flex
-                  items-center
-                  gap-2
-                  rounded-lg
-                  border
-                  border-white/[0.06]
-                  bg-white/[0.015]
-                  px-3
-                  py-2.5
-                  text-xs
-                "
-              >
-                {item.active ? (
-                  <CheckCircle2
-                    className="
-                      h-3.5
-                      w-3.5
-                      shrink-0
-                      text-emerald-300/75
-                    "
-                  />
-                ) : (
-                  <CircleOff
-                    className="
-                      h-3.5
-                      w-3.5
-                      shrink-0
-                      text-white/20
-                    "
-                  />
-                )}
-
-                <span
-                  className={
-                    item.active
-                      ? "text-white/60"
-                      : "text-white/25"
-                  }
-                >
-                  {item.label}
-                </span>
-              </div>
-            )
-          )}
-        </div>
-
-        <div
-          className="
-            mt-3
-            text-[10px]
-            leading-relaxed
-            text-white/20
-          "
-        >
-          Local evidence is intentionally conservative. An undetected item may still be present if it does not leave a recognized file signature in the scanned installation.
-        </div>
+      <div className="mt-4 text-xs leading-relaxed text-white/40">
+        Local evidence is intentionally conservative. An undetected item may still be present if it does not leave a recognized file signature in the scanned installation.
       </div>
+      </>
+      ) : null}
     </div>
   );
 }

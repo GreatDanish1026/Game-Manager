@@ -1,0 +1,177 @@
+/* Shared readability floor for the existing compact metadata and badges. */
+[class~="text-[8px]"],
+[class~="text-[9px]"],
+[class~="text-[10px]"],
+[class~="text-[11px]"] {
+  font-size: 0.75rem !important;
+  line-height: 1.35 !important;
+}
+
+:root:not([data-theme="light"]) :is(
+  [class~="text-white/15"],
+  [class~="text-white/18"],
+  [class~="text-white/20"],
+  [class~="text-white/22"],
+  [class~="text-white/23"],
+  [class~="text-white/24"],
+  [class~="text-white/25"],
+  [class~="text-white/27"],
+  [class~="text-white/28"],
+  [class~="text-white/30"],
+  [class~="text-white/32"],
+  [class~="text-white/34"],
+  [class~="text-white/35"],
+  [class~="text-white/38"],
+  [class~="text-white/40"],
+  [class~="text-white/42"],
+  [class~="text-white/45"],
+  [class~="text-white/48"],
+  [class~="text-white/50"],
+  [class~="text-white/52"],
+  [class~="text-white/55"]
+) {
+  color: rgba(255, 255, 255, 0.62) !important;
+}
+
+:where(button, a, input, select, textarea, [role="button"]):focus-visible {
+  outline: 2px solid #22d3ee;
+  outline-offset: 2px;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  color: #172334;
+  background: #f5f7fb;
+}
+
+:root[data-theme="light"] body {
+  background: #f5f7fb;
+}
+
+:root[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: #b8c6d5;
+}
+
+:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: #94a7ba;
+}
+
+/* Existing components use dark Tailwind utilities; translate their surfaces in light mode. */
+:root[data-theme="light"] :is([class^="bg-[#"], [class*=" bg-[#"]) {
+  background-color: #ffffff !important;
+}
+
+:root[data-theme="light"] :is(
+  [class~="bg-[#0b0f17]"],
+  [class~="bg-[#0b0f17]/95"]
+) {
+  background-color: #f5f7fb !important;
+}
+
+:root[data-theme="light"] [class~="bg-[#0d121b]"] {
+  background-color: #edf2f8 !important;
+}
+
+:root[data-theme="light"] :is([class^="bg-white/"], [class*=" bg-white/"]) {
+  background-color: rgba(25, 43, 62, 0.055) !important;
+}
+
+:root[data-theme="light"] :is(
+  [class~="bg-black/10"],
+  [class~="bg-black/15"],
+  [class~="bg-black/20"],
+  [class~="bg-black/25"],
+  [class~="bg-black/30"],
+  [class~="bg-black/35"],
+  [class~="bg-black/40"]
+) {
+  background-color: rgba(25, 43, 62, 0.035) !important;
+}
+
+:root[data-theme="light"] [class~="bg-slate-900/95"] {
+  background-color: rgba(255, 255, 255, 0.97) !important;
+}
+
+:root[data-theme="light"] :is([class^="border-white/"], [class*=" border-white/"]) {
+  border-color: rgba(25, 43, 62, 0.17) !important;
+}
+
+:root[data-theme="light"] [class~="text-white"] {
+  color: #172334 !important;
+}
+
+:root[data-theme="light"] :is([class^="text-white/"], [class*=" text-white/"]) {
+  color: #475569 !important;
+}
+
+:root[data-theme="light"] :is(
+  [class~="text-white/60"],
+  [class~="text-white/62"],
+  [class~="text-white/65"],
+  [class~="text-white/68"],
+  [class~="text-white/70"],
+  [class~="text-white/72"],
+  [class~="text-white/75"],
+  [class~="text-white/78"],
+  [class~="text-white/80"],
+  [class~="text-white/85"],
+  [class~="text-white/90"]
+) {
+  color: #1e293b !important;
+}
+
+:root[data-theme="light"] :is([class^="text-slate-"], [class*=" text-slate-"], [class^="text-gray-"], [class*=" text-gray-"]) {
+  color: #475569 !important;
+}
+
+:root[data-theme="light"] :is([class^="text-cyan-"], [class*=" text-cyan-"], [class^="text-sky-"], [class*=" text-sky-"]) {
+  color: #0e7490 !important;
+}
+
+:root[data-theme="light"] :is([class^="text-emerald-"], [class*=" text-emerald-"]) {
+  color: #047857 !important;
+}
+
+:root[data-theme="light"] :is([class^="text-amber-"], [class*=" text-amber-"], [class^="text-orange-"], [class*=" text-orange-"]) {
+  color: #92400e !important;
+}
+
+:root[data-theme="light"] :is([class^="text-red-"], [class*=" text-red-"], [class^="text-rose-"], [class*=" text-rose-"]) {
+  color: #b91c1c !important;
+}
+
+:root[data-theme="light"] :is([class^="text-violet-"], [class*=" text-violet-"], [class^="text-fuchsia-"], [class*=" text-fuchsia-"]) {
+  color: #6d28d9 !important;
+}
+
+:root[data-theme="light"] :is([class^="text-blue-"], [class*=" text-blue-"]) {
+  color: #1d4ed8 !important;
+}
+
+:root[data-theme="light"] input,
+:root[data-theme="light"] textarea,
+:root[data-theme="light"] select {
+  color-scheme: light !important;
+  color: #172334 !important;
+}
+
+:root[data-theme="light"] input::placeholder,
+:root[data-theme="light"] textarea::placeholder {
+  color: #64748b !important;
+}
+
+:root[data-theme="light"] select,
+:root[data-theme="light"] select:hover,
+:root[data-theme="light"] select:focus,
+:root[data-theme="light"] select:disabled,
+:root[data-theme="light"] select option,
+:root[data-theme="light"] select optgroup {
+  color-scheme: light !important;
+  background-color: #ffffff !important;
+  color: #172334 !important;
+  border-color: #cbd5e1 !important;
+}
+
+:root[data-theme="light"] :where(button, a, input, select, textarea, [role="button"]):focus-visible {
+  outline-color: #0e7490;
+}

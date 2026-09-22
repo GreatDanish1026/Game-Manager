@@ -39,12 +39,13 @@ export default function CollapsibleSection({
   description,
   icon: Icon,
   defaultOpen = false,
+  persistOpen = true,
   summary = null,
   children,
   className = "",
 }) {
   const storageKey =
-    id
+    id && persistOpen
       ? `game-manager-section-${id}`
       : null;
 

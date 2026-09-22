@@ -209,10 +209,10 @@ export default function GameSectionNavigator() {
       <div
         className="
           hidden
-          flex-wrap
+          flex-nowrap
           items-center
           gap-2
-          xl:flex
+          2xl:flex
         "
       >
         {SECTIONS.map(
@@ -251,6 +251,7 @@ export default function GameSectionNavigator() {
                   py-2
                   text-xs
                   font-semibold
+                  whitespace-nowrap
                   transition
                   hover:border-cyan-400/20
                   hover:bg-cyan-400/[0.06]
@@ -281,7 +282,7 @@ export default function GameSectionNavigator() {
           flex
           items-center
           gap-3
-          xl:hidden
+          2xl:hidden
         "
       >
         <span
@@ -305,6 +306,7 @@ export default function GameSectionNavigator() {
                 event.target.value
               )
           }
+          aria-label="Jump to game section"
           className="
             min-w-0
             flex-1
