@@ -56,10 +56,49 @@ mod reshade_manager;
 mod reshade_windows;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    {
+        use tauri::Manager;
+
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }));
+    }
+
+    builder
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|app| {
+            #[cfg(target_os = "linux")]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+
+                app.deep_link().register_all()?;
+
+                if let Some(urls) = app.deep_link().get_current()? {
+                    for url in urls {
+                        nexus_integration::queue_nxm_link(app.handle(), url.as_str());
+                    }
+                }
+
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        nexus_integration::queue_nxm_link(&handle, url.as_str());
+                    }
+                });
+            }
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             background_conflicts::get_background_conflict_report,
             clean_launch::get_clean_launch_status,
@@ -160,6 +199,9 @@ pub fn run() {
             nexus_integration::lookup_nexus_mod,
             nexus_integration::download_nexus_file,
             nexus_integration::check_nexus_mod_updates,
+            nexus_integration::inspect_nxm_link,
+            nexus_integration::get_pending_nxm_links,
+            nexus_integration::dismiss_nxm_link,
             launch_profiles::get_installed_proton_tools,
             game_launcher::get_launcher_status,
             local_installation::inspect_local_installation,

@@ -54,6 +54,7 @@ import NexusIntegrationPanel from "./NexusIntegrationPanel";
 import {
   checkNexusModUpdates,
   downloadNexusFile,
+  getNexusAccountStatus,
 } from "../services/nexusIntegration";
 
 
@@ -106,6 +107,21 @@ function formatDate(
   }
 
   return new Date(value * 1000).toLocaleString();
+}
+
+
+function remainingNexusQuota(
+  account
+) {
+  const known = [
+    account?.hourlyRemaining,
+    account?.dailyRemaining,
+  ].filter(
+    (value) => Number.isFinite(value)
+  );
+  return known.length > 0
+    ? Math.min(...known)
+    : null;
 }
 
 
@@ -371,9 +387,13 @@ export default function LinuxModDeploymentPanel({
         .sort()
         .join("|")
         ?? "";
+      const quotaRemaining = remainingNexusQuota(nexusAccountStatus);
+      const automaticCheckAllowed = quotaRemaining === null
+        || quotaRemaining > 10;
       if (
         nexusAccountStatus?.connected
         && trackedKey
+        && automaticCheckAllowed
         && nexusAutoCheckKey !== trackedKey
       ) {
         setNexusAutoCheckKey(trackedKey);
@@ -390,6 +410,8 @@ export default function LinuxModDeploymentPanel({
     },
     [
       nexusAccountStatus?.connected,
+      nexusAccountStatus?.hourlyRemaining,
+      nexusAccountStatus?.dailyRemaining,
       status?.deployments,
       nexusUpdateReport,
       nexusAutoCheckKey,
@@ -585,6 +607,15 @@ export default function LinuxModDeploymentPanel({
     try {
       const report = await checkNexusModUpdates(tracked);
       setNexusUpdateReport(report);
+      setNexusAccountStatus(
+        (current) => ({
+          ...current,
+          dailyRemaining: report.dailyRemaining,
+          hourlyRemaining: report.hourlyRemaining,
+          dailyReset: report.dailyReset,
+          hourlyReset: report.hourlyReset,
+        })
+      );
       setMessage(
         report.updateCount > 0
           ? `Checked ${report.checkedCount} Nexus mod${report.checkedCount === 1 ? "" : "s"}; ${report.updateCount} ${report.updateCount === 1 ? "has" : "have"} newer file candidates.`
@@ -592,6 +623,11 @@ export default function LinuxModDeploymentPanel({
       );
     } catch (updateError) {
       setError(String(updateError));
+      try {
+        setNexusAccountStatus(await getNexusAccountStatus());
+      } catch {
+        // Preserve the actionable update-check error if local status cannot be read.
+      }
     } finally {
       setNexusUpdateAction(null);
     }
@@ -1609,7 +1645,8 @@ export default function LinuxModDeploymentPanel({
                 <button
                   type="button"
                   onClick={checkNexusUpdates}
-                  disabled={busy}
+                  disabled={busy || remainingNexusQuota(nexusAccountStatus) === 0}
+                  title={remainingNexusQuota(nexusAccountStatus) === 0 ? "Nexus API quota is exhausted." : undefined}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-violet-400/15 bg-violet-400/[0.05] px-2.5 py-1.5 text-[10px] font-semibold text-violet-100/60 hover:bg-violet-400/[0.10] disabled:opacity-30"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${nexusUpdateAction === "check" ? "animate-spin" : ""}`} />

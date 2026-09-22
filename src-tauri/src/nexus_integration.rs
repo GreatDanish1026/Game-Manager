@@ -1,26 +1,28 @@
 use reqwest::{header::HeaderMap, Client, StatusCode, Url};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::{Mutex, OnceLock},
 };
+use tauri::Emitter;
 
 #[cfg(target_os = "linux")]
 use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 const NEXUS_API_ROOT: &str = "https://api.nexusmods.com/v1";
 const APP_NAME: &str = "GameAtlas";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const MAX_API_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 #[cfg(target_os = "linux")]
 const MAX_NEXUS_DOWNLOAD_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 
 static NEXUS_SESSION: OnceLock<Mutex<Option<NexusSession>>> = OnceLock::new();
+static PENDING_NXM_LINKS: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
 
 #[derive(Clone)]
 struct NexusSession {
@@ -40,6 +42,8 @@ pub struct NexusAccountStatus {
     pub is_supporter: bool,
     pub daily_remaining: Option<u64>,
     pub hourly_remaining: Option<u64>,
+    pub daily_reset: Option<String>,
+    pub hourly_reset: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,6 +66,31 @@ pub struct NexusDownloadRequest {
     pub mod_id: u64,
     pub file_id: u64,
     pub file_name: String,
+    pub nxm_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NxmLinkRequest {
+    pub nxm_url: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NxmLinkInfo {
+    pub game_domain: String,
+    pub mod_id: u64,
+    pub file_id: u64,
+    pub mod_page_url: String,
+    pub expires_unix: Option<u64>,
+    pub authenticated: bool,
+}
+
+#[derive(Debug)]
+struct ParsedNxmLink {
+    info: NxmLinkInfo,
+    key: Option<String>,
+    user_id: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -97,6 +126,10 @@ pub struct NexusUpdateReport {
     pub checked_count: usize,
     pub update_count: usize,
     pub results: Vec<NexusTrackedModUpdate>,
+    pub daily_remaining: Option<u64>,
+    pub hourly_remaining: Option<u64>,
+    pub daily_reset: Option<String>,
+    pub hourly_reset: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -131,6 +164,8 @@ pub struct NexusModMetadata {
     pub files: Vec<NexusFileMetadata>,
     pub daily_remaining: Option<u64>,
     pub hourly_remaining: Option<u64>,
+    pub daily_reset: Option<String>,
+    pub hourly_reset: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -206,14 +241,20 @@ struct DownloadLinkResponse {
     uri: String,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct NexusQuota {
     daily_remaining: Option<u64>,
     hourly_remaining: Option<u64>,
+    daily_reset: Option<String>,
+    hourly_reset: Option<String>,
 }
 
 fn session() -> &'static Mutex<Option<NexusSession>> {
     NEXUS_SESSION.get_or_init(|| Mutex::new(None))
+}
+
+fn pending_nxm_links() -> &'static Mutex<VecDeque<String>> {
+    PENDING_NXM_LINKS.get_or_init(|| Mutex::new(VecDeque::new()))
 }
 
 fn client() -> Result<Client, String> {
@@ -232,23 +273,83 @@ fn quota_from_headers(headers: &HeaderMap) -> NexusQuota {
             .and_then(|text| text.parse::<u64>().ok())
     }
 
+    fn text(headers: &HeaderMap, name: &str) -> Option<String> {
+        headers
+            .get(name)
+            .and_then(|header| header.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && value.len() <= 80)
+            .filter(|value| !value.chars().any(char::is_control))
+            .map(str::to_string)
+    }
+
     NexusQuota {
         daily_remaining: value(headers, "x-rl-daily-remaining"),
         hourly_remaining: value(headers, "x-rl-hourly-remaining"),
+        daily_reset: text(headers, "x-rl-daily-reset"),
+        hourly_reset: text(headers, "x-rl-hourly-reset"),
     }
 }
 
-fn api_error(status: StatusCode) -> String {
-    match status {
-        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
-            "Nexus Mods rejected the API key. Create or copy a personal API key from your Nexus Mods API settings and try again.".to_string()
-        }
-        StatusCode::NOT_FOUND => "Nexus Mods could not find that game or mod.".to_string(),
-        StatusCode::TOO_MANY_REQUESTS => {
-            "The Nexus Mods API rate limit has been reached. Wait for the quota to reset, then try again.".to_string()
-        }
-        _ => format!("Nexus Mods returned HTTP {status}."),
+fn quota_reset_hint(quota: &NexusQuota) -> String {
+    if quota.daily_remaining == Some(0) {
+        return quota
+            .daily_reset
+            .as_deref()
+            .map(|reset| format!(" Daily quota resets at {reset}."))
+            .unwrap_or_default();
     }
+    quota
+        .hourly_reset
+        .as_deref()
+        .map(|reset| format!(" Hourly quota resets at {reset}."))
+        .unwrap_or_default()
+}
+
+fn api_error(status: StatusCode, quota: &NexusQuota) -> String {
+    match status {
+        StatusCode::UNAUTHORIZED => {
+            "Nexus Mods rejected the API key. It may be invalid or revoked; disconnect the account, create a new key in Nexus API settings, and reconnect."
+                .to_string()
+        }
+        StatusCode::FORBIDDEN => {
+            "Nexus Mods denied access to this resource. Confirm the connected account can access it; for a free-account download, request a fresh Mod Manager Download link."
+                .to_string()
+        }
+        StatusCode::NOT_FOUND => {
+            "Nexus Mods could not find the requested game, mod, or file. Refresh the page and confirm it is still available."
+                .to_string()
+        }
+        StatusCode::TOO_MANY_REQUESTS => {
+            format!(
+                "The Nexus Mods API rate limit has been reached. Wait for the quota to reset, then try again.{}",
+                quota_reset_hint(quota)
+            )
+        }
+        StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY => {
+            "Nexus Mods rejected the request as invalid. Refresh the catalog or request a new download link and try again.".to_string()
+        }
+        status if status.is_server_error() => {
+            "Nexus Mods is temporarily unavailable. No local files were changed; try again later."
+                .to_string()
+        }
+        _ => format!(
+            "Nexus Mods returned HTTP {}. No local files were changed.",
+            status.as_u16()
+        ),
+    }
+}
+
+fn request_error(error: &reqwest::Error, action: &str) -> String {
+    if error.is_timeout() {
+        return format!("Nexus Mods timed out while {action}. Check the connection and try again.");
+    }
+    if error.is_connect() {
+        return format!(
+            "GameAtlas could not connect to Nexus Mods while {action}. Check the network connection and try again."
+        );
+    }
+    format!("The Nexus Mods request failed while {action}. No credentials were logged; try again.")
 }
 
 async fn get_json<T: DeserializeOwned>(
@@ -263,18 +364,28 @@ async fn get_json<T: DeserializeOwned>(
         .header("Application-Version", APP_VERSION)
         .send()
         .await
-        .map_err(|error| format!("Could not reach Nexus Mods: {error}"))?;
+        .map_err(|error| request_error(&error, "requesting API data"))?;
 
     let status = response.status();
     let quota = quota_from_headers(response.headers());
-    if !status.is_success() {
-        return Err(api_error(status));
+    let _ = update_quota(&quota);
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_API_RESPONSE_BYTES)
+    {
+        return Err("Nexus Mods returned an unexpectedly large API response.".to_string());
     }
-
     let body = response
         .bytes()
         .await
-        .map_err(|error| format!("Nexus Mods returned an unreadable response body: {error}"))?;
+        .map_err(|error| request_error(&error, "reading API data"))?;
+    if body.len() as u64 > MAX_API_RESPONSE_BYTES {
+        return Err("Nexus Mods returned an unexpectedly large API response.".to_string());
+    }
+    if !status.is_success() {
+        return Err(api_error(status, &quota));
+    }
+
     let value = serde_json::from_slice::<T>(&body).map_err(|error| {
         format!(
             "Nexus Mods returned JSON that GameAtlas could not interpret (line {}, column {}).",
@@ -346,6 +457,8 @@ fn account_from_json(
         is_supporter: flexible_bool(&value, &["is_supporter", "is_supporter?", "isSupporter"]),
         daily_remaining: quota.daily_remaining,
         hourly_remaining: quota.hourly_remaining,
+        daily_reset: quota.daily_reset,
+        hourly_reset: quota.hourly_reset,
     })
 }
 
@@ -374,7 +487,7 @@ fn save_session(next: Option<NexusSession>) -> Result<(), String> {
     Ok(())
 }
 
-fn update_quota(quota: NexusQuota) -> Result<(), String> {
+fn update_quota(quota: &NexusQuota) -> Result<(), String> {
     if let Some(active) = session()
         .lock()
         .map_err(|_| "The Nexus account session could not be updated.".to_string())?
@@ -382,6 +495,36 @@ fn update_quota(quota: NexusQuota) -> Result<(), String> {
     {
         active.account.daily_remaining = quota.daily_remaining;
         active.account.hourly_remaining = quota.hourly_remaining;
+        active.account.daily_reset = quota.daily_reset.clone();
+        active.account.hourly_reset = quota.hourly_reset.clone();
+    }
+    Ok(())
+}
+
+fn ensure_quota_capacity(
+    account: &NexusAccountStatus,
+    required: u64,
+    action: &str,
+) -> Result<(), String> {
+    let remaining = match (account.hourly_remaining, account.daily_remaining) {
+        (Some(hourly), Some(daily)) => Some(hourly.min(daily)),
+        (Some(hourly), None) => Some(hourly),
+        (None, Some(daily)) => Some(daily),
+        (None, None) => None,
+    };
+    if remaining.is_some_and(|remaining| remaining < required) {
+        let quota = NexusQuota {
+            daily_remaining: account.daily_remaining,
+            hourly_remaining: account.hourly_remaining,
+            daily_reset: account.daily_reset.clone(),
+            hourly_reset: account.hourly_reset.clone(),
+        };
+        return Err(format!(
+            "Nexus quota is too low to {action}: {required} request{} required, {} remaining.{} Select Refresh after the reset to resume.",
+            if required == 1 { " is" } else { "s are" },
+            remaining.unwrap_or_default(),
+            quota_reset_hint(&quota)
+        ));
     }
     Ok(())
 }
@@ -425,6 +568,114 @@ fn parse_nexus_mod_url(value: &str) -> Result<(String, u64), String> {
     Ok((domain.to_ascii_lowercase(), mod_id))
 }
 
+fn parse_nxm_url(value: &str) -> Result<ParsedNxmLink, String> {
+    let url = Url::parse(value.trim())
+        .map_err(|_| "Nexus supplied an invalid Mod Manager Download link.".to_string())?;
+    if url.scheme() != "nxm" {
+        return Err("Only nxm:// download links are accepted.".to_string());
+    }
+
+    let game_domain = validate_game_domain(
+        url.host_str()
+            .ok_or_else(|| "The nxm link does not identify a Nexus game.".to_string())?,
+    )?;
+    let parts = url
+        .path_segments()
+        .map(|segments| segments.filter(|part| !part.is_empty()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let (mod_id, file_id) = match parts.as_slice() {
+        ["mods", mod_id, "files", file_id] => (mod_id, file_id),
+        ["collections", ..] => {
+            return Err(
+                "Nexus Collections are not supported yet. Open an individual mod file instead."
+                    .to_string(),
+            )
+        }
+        _ => return Err("That nxm link is not an individual Nexus mod-file download.".to_string()),
+    };
+    let mod_id = mod_id
+        .parse::<u64>()
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| "The nxm link contains an invalid mod ID.".to_string())?;
+    let file_id = file_id
+        .parse::<u64>()
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| "The nxm link contains an invalid file ID.".to_string())?;
+
+    let mut key = None;
+    let mut expires_unix = None;
+    let mut user_id = None;
+    for (name, value) in url.query_pairs() {
+        match name.as_ref() {
+            "key" if key.is_none() => key = Some(value.into_owned()),
+            "expires" if expires_unix.is_none() => {
+                expires_unix = value.parse::<u64>().ok();
+            }
+            "user_id" if user_id.is_none() => {
+                user_id = value.parse::<u64>().ok().filter(|value| *value > 0);
+            }
+            _ => {}
+        }
+    }
+
+    let credential_count = usize::from(key.is_some())
+        + usize::from(expires_unix.is_some())
+        + usize::from(user_id.is_some());
+    if credential_count != 0 && credential_count != 3 {
+        return Err("The nxm download credentials are incomplete. Request a fresh Mod Manager Download link from Nexus Mods.".to_string());
+    }
+    if let Some(secret) = key.as_deref() {
+        if secret.is_empty() || secret.len() > 512 || secret.chars().any(char::is_control) {
+            return Err("The nxm download token is invalid.".to_string());
+        }
+    }
+    if let Some(expires) = expires_unix {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or_default();
+        if expires <= now {
+            return Err(
+                "This Mod Manager Download link has expired. Request a new one from Nexus Mods."
+                    .to_string(),
+            );
+        }
+    }
+
+    Ok(ParsedNxmLink {
+        info: NxmLinkInfo {
+            game_domain: game_domain.clone(),
+            mod_id,
+            file_id,
+            mod_page_url: format!("https://www.nexusmods.com/{game_domain}/mods/{mod_id}"),
+            expires_unix,
+            authenticated: credential_count == 3,
+        },
+        key,
+        user_id,
+    })
+}
+
+pub fn queue_nxm_link(app: &tauri::AppHandle, value: &str) {
+    let accepted_scheme = Url::parse(value)
+        .ok()
+        .is_some_and(|url| url.scheme() == "nxm");
+    if !accepted_scheme || value.len() > 4_096 {
+        return;
+    }
+    if let Ok(mut pending) = pending_nxm_links().lock() {
+        if !pending.iter().any(|existing| existing == value) {
+            if pending.len() >= 10 {
+                pending.pop_front();
+            }
+            pending.push_back(value.to_string());
+        }
+    }
+    let _ = app.emit("gameatlas:nxm-link", ());
+}
+
 fn file_metadata(file: FileResponse) -> NexusFileMetadata {
     NexusFileMetadata {
         file_id: file.file_id,
@@ -449,6 +700,25 @@ fn supported_archive_name(value: &str) -> bool {
         extension.to_ascii_lowercase().as_str(),
         "zip" | "rar" | "7z"
     )
+}
+
+#[cfg(target_os = "linux")]
+fn archive_signature_matches(file_name: &str, signature: &[u8]) -> bool {
+    let extension = Path::new(file_name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "zip" => {
+            signature.starts_with(b"PK\x03\x04")
+                || signature.starts_with(b"PK\x05\x06")
+                || signature.starts_with(b"PK\x07\x08")
+        }
+        "rar" => signature.starts_with(b"Rar!\x1a\x07"),
+        "7z" => signature.starts_with(b"7z\xbc\xaf\x27\x1c"),
+        _ => false,
+    }
 }
 
 fn obsolete_category(value: &str) -> bool {
@@ -632,9 +902,34 @@ pub fn disconnect_nexus_account() -> Result<NexusAccountStatus, String> {
 }
 
 #[tauri::command]
+pub fn inspect_nxm_link(request: NxmLinkRequest) -> Result<NxmLinkInfo, String> {
+    Ok(parse_nxm_url(&request.nxm_url)?.info)
+}
+
+#[tauri::command]
+pub fn get_pending_nxm_links() -> Result<Vec<String>, String> {
+    Ok(pending_nxm_links()
+        .lock()
+        .map_err(|_| "The pending Nexus download links could not be accessed.".to_string())?
+        .iter()
+        .cloned()
+        .collect())
+}
+
+#[tauri::command]
+pub fn dismiss_nxm_link(request: NxmLinkRequest) -> Result<(), String> {
+    let mut pending = pending_nxm_links()
+        .lock()
+        .map_err(|_| "The pending Nexus download links could not be updated.".to_string())?;
+    pending.retain(|value| value != request.nxm_url.trim());
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn lookup_nexus_mod(request: NexusLookupRequest) -> Result<NexusModMetadata, String> {
     let (game_domain, mod_id) = parse_nexus_mod_url(&request.nexus_url)?;
     let active = current_session()?;
+    ensure_quota_capacity(&active.account, 2, "look up this mod")?;
     let client = client()?;
     let (mod_data, _) = get_json::<ModResponse>(
         &client,
@@ -648,7 +943,7 @@ pub async fn lookup_nexus_mod(request: NexusLookupRequest) -> Result<NexusModMet
         &active.api_key,
     )
     .await?;
-    update_quota(quota)?;
+    update_quota(&quota)?;
 
     let files = file_data.files.into_iter().map(file_metadata).collect();
 
@@ -669,6 +964,8 @@ pub async fn lookup_nexus_mod(request: NexusLookupRequest) -> Result<NexusModMet
         files,
         daily_remaining: quota.daily_remaining,
         hourly_remaining: quota.hourly_remaining,
+        daily_reset: quota.daily_reset,
+        hourly_reset: quota.hourly_reset,
     })
 }
 
@@ -680,6 +977,17 @@ pub async fn check_nexus_mod_updates(
         return Err("At most 100 managed Nexus mods can be checked at once.".to_string());
     }
     let active = current_session()?;
+    let required_requests = request
+        .mods
+        .iter()
+        .map(|tracked| (tracked.game_domain.to_ascii_lowercase(), tracked.mod_id))
+        .collect::<std::collections::HashSet<_>>()
+        .len() as u64;
+    ensure_quota_capacity(
+        &active.account,
+        required_requests,
+        "check these mod updates",
+    )?;
     let client = client()?;
     let mut cache: HashMap<(String, u64), Vec<FileResponse>> = HashMap::new();
     let mut results = Vec::with_capacity(request.mods.len());
@@ -704,7 +1012,7 @@ pub async fn check_nexus_mod_updates(
                 &active.api_key,
             )
             .await?;
-            update_quota(quota)?;
+            update_quota(&quota)?;
             cache.insert(key.clone(), response.files);
         }
         let files = cache.get(&key).expect("Nexus file cache was populated");
@@ -747,11 +1055,16 @@ pub async fn check_nexus_mod_updates(
         .iter()
         .filter(|result| result.status == "update-available")
         .count();
+    let quota_status = get_nexus_account_status()?;
     Ok(NexusUpdateReport {
         is_premium: active.account.is_premium,
         checked_count: results.len(),
         update_count,
         results,
+        daily_remaining: quota_status.daily_remaining,
+        hourly_remaining: quota_status.hourly_remaining,
+        daily_reset: quota_status.daily_reset,
+        hourly_reset: quota_status.hourly_reset,
     })
 }
 
@@ -771,24 +1084,58 @@ pub async fn download_nexus_file(
         let domain = validate_game_domain(&request.game_domain)?;
         let file_name = safe_archive_name(&request.file_name, request.mod_id, request.file_id)?;
         let active = current_session()?;
-        if !active.account.is_premium {
+        ensure_quota_capacity(&active.account, 1, "resolve this download")?;
+        let nxm = request.nxm_url.as_deref().map(parse_nxm_url).transpose()?;
+        if let Some(link) = nxm.as_ref() {
+            if link.info.game_domain != domain
+                || link.info.mod_id != request.mod_id
+                || link.info.file_id != request.file_id
+            {
+                return Err(
+                    "The nxm link does not match the selected Nexus game, mod, and file."
+                        .to_string(),
+                );
+            }
+            if let (Some(link_user_id), Some(account_user_id)) =
+                (link.user_id, active.account.user_id)
+            {
+                if link_user_id != account_user_id {
+                    return Err(
+                        "This nxm link belongs to a different Nexus Mods account. Request a new link while signed into the connected account."
+                            .to_string(),
+                    );
+                }
+            }
+        }
+        if !active.account.is_premium && !nxm.as_ref().is_some_and(|link| link.info.authenticated) {
             return Err(
-                "Direct API downloads require Nexus Mods Premium. Open the file page in your browser, download it there, and move the archive into this game's VortexMods folder."
+                "A free Nexus account requires a fresh Mod Manager Download link. Return to the file page and choose Mod Manager Download again."
                     .to_string(),
             );
         }
 
         let api_client = client()?;
+        let mut download_link_url = Url::parse(&format!(
+            "{NEXUS_API_ROOT}/games/{domain}/mods/{}/files/{}/download_link.json",
+            request.mod_id, request.file_id
+        ))
+        .map_err(|_| "Could not construct the Nexus download request.".to_string())?;
+        if let Some(link) = nxm.as_ref().filter(|link| link.info.authenticated) {
+            let mut query = download_link_url.query_pairs_mut();
+            query.append_pair("key", link.key.as_deref().unwrap_or_default());
+            query.append_pair(
+                "expires",
+                &link.info.expires_unix.unwrap_or_default().to_string(),
+            );
+            query.append_pair("user_id", &link.user_id.unwrap_or_default().to_string());
+        }
         let (links, quota) = get_json::<Vec<DownloadLinkResponse>>(
             &api_client,
-            format!(
-                "{NEXUS_API_ROOT}/games/{domain}/mods/{}/files/{}/download_link",
-                request.mod_id, request.file_id
-            ),
+            download_link_url.to_string(),
             &active.api_key,
         )
         .await?;
-        update_quota(quota)?;
+        update_quota(&quota)?;
         let link = links.into_iter().next().ok_or_else(|| {
             "Nexus Mods did not return a download mirror for that file.".to_string()
         })?;
@@ -822,12 +1169,26 @@ pub async fn download_nexus_file(
             .get(download_url)
             .send()
             .await
-            .map_err(|error| format!("Could not start the Nexus download: {error}"))?;
+            .map_err(|error| request_error(&error, "starting the file download"))?;
         if !response.status().is_success() {
-            return Err(format!(
-                "The Nexus download mirror returned HTTP {}.",
-                response.status()
-            ));
+            return Err(match response.status() {
+                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+                    "The Nexus download link was denied or expired. Request a fresh Mod Manager Download link and try again."
+                        .to_string()
+                }
+                StatusCode::NOT_FOUND => {
+                    "The selected Nexus file is no longer available from this download mirror. Refresh the mod catalog before retrying."
+                        .to_string()
+                }
+                status if status.is_server_error() => {
+                    "The Nexus download mirror is temporarily unavailable. No archive was saved; try again later."
+                        .to_string()
+                }
+                status => format!(
+                    "The Nexus download mirror returned HTTP {}. No archive was saved.",
+                    status.as_u16()
+                ),
+            });
         }
         if response
             .content_length()
@@ -841,13 +1202,17 @@ pub async fn download_nexus_file(
             .write(true)
             .open(&temporary)
             .map_err(|error| format!("Could not create the temporary Nexus download: {error}"))?;
-        let result: Result<u64, String> = async {
+        let result: Result<(u64, Vec<u8>), String> = async {
             let mut bytes_downloaded = 0_u64;
+            let mut signature = Vec::with_capacity(8);
             while let Some(chunk) = response
                 .chunk()
                 .await
-                .map_err(|error| format!("The Nexus download was interrupted: {error}"))?
+                .map_err(|error| request_error(&error, "downloading the archive"))?
             {
+                if signature.len() < 8 {
+                    signature.extend(chunk.iter().take(8_usize.saturating_sub(signature.len())));
+                }
                 bytes_downloaded = bytes_downloaded.saturating_add(chunk.len() as u64);
                 if bytes_downloaded > MAX_NEXUS_DOWNLOAD_BYTES {
                     return Err("The Nexus archive exceeded the 32 GiB safety limit.".to_string());
@@ -859,13 +1224,13 @@ pub async fn download_nexus_file(
             output
                 .sync_all()
                 .map_err(|error| format!("Could not finalize the Nexus archive: {error}"))?;
-            Ok(bytes_downloaded)
+            Ok((bytes_downloaded, signature))
         }
         .await;
         drop(output);
 
-        let bytes_downloaded = match result {
-            Ok(value) if value > 0 => value,
+        let (bytes_downloaded, signature) = match result {
+            Ok((value, signature)) if value > 0 => (value, signature),
             Ok(_) => {
                 let _ = fs::remove_file(&temporary);
                 return Err("The Nexus download completed without any file data.".to_string());
@@ -875,6 +1240,13 @@ pub async fn download_nexus_file(
                 return Err(error);
             }
         };
+        if !archive_signature_matches(&file_name, &signature) {
+            let _ = fs::remove_file(&temporary);
+            return Err(
+                "Nexus returned data that does not match the selected archive type. The temporary file was removed; request a fresh download link and try again."
+                    .to_string(),
+            );
+        }
         if let Err(error) = fs::hard_link(&temporary, &destination) {
             let _ = fs::remove_file(&temporary);
             return Err(format!(
@@ -928,6 +1300,39 @@ mod tests {
     }
 
     #[test]
+    fn parses_authenticated_nxm_mod_file_links() {
+        let parsed = parse_nxm_url(
+            "nxm://godofwar/mods/89/files/202?key=test%2Ftoken%2Bvalue&expires=4102444800&user_id=42",
+        )
+        .unwrap();
+        assert_eq!(parsed.info.game_domain, "godofwar");
+        assert_eq!(parsed.info.mod_id, 89);
+        assert_eq!(parsed.info.file_id, 202);
+        assert_eq!(parsed.info.expires_unix, Some(4_102_444_800));
+        assert!(parsed.info.authenticated);
+        assert_eq!(parsed.key.as_deref(), Some("test/token+value"));
+        assert_eq!(parsed.user_id, Some(42));
+    }
+
+    #[test]
+    fn accepts_tokenless_nxm_links_for_premium_resolution() {
+        let parsed = parse_nxm_url("nxm://cyberpunk2077/mods/123/files/456").unwrap();
+        assert_eq!(parsed.info.game_domain, "cyberpunk2077");
+        assert_eq!(parsed.info.mod_id, 123);
+        assert_eq!(parsed.info.file_id, 456);
+        assert!(!parsed.info.authenticated);
+    }
+
+    #[test]
+    fn rejects_incomplete_or_unsupported_nxm_links() {
+        assert!(
+            parse_nxm_url("nxm://godofwar/mods/89/files/202?key=token&expires=4102444800").is_err()
+        );
+        assert!(parse_nxm_url("nxm://godofwar/collections/example/revisions/latest").is_err());
+        assert!(parse_nxm_url("https://godofwar/mods/89/files/202").is_err());
+    }
+
+    #[test]
     fn accepts_account_field_variations() {
         let account = account_from_json(
             serde_json::from_str(
@@ -953,6 +1358,54 @@ mod tests {
         .is_err());
     }
 
+    #[test]
+    fn reads_remaining_quota_and_reset_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-rl-hourly-remaining", "0".parse().unwrap());
+        headers.insert("x-rl-daily-remaining", "17".parse().unwrap());
+        headers.insert(
+            "x-rl-hourly-reset",
+            "2026-09-22T18:00:00+00:00".parse().unwrap(),
+        );
+
+        let quota = quota_from_headers(&headers);
+        assert_eq!(quota.hourly_remaining, Some(0));
+        assert_eq!(quota.daily_remaining, Some(17));
+        assert_eq!(
+            quota.hourly_reset.as_deref(),
+            Some("2026-09-22T18:00:00+00:00")
+        );
+    }
+
+    #[test]
+    fn refuses_an_action_that_exceeds_known_quota() {
+        let account = NexusAccountStatus {
+            connected: true,
+            hourly_remaining: Some(1),
+            daily_remaining: Some(20),
+            hourly_reset: Some("2026-09-22T18:00:00+00:00".to_string()),
+            ..NexusAccountStatus::default()
+        };
+
+        let error = ensure_quota_capacity(&account, 2, "look up this mod").unwrap_err();
+        assert!(error.contains("2 requests are required"));
+        assert!(error.contains("1 remaining"));
+        assert!(error.contains("Select Refresh"));
+    }
+
+    #[test]
+    fn rate_limit_errors_include_the_known_reset() {
+        let quota = NexusQuota {
+            hourly_remaining: Some(0),
+            hourly_reset: Some("2026-09-22T18:00:00+00:00".to_string()),
+            ..NexusQuota::default()
+        };
+
+        let error = api_error(StatusCode::TOO_MANY_REQUESTS, &quota);
+        assert!(error.contains("rate limit"));
+        assert!(error.contains("2026-09-22T18:00:00+00:00"));
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn accepts_only_safe_supported_archive_names() {
@@ -963,6 +1416,19 @@ mod tests {
         assert!(safe_archive_name("../escape.zip", 10, 20).is_err());
         assert!(safe_archive_name("installer.exe", 10, 20).is_err());
         assert!(safe_archive_name(".gameatlas-hidden.rar", 10, 20).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn validates_supported_archive_signatures() {
+        assert!(archive_signature_matches("mod.zip", b"PK\x03\x04payload"));
+        assert!(archive_signature_matches(
+            "mod.rar",
+            b"Rar!\x1a\x07\x01\x00"
+        ));
+        assert!(archive_signature_matches("mod.7z", b"7z\xbc\xaf\x27\x1c"));
+        assert!(!archive_signature_matches("mod.zip", b"<html>denied"));
+        assert!(!archive_signature_matches("mod.exe", b"MZpayload"));
     }
 
     #[test]

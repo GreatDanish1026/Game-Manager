@@ -1147,6 +1147,48 @@ fn preview_for(
 }
 
 #[cfg(target_os = "linux")]
+fn normalized_zip_entry_path(name: &str) -> Result<Option<(PathBuf, bool)>, String> {
+    if name
+        .chars()
+        .any(|character| character == '\0' || character.is_control())
+    {
+        return Err("The ZIP contains an entry with control characters in its path.".to_string());
+    }
+
+    let is_directory = name.ends_with('/') || name.ends_with('\\');
+    let normalized = name.replace('\\', "/");
+    if normalized.starts_with('/') {
+        return Err(format!("ZIP entry {name} has an absolute path."));
+    }
+    let normalized = normalized.trim_end_matches('/');
+    if normalized.is_empty() {
+        return Ok(None);
+    }
+
+    let segments = normalized.split('/').collect::<Vec<_>>();
+    if segments.len() > MAX_DEPTH {
+        return Err(format!(
+            "ZIP entry {name} exceeds the {MAX_DEPTH}-level depth limit."
+        ));
+    }
+    if segments
+        .iter()
+        .any(|segment| segment.is_empty() || matches!(*segment, "." | ".."))
+    {
+        return Err(format!("ZIP entry {name} has an unsafe relative path."));
+    }
+    if segments.iter().any(|segment| segment.contains(':')) {
+        return Err(format!(
+            "ZIP entry {name} contains a Windows drive or stream separator."
+        ));
+    }
+
+    let relative = segments.iter().collect::<PathBuf>();
+    safe_relative_text(&relative)?;
+    Ok(Some((relative, is_directory)))
+}
+
+#[cfg(target_os = "linux")]
 fn extract_zip_archive(archive_path: &Path, staging: &Path) -> Result<PathBuf, String> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -1166,18 +1208,9 @@ fn extract_zip_archive(archive_path: &Path, staging: &Path) -> Result<PathBuf, S
         let entry = archive
             .by_index(index)
             .map_err(|error| format!("Could not inspect ZIP entry {index}: {error}"))?;
-        if entry.name().contains('\\') {
-            return Err(format!(
-                "ZIP entry {} uses ambiguous backslash separators.",
-                entry.name()
-            ));
-        }
-        let relative = entry
-            .enclosed_name()
-            .ok_or_else(|| format!("ZIP entry {} has an unsafe path.", entry.name()))?;
-        if relative.as_os_str().is_empty() {
+        let Some((relative, _)) = normalized_zip_entry_path(entry.name())? else {
             continue;
-        }
+        };
         let relative_text = safe_relative_text(&relative)?;
         if !seen.insert(relative_text.to_ascii_lowercase()) {
             return Err(format!(
@@ -1223,14 +1256,12 @@ fn extract_zip_archive(archive_path: &Path, staging: &Path) -> Result<PathBuf, S
             let mut entry = archive
                 .by_index(index)
                 .map_err(|error| format!("Could not read ZIP entry {index}: {error}"))?;
-            let relative = entry
-                .enclosed_name()
-                .ok_or_else(|| format!("ZIP entry {} has an unsafe path.", entry.name()))?;
-            if relative.as_os_str().is_empty() {
+            let Some((relative, windows_directory)) = normalized_zip_entry_path(entry.name())?
+            else {
                 continue;
-            }
+            };
             let output = temporary.join(&relative);
-            if entry.is_dir() {
+            if entry.is_dir() || windows_directory {
                 fs::create_dir_all(&output).map_err(|error| {
                     format!(
                         "Could not create extracted folder {}: {error}",
@@ -4043,9 +4074,10 @@ pub fn remove_linux_mod_deployment(
 mod tests {
     use super::{
         activate_layer, deactivate_layer, deployment_id, deployment_plan, file_sha256,
-        profile_mod_ids, safe_relative_text, validate_deployment_id, validate_rar_listing,
-        verify_library_at, write_library_state, write_manifest, DeploymentManifest, LsarEntry,
-        LsarListing, ManifestFile, ModLibraryState, SourceFile, MAX_TOTAL_BYTES,
+        normalized_zip_entry_path, profile_mod_ids, safe_relative_text, validate_deployment_id,
+        validate_rar_listing, verify_library_at, write_library_state, write_manifest,
+        DeploymentManifest, LsarEntry, LsarListing, ManifestFile, ModLibraryState, SourceFile,
+        MAX_TOTAL_BYTES,
     };
     use serde_json::json;
     use std::{collections::BTreeMap, fs, path::Path};
@@ -4061,6 +4093,27 @@ mod tests {
     fn rejects_parent_relative_paths() {
         assert!(safe_relative_text(Path::new("../outside.dll")).is_err());
         assert!(safe_relative_text(Path::new("mods/example.dll")).is_ok());
+    }
+
+    #[test]
+    fn normalizes_safe_windows_zip_separators() {
+        let (path, directory) = normalized_zip_entry_path("bin\\dc1\\").unwrap().unwrap();
+        assert_eq!(path, Path::new("bin/dc1"));
+        assert!(directory);
+
+        let (path, directory) = normalized_zip_entry_path("bin\\dc1\\mod.dll")
+            .unwrap()
+            .unwrap();
+        assert_eq!(path, Path::new("bin/dc1/mod.dll"));
+        assert!(!directory);
+    }
+
+    #[test]
+    fn rejects_unsafe_windows_zip_paths_after_normalization() {
+        assert!(normalized_zip_entry_path("..\\outside.dll").is_err());
+        assert!(normalized_zip_entry_path("C:\\outside.dll").is_err());
+        assert!(normalized_zip_entry_path("\\\\server\\share\\mod.dll").is_err());
+        assert!(normalized_zip_entry_path("bin\\\\mod.dll").is_err());
     }
 
     #[test]

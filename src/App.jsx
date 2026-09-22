@@ -14,6 +14,7 @@ import UpdateNotification from "./components/UpdateNotification";
 import LibraryAnalysisPanel from "./components/LibraryAnalysisPanel";
 import SettingsScreen from "./components/SettingsScreen";
 import GameLoadingOverlay from "./components/GameLoadingOverlay";
+import NxmLinkNotification from "./components/NxmLinkNotification";
 
 import {
   gameMatchesLauncher,
@@ -4235,6 +4236,25 @@ onAnalyzeRemaining={
           }
         />
       ) : null}
+
+      <NxmLinkNotification
+        games={
+          games
+        }
+        selectedGame={
+          selectedGame
+        }
+        onSelectGame={
+          (game) => {
+            setActiveView(
+              "library"
+            );
+            selectGame(
+              game
+            );
+          }
+        }
+      />
 
 
     </div>

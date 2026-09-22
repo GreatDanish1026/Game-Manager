@@ -55,7 +55,8 @@ export function lookupNexusMod(
 export function downloadNexusFile(
   game,
   metadata,
-  file
+  file,
+  nxmUrl = null
 ) {
   return invoke(
     "download_nexus_file",
@@ -70,6 +71,42 @@ export function downloadNexusFile(
         fileName:
           file.fileName
           || `${metadata.name || "Nexus Mod"}-${file.fileId}.zip`,
+        nxmUrl,
+      },
+    }
+  );
+}
+
+
+export function inspectNxmLink(
+  nxmUrl
+) {
+  return invoke(
+    "inspect_nxm_link",
+    {
+      request: {
+        nxmUrl,
+      },
+    }
+  );
+}
+
+
+export function getPendingNxmLinks() {
+  return invoke(
+    "get_pending_nxm_links"
+  );
+}
+
+
+export function dismissNxmLink(
+  nxmUrl
+) {
+  return invoke(
+    "dismiss_nxm_link",
+    {
+      request: {
+        nxmUrl,
       },
     }
   );
