@@ -1,6 +1,6 @@
 [package]
 name = "GameManager"
-version = "2.4.0"
+version = "2.5.0"
 description = "A do-it-all gaming app for Windows and Linux."
 authors = ["Scott Dinwiddie"]
 edition = "2021"
