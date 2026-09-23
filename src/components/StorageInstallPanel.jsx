@@ -44,7 +44,7 @@ function formatBytes(
     )
     || bytes < 0
   ) {
-    return "Unknown";
+    return "Not available";
   }
 
   if (bytes === 0) {
@@ -347,6 +347,7 @@ function PathStorageCard({
 
 export default function StorageInstallPanel({
   game,
+  isLinux = false,
 }) {
   const [
     installation,
@@ -444,7 +445,9 @@ export default function StorageInstallPanel({
     ?? {};
 
   const usedDriveBytes =
-    Number.isFinite(
+    storage.driveTotalBytes != null
+    && storage.driveFreeBytes != null
+    && Number.isFinite(
       Number(
         storage.driveTotalBytes
       )
@@ -627,10 +630,10 @@ export default function StorageInstallPanel({
 
         <MetricCard
           icon={HardDrive}
-          label="Install Drive"
+          label={isLinux ? "Install Filesystem" : "Install Drive"}
           value={
             storage.driveRoot
-            ?? "Unknown"
+            ?? "Not available"
           }
           detail={
             storage.driveFreeBytes != null
@@ -645,7 +648,7 @@ export default function StorageInstallPanel({
           value={
             driveUsagePercent != null
               ? `${driveUsagePercent.toFixed(1)}% used`
-              : "Unknown"
+              : "Not available"
           }
           detail={
             usedDriveBytes != null

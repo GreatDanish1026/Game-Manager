@@ -4255,9 +4255,6 @@ onAnalyzeRemaining={
         games={
           games
         }
-        selectedGame={
-          selectedGame
-        }
         onSelectGame={
           (game) => {
             setActiveView(

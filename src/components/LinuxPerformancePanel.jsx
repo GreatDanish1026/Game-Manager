@@ -1,10 +1,17 @@
 import SteamLaunchOptionsPanel from "./SteamLaunchOptionsPanel";
+import LinuxDependencyNotice, {
+  LINUX_DEPENDENCIES,
+} from "./LinuxDependencyNotice";
+import LinuxActionStatus from "./LinuxActionStatus";
 import {
+  Activity,
   CheckCircle2,
   Copy,
   Gauge,
   RefreshCw,
   RotateCcw,
+  ShieldCheck,
+  TimerReset,
   TriangleAlert,
 } from "lucide-react";
 
@@ -16,11 +23,113 @@ import {
 
 import {
   buildLinuxLaunchOptions,
+  defaultLinuxPerformanceSettings,
   getLinuxPerformanceCapabilities,
   getLinuxPerformanceSettings,
   resetLinuxPerformanceSettings,
   saveLinuxPerformanceSettings,
 } from "../services/linuxPerformance";
+
+
+const PERFORMANCE_PRESETS = [
+  {
+    id: "compatibility",
+    icon: ShieldCheck,
+    name: "Compatibility first",
+    description: "No wrappers or experimental environment flags. Best when diagnosing a launch problem.",
+  },
+  {
+    id: "balanced",
+    icon: Gauge,
+    name: "Balanced",
+    description: "Use GameMode for the game session without changing display, HDR, or runtime behavior.",
+  },
+  {
+    id: "smooth-60",
+    icon: TimerReset,
+    name: "Smooth 60 FPS",
+    description: "Apply a 60 FPS limit with an installed limiter. HDR, scaling, and Wine-Wayland stay off.",
+  },
+  {
+    id: "monitor",
+    icon: Activity,
+    name: "Performance monitor",
+    description: "Show MangoHud's compact FPS view and use GameMode when available.",
+  },
+];
+
+
+function settingsForPreset(
+  id,
+  capabilities
+) {
+  const defaults =
+    defaultLinuxPerformanceSettings();
+  const mangoHud =
+    Boolean(capabilities?.mangoHud?.available);
+  const gameMode =
+    Boolean(capabilities?.gameMode?.available);
+  const gamescope =
+    Boolean(capabilities?.gamescope?.available);
+
+  if (id === "balanced") {
+    return gameMode
+      ? {
+          ...defaults,
+          gameModeEnabled: true,
+        }
+      : null;
+  }
+
+  if (id === "smooth-60") {
+    if (gamescope) {
+      return {
+        ...defaults,
+        gameModeEnabled: gameMode,
+        gamescopeEnabled: true,
+        fpsLimit: 60,
+      };
+    }
+
+    if (mangoHud) {
+      return {
+        ...defaults,
+        gameModeEnabled: gameMode,
+        mangoHudEnabled: true,
+        mangoHudFpsOnly: true,
+        fpsLimit: 60,
+        fpsLimitMethod: "early",
+      };
+    }
+
+    return null;
+  }
+
+  if (id === "monitor") {
+    return mangoHud
+      ? {
+          ...defaults,
+          gameModeEnabled: gameMode,
+          mangoHudEnabled: true,
+          mangoHudFpsOnly: true,
+        }
+      : null;
+  }
+
+  return defaults;
+}
+
+
+function settingsMatch(
+  left,
+  right
+) {
+  return Object.keys(
+    defaultLinuxPerformanceSettings()
+  ).every(
+    (key) => left[key] === right[key]
+  );
+}
 
 function normalizedStore(
   game
@@ -66,6 +175,9 @@ function launchOptionGuidance(
 function ToolStatus({
   label,
   tool,
+  dependency,
+  detecting = false,
+  onRefresh,
 }) {
   const available =
     Boolean(
@@ -96,6 +208,10 @@ function ToolStatus({
               w-4
               text-emerald-400
             "
+          />
+        ) : detecting ? (
+          <RefreshCw
+            className="h-4 w-4 animate-spin text-white/30"
           />
         ) : (
           <TriangleAlert
@@ -131,11 +247,25 @@ function ToolStatus({
           ?? ""
         }
       >
-        {available
+        {detecting
+          ? "Checking…"
+          : available
           ? tool?.version
             || "Installed"
           : "Not detected"}
       </div>
+
+      {!available
+      && !detecting ? (
+        <div className="mt-2.5">
+          <LinuxDependencyNotice
+            dependency={dependency}
+            onRefresh={onRefresh}
+            refreshing={detecting}
+            compact
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -151,6 +281,9 @@ function ToggleRow({
   return (
     <button
       type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-disabled={disabled}
       onClick={
         () => {
           if (!disabled) {
@@ -358,6 +491,31 @@ export default function LinuxPerformancePanel({
       ]
     );
 
+  const activePreset =
+    useMemo(
+      () =>
+        PERFORMANCE_PRESETS.find(
+          (preset) => {
+            const presetSettings =
+              settingsForPreset(
+                preset.id,
+                capabilities
+              );
+
+            return presetSettings
+              && settingsMatch(
+                settings,
+                presetSettings
+              );
+          }
+        )?.id
+        ?? null,
+      [
+        capabilities,
+        settings,
+      ]
+    );
+
 
   if (
     !loading
@@ -426,6 +584,36 @@ export default function LinuxPerformancePanel({
   }
 
 
+  function applyPreset(
+    preset
+  ) {
+    const next =
+      settingsForPreset(
+        preset.id,
+        capabilities
+      );
+
+    if (!next) {
+      setError(
+        `The tools required for ${preset.name} were not detected.`
+      );
+      return;
+    }
+
+    const saved =
+      saveLinuxPerformanceSettings(
+        game,
+        next
+      );
+
+    setSettings(saved);
+    setError(null);
+    setMessage(
+      `${preset.name} preset applied. Review the generated launch options before saving them to your launcher.`
+    );
+  }
+
+
   const mangoAvailable =
     Boolean(
       capabilities
@@ -450,7 +638,10 @@ export default function LinuxPerformancePanel({
 
   return (
     <div
+      id="linux-performance-controls"
+      aria-busy={loading}
       className="
+        scroll-mt-20
         space-y-5
       "
     >
@@ -555,38 +746,89 @@ export default function LinuxPerformancePanel({
       </div>
 
 
-      {error ? (
-        <div
-          className="
-            rounded-xl
-            border
-            border-red-500/20
-            bg-red-500/[0.06]
-            p-3
-            text-xs
-            text-red-200/70
-          "
-        >
-          {error}
-        </div>
-      ) : null}
+      <LinuxActionStatus
+        type="error"
+        message={error}
+      />
+
+      <LinuxActionStatus
+        type="success"
+        message={message}
+      />
 
 
-      {message ? (
-        <div
-          className="
-            rounded-xl
-            border
-            border-emerald-500/15
-            bg-emerald-500/[0.05]
-            p-3
-            text-xs
-            text-emerald-100/60
-          "
-        >
-          {message}
+      <section
+        aria-labelledby="linux-performance-presets"
+        className="rounded-xl border border-white/[0.08] bg-black/10 p-4"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div
+              id="linux-performance-presets"
+              className="text-sm font-semibold text-white/75"
+            >
+              Safe starting points
+            </div>
+            <div className="mt-1 max-w-3xl text-xs leading-relaxed text-white/35">
+              Presets replace the GameAtlas settings below, never existing launcher options. Experimental HDR, scaling, resolution, and Wine-Wayland settings remain off.
+            </div>
+          </div>
+
+          <span className="rounded-full border border-white/[0.08] bg-white/[0.025] px-2.5 py-1 text-[10px] font-semibold text-white/40">
+            {activePreset
+              ? PERFORMANCE_PRESETS.find((preset) => preset.id === activePreset)?.name
+              : "Custom settings"}
+          </span>
         </div>
-      ) : null}
+
+        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4">
+          {PERFORMANCE_PRESETS.map((preset) => {
+            const PresetIcon = preset.icon;
+            const available = Boolean(
+              settingsForPreset(
+                preset.id,
+                capabilities
+              )
+            );
+            const selected =
+              activePreset === preset.id;
+
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                disabled={loading || !available}
+                onClick={() => applyPreset(preset)}
+                className={`rounded-xl border p-3 text-left transition ${
+                  selected
+                    ? "border-cyan-400/25 bg-cyan-500/[0.08]"
+                    : "border-white/[0.07] bg-white/[0.02] hover:border-white/15 hover:bg-white/[0.045]"
+                } disabled:cursor-not-allowed disabled:opacity-35`}
+              >
+                <div className="flex items-center gap-2">
+                  <PresetIcon className={`h-4 w-4 ${selected ? "text-cyan-300" : "text-white/35"}`} />
+                  <span className="text-xs font-semibold text-white/75">
+                    {preset.name}
+                  </span>
+                  {selected ? (
+                    <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-emerald-300" />
+                  ) : null}
+                </div>
+
+                <div className="mt-2 text-[11px] leading-relaxed text-white/35">
+                  {preset.description}
+                </div>
+
+                {!loading && !available ? (
+                  <div className="mt-2 text-[10px] font-medium text-amber-200/60">
+                    Required tool not detected
+                  </div>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
 
       <div
@@ -602,6 +844,9 @@ export default function LinuxPerformancePanel({
           tool={
             capabilities?.mangoHud
           }
+          dependency={LINUX_DEPENDENCIES.mangohud}
+          detecting={loading}
+          onRefresh={refreshCapabilities}
         />
 
         <ToolStatus
@@ -609,6 +854,9 @@ export default function LinuxPerformancePanel({
           tool={
             capabilities?.gameMode
           }
+          dependency={LINUX_DEPENDENCIES.gamemode}
+          detecting={loading}
+          onRefresh={refreshCapabilities}
         />
 
         <ToolStatus
@@ -616,6 +864,9 @@ export default function LinuxPerformancePanel({
           tool={
             capabilities?.gamescope
           }
+          dependency={LINUX_DEPENDENCIES.gamescope}
+          detecting={loading}
+          onRefresh={refreshCapabilities}
         />
       </div>
 

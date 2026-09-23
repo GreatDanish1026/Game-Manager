@@ -10,7 +10,11 @@ import {
   ChevronUp,
   CircleCheck,
   CircleX,
+  FolderOpen,
+  Gauge,
+  LifeBuoy,
   RefreshCcw,
+  Settings2,
   Wrench,
 } from "lucide-react";
 
@@ -33,6 +37,10 @@ import {
 
 import ProtonTroubleshootingPanel from "./ProtonTroubleshootingPanel";
 import ProtonToolboxSummary from "./ProtonToolboxSummary";
+import LinuxDependencyNotice, {
+  LINUX_DEPENDENCIES,
+} from "./LinuxDependencyNotice";
+import LinuxActionStatus from "./LinuxActionStatus";
 
 import {
   createPrefixBackup,
@@ -128,6 +136,85 @@ function StatusRow({
   );
 }
 
+
+function ToolboxTaskSection({
+  id,
+  icon: Icon,
+  title,
+  description,
+  summary,
+  defaultOpen = false,
+  children,
+}) {
+  const [isOpen, setIsOpen] =
+    useState(defaultOpen);
+
+  useEffect(() => {
+    function handleOpenTask(event) {
+      if (event.detail?.id === id) {
+        setIsOpen(true);
+      }
+    }
+
+    window.addEventListener(
+      "gameatlas-open-proton-task",
+      handleOpenTask
+    );
+
+    return () => {
+      window.removeEventListener(
+        "gameatlas-open-proton-task",
+        handleOpenTask
+      );
+    };
+  }, [id]);
+
+  return (
+    <details
+      id={id}
+      open={isOpen}
+      onToggle={(event) => {
+        setIsOpen(
+          event.currentTarget.open
+        );
+      }}
+      className="group scroll-mt-20 rounded-xl border border-white/[0.08] bg-white/[0.02]"
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3.5 marker:hidden">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-300">
+          <Icon className="h-4 w-4" />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-white/80">
+              {title}
+            </span>
+
+            {summary ? (
+              <span className="rounded-full border border-white/[0.08] bg-black/15 px-2 py-0.5 text-[10px] text-white/35">
+                {summary}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="mt-0.5 text-[11px] leading-relaxed text-white/35">
+            {description}
+          </div>
+        </div>
+
+        <ChevronDown className="h-4 w-4 shrink-0 text-white/30 transition group-open:rotate-180" />
+      </summary>
+
+      <div className="border-t border-white/[0.06] p-3 md:p-4">
+        <div className="space-y-3">
+          {children}
+        </div>
+      </div>
+    </details>
+  );
+}
+
 export default function ProtonToolboxPanel({
   game,
 }) {
@@ -197,6 +284,14 @@ export default function ProtonToolboxPanel({
   });
 
   async function loadActions() {
+    setActionState(
+      (current) => ({
+        ...current,
+        loading: true,
+        error: null,
+      })
+    );
+
     try {
       const capabilities =
         await getProtonToolActions();
@@ -726,6 +821,42 @@ export default function ProtonToolboxPanel({
       ]
     );
 
+  function openTask(
+    id
+  ) {
+    const task =
+      document.getElementById(
+        id
+      );
+
+    if (!task) {
+      return;
+    }
+
+    window.dispatchEvent(
+      new CustomEvent(
+        "gameatlas-open-proton-task",
+        {
+          detail: {
+            id,
+          },
+        }
+      )
+    );
+
+    window.setTimeout(() => {
+      task.scrollIntoView({
+        behavior:
+          window.matchMedia?.(
+            "(prefers-reduced-motion: reduce)"
+          ).matches
+            ? "auto"
+            : "smooth",
+        block: "start",
+      });
+    }, 50);
+  }
+
   if (
     !state.loading
     && state.data
@@ -750,7 +881,11 @@ export default function ProtonToolboxPanel({
   }
 
   return (
-    <div className="space-y-3">
+    <div
+      id="linux-proton-toolbox"
+      aria-busy={state.loading || Boolean(actionState.busy) || Boolean(maintenanceState.busy) || overrideState.busy}
+      className="scroll-mt-20 space-y-3"
+    >
       <div
         className="
           flex
@@ -784,11 +919,11 @@ export default function ProtonToolboxPanel({
 
           <div className="min-w-0">
             <div className="text-sm font-semibold text-white/85">
-              Proton environment
+              Proton Toolbox
             </div>
 
             <div className="mt-0.5 text-[11px] text-white/35">
-              Prefix discovery, active runtime, and installed compatibility tools
+              Check the current setup, open tools, change Proton versions, or recover the prefix
             </div>
           </div>
         </div>
@@ -818,6 +953,7 @@ export default function ProtonToolboxPanel({
             disabled:opacity-40
           "
           title="Refresh Proton information"
+          aria-label="Refresh Proton information"
         >
           <RefreshCcw
             className={`
@@ -833,44 +969,102 @@ export default function ProtonToolboxPanel({
         </button>
       </div>
 
-      {state.error ? (
+      {!state.loading
+      && state.data ? (
         <div
-          className="
-            rounded-xl
-            border
-            border-red-500/20
-            bg-red-500/[0.05]
-            px-4
-            py-3
-            text-xs
-            leading-relaxed
-            text-red-200/75
-          "
+          className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4"
+          aria-label="Proton Toolbox tasks"
         >
-          {state.error}
+          {[
+            {
+              id: "proton-task-environment",
+              icon: Gauge,
+              title: "Check my setup",
+              detail:
+                state.data.runtimeInUse?.name
+                ?? "Runtime not detected",
+            },
+            {
+              id: "proton-task-tools",
+              icon: FolderOpen,
+              title: "Open tools & folders",
+              detail:
+                state.data.prefix?.exists
+                  ? "Prefix detected"
+                  : "Prefix not detected",
+            },
+            {
+              id: "proton-task-recovery",
+              icon: LifeBuoy,
+              title: "Diagnose & recover",
+              detail:
+                prefixBackups.length === 1
+                  ? "1 prefix backup"
+                  : `${prefixBackups.length} prefix backups`,
+            },
+            {
+              id: "proton-task-runtime",
+              icon: Settings2,
+              title: "Change Proton version",
+              detail: `${installedVersions.length} installed`,
+            },
+          ].map((task) => (
+            <button
+              key={task.id}
+              type="button"
+              onClick={() => openTask(task.id)}
+              className="flex items-center gap-3 rounded-xl border border-white/[0.08] bg-black/10 px-3 py-3 text-left transition hover:border-cyan-400/20 hover:bg-cyan-500/[0.045]"
+            >
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.04] text-cyan-300/80">
+                <task.icon className="h-4 w-4" />
+              </div>
+
+              <div className="min-w-0">
+                <div className="text-xs font-semibold text-white/70">
+                  {task.title}
+                </div>
+                <div className="mt-0.5 truncate text-[10px] text-white/30">
+                  {task.detail}
+                </div>
+              </div>
+            </button>
+          ))}
         </div>
       ) : null}
 
+      <LinuxActionStatus
+        type="error"
+        message={state.error}
+      />
+
       {state.loading ? (
-        <div
-          className="
-            rounded-xl
-            border
-            border-white/[0.07]
-            bg-white/[0.02]
-            px-4
-            py-4
-            text-xs
-            text-white/35
-          "
-        >
-          Inspecting Proton environment…
-        </div>
+        <LinuxActionStatus
+          type="loading"
+          message="Inspecting Proton environment…"
+        />
       ) : null}
 
       {!state.loading
       && state.data ? (
         <>
+          <ToolboxTaskSection
+            id="proton-task-environment"
+            icon={Gauge}
+            title="Check my setup"
+            description="Confirm the launcher, active compatibility runtime, and prefix GameAtlas detected."
+            summary={
+              state.data.prefix?.exists
+                ? "Prefix detected"
+                : "Needs review"
+            }
+            defaultOpen
+          >
+            <ProtonToolboxSummary
+              game={game}
+              toolbox={state.data}
+              onUseRuntime={useRuntimeFromHistory}
+            />
+
           <div
             className="
               rounded-xl
@@ -1018,6 +1212,21 @@ export default function ProtonToolboxPanel({
             />
           </div>
 
+          </ToolboxTaskSection>
+
+          <ToolboxTaskSection
+            id="proton-task-tools"
+            icon={FolderOpen}
+            title="Open tools & folders"
+            description="Browse the current prefix or launch configuration utilities without changing it automatically."
+            summary={
+              actionState.loading
+                ? "Checking tools"
+                : actionState.capabilities?.protontricksAvailable
+                  ? "Protontricks available"
+                  : "Basic actions"
+            }
+          >
           <div
             className="
               rounded-xl
@@ -1029,7 +1238,7 @@ export default function ProtonToolboxPanel({
             "
           >
             <div className="text-xs font-semibold text-white/75">
-              Safe actions
+              Quick actions
             </div>
 
             <div className="mt-1 text-[11px] text-white/30">
@@ -1290,43 +1499,72 @@ export default function ProtonToolboxPanel({
               </div>
             ) : null}
 
-            {actionState.error ? (
-              <div
-                className="
-                  mt-3
-                  rounded-lg
-                  border
-                  border-red-500/15
-                  bg-red-500/[0.04]
-                  px-3
-                  py-2
-                  text-xs
-                  text-red-200/70
-                "
-              >
-                {actionState.error}
+            {!actionState.loading
+            && actionState.capabilities
+            && (
+              !actionState.capabilities.protontricksAvailable
+              || (
+                !state.data.steamAppId
+                && state.data.prefix?.prefixPath
+                && !actionState.capabilities.winetricksAvailable
+              )
+            ) ? (
+              <div className="mt-3 grid grid-cols-1 gap-2 xl:grid-cols-2">
+                {!actionState.capabilities.protontricksAvailable ? (
+                  <LinuxDependencyNotice
+                    dependency={LINUX_DEPENDENCIES.protontricks}
+                    onRefresh={loadActions}
+                    refreshing={actionState.loading}
+                    compact
+                  />
+                ) : null}
+
+                {!state.data.steamAppId
+                && state.data.prefix?.prefixPath
+                && !actionState.capabilities.winetricksAvailable ? (
+                  <LinuxDependencyNotice
+                    dependency={LINUX_DEPENDENCIES.winetricks}
+                    onRefresh={loadActions}
+                    refreshing={actionState.loading}
+                    compact
+                  />
+                ) : null}
               </div>
             ) : null}
 
-            {actionState.message ? (
-              <div
-                className="
-                  mt-3
-                  rounded-lg
-                  border
-                  border-emerald-500/15
-                  bg-emerald-500/[0.04]
-                  px-3
-                  py-2
-                  text-xs
-                  text-emerald-200/65
-                "
-              >
-                {actionState.message}
-              </div>
-            ) : null}
+            <LinuxActionStatus
+              type="error"
+              message={actionState.error}
+              className="mt-3"
+            />
+
+            <LinuxActionStatus
+              type="success"
+              message={actionState.message}
+              className="mt-3"
+            />
           </div>
 
+          </ToolboxTaskSection>
+
+
+          <ToolboxTaskSection
+            id="proton-task-recovery"
+            icon={LifeBuoy}
+            title="Diagnose & recover"
+            description="Inspect common Proton problems, preserve a working state, and repair the prefix when needed."
+            summary={
+              prefixBackups.length === 1
+                ? "1 backup"
+                : `${prefixBackups.length} backups`
+            }
+          >
+          <ProtonTroubleshootingPanel
+            game={game}
+            toolbox={state.data}
+            onRefresh={refresh}
+            onRevertRuntime={revertToLastKnownWorking}
+          />
 
           <div
             className="
@@ -1348,37 +1586,8 @@ export default function ProtonToolboxPanel({
               "
             >
               <div>
-                <ProtonToolboxSummary
-            game={
-              game
-            }
-            toolbox={
-              state.data
-            }
-            onUseRuntime={
-              useRuntimeFromHistory
-            }
-          />
-
-
-          <ProtonTroubleshootingPanel
-            game={
-              game
-            }
-            toolbox={
-              state.data
-            }
-            onRefresh={
-              refresh
-            }
-            onRevertRuntime={
-              revertToLastKnownWorking
-            }
-          />
-
-
-          <div className="text-xs font-semibold text-white/80">
-                  Prefix maintenance
+                <div className="text-xs font-semibold text-white/80">
+                  Prefix backup & recovery
                 </div>
 
                 <div className="mt-1 text-[11px] leading-relaxed text-white/30">
@@ -1543,7 +1752,7 @@ export default function ProtonToolboxPanel({
                   disabled:opacity-30
                 "
               >
-                Back Up Prefix
+                Create Prefix Backup
               </button>
             </div>
 
@@ -1746,54 +1955,33 @@ export default function ProtonToolboxPanel({
               </div>
             </div>
 
-            {maintenanceState.error ? (
-              <div
-                className="
-                  mt-3
-                  rounded-lg
-                  border
-                  border-red-500/15
-                  bg-red-500/[0.04]
-                  px-3
-                  py-2
-                  text-xs
-                  leading-relaxed
-                  text-red-200/70
-                "
-              >
-                {maintenanceState.error}
-              </div>
-            ) : null}
+            <LinuxActionStatus
+              type="error"
+              message={maintenanceState.error}
+              className="mt-3"
+            />
 
-            {maintenanceState.message ? (
-              <div
-                className="
-                  mt-3
-                  rounded-lg
-                  border
-                  border-emerald-500/15
-                  bg-emerald-500/[0.04]
-                  px-3
-                  py-2
-                  text-xs
-                  leading-relaxed
-                  text-emerald-200/70
-                "
-              >
-                <div>
-                  {maintenanceState.message}
-                </div>
-
-                {maintenanceState.safetyBackupPath ? (
-                  <div className="mt-1 break-all text-[10px] text-white/30">
-                    Backup: {maintenanceState.safetyBackupPath}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+            <LinuxActionStatus
+              type="success"
+              message={maintenanceState.message}
+              details={maintenanceState.safetyBackupPath
+                ? `Backup: ${maintenanceState.safetyBackupPath}`
+                : null
+              }
+              className="mt-3"
+            />
           </div>
 
+          </ToolboxTaskSection>
 
+
+          <ToolboxTaskSection
+            id="proton-task-runtime"
+            icon={Settings2}
+            title="Change Proton version"
+            description="Choose a per-game compatibility tool, return to the launcher default, or review installed versions."
+            summary={`${installedVersions.length} installed`}
+          >
           <div
             className="
               rounded-xl
@@ -1805,7 +1993,7 @@ export default function ProtonToolboxPanel({
             "
           >
             <div className="text-xs font-semibold text-white/80">
-              Runtime override
+              Proton version for this game
             </div>
 
             <div className="mt-1 text-[11px] leading-relaxed text-white/30">
@@ -1899,7 +2087,7 @@ export default function ProtonToolboxPanel({
                   disabled:opacity-35
                 "
               >
-                Apply Override
+                Use Selected Version
               </button>
 
               <button
@@ -1927,7 +2115,7 @@ export default function ProtonToolboxPanel({
                   disabled:opacity-35
                 "
               >
-                Clear Override
+                Use Launcher Default
               </button>
             </div>
 
@@ -1935,51 +2123,21 @@ export default function ProtonToolboxPanel({
               Steam updates CompatToolMapping. Heroic updates the matched game Wine/Proton setting. Lutris updates wine.version.
             </div>
 
-            {overrideState.error ? (
-              <div
-                className="
-                  mt-3
-                  rounded-lg
-                  border
-                  border-red-500/15
-                  bg-red-500/[0.04]
-                  px-3
-                  py-2
-                  text-xs
-                  leading-relaxed
-                  text-red-200/70
-                "
-              >
-                {overrideState.error}
-              </div>
-            ) : null}
+            <LinuxActionStatus
+              type="error"
+              message={overrideState.error}
+              className="mt-3"
+            />
 
-            {overrideState.message ? (
-              <div
-                className="
-                  mt-3
-                  rounded-lg
-                  border
-                  border-emerald-500/15
-                  bg-emerald-500/[0.04]
-                  px-3
-                  py-2
-                  text-xs
-                  leading-relaxed
-                  text-emerald-200/70
-                "
-              >
-                <div>
-                  {overrideState.message}
-                </div>
-
-                {overrideState.backupPath ? (
-                  <div className="mt-1 break-all text-[10px] text-white/30">
-                    Backup: {overrideState.backupPath}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+            <LinuxActionStatus
+              type="success"
+              message={overrideState.message}
+              details={overrideState.backupPath
+                ? `Backup: ${overrideState.backupPath}`
+                : null
+              }
+              className="mt-3"
+            />
           </div>
 
 
@@ -2000,6 +2158,8 @@ export default function ProtonToolboxPanel({
                       !current
                   )
               }
+              aria-expanded={showVersions}
+              aria-controls="proton-installed-versions"
               className="
                 flex
                 w-full
@@ -2014,7 +2174,7 @@ export default function ProtonToolboxPanel({
               <div>
                 <div className="flex items-center gap-2 text-xs font-semibold text-white/75">
                   <Box className="h-3.5 w-3.5 text-cyan-300/75" />
-                  Installed compatibility tools
+                  Installed Proton versions
                 </div>
 
                 <div className="mt-1 text-[11px] text-white/30">
@@ -2033,7 +2193,10 @@ export default function ProtonToolboxPanel({
             </button>
 
             {showVersions ? (
-              <div className="border-t border-white/[0.06] px-4 py-3">
+              <div
+                id="proton-installed-versions"
+                className="border-t border-white/[0.06] px-4 py-3"
+              >
                 {installedVersions.length ===
                 0 ? (
                   <div className="text-xs text-white/35">
@@ -2091,6 +2254,8 @@ export default function ProtonToolboxPanel({
               </div>
             ) : null}
           </div>
+
+          </ToolboxTaskSection>
 
           {state.data.notes
             ?.length ? (

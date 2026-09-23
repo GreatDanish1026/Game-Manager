@@ -58,10 +58,14 @@ export function downloadNexusFile(
   file,
   nxmUrl = null
 ) {
+  const randomPart = globalThis.crypto?.randomUUID?.()
+    ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const downloadId = `nexus-${file.fileId}-${randomPart}`;
   return invoke(
     "download_nexus_file",
     {
       request: {
+        downloadId,
         gameName:
           game?.name
           ?? "Unknown Game",
@@ -72,6 +76,37 @@ export function downloadNexusFile(
           file.fileName
           || `${metadata.name || "Nexus Mod"}-${file.fileId}.zip`,
         nxmUrl,
+      },
+    }
+  ).catch(
+    (error) => {
+      window.dispatchEvent(
+        new CustomEvent(
+          "gameatlas:nexus-download-stage",
+          {
+            detail: {
+              downloadId,
+              phase: String(error).toLowerCase().includes("download canceled")
+                ? "canceled"
+                : "failed",
+            },
+          }
+        )
+      );
+      throw error;
+    }
+  );
+}
+
+
+export function cancelNexusDownload(
+  downloadId
+) {
+  return invoke(
+    "cancel_nexus_download",
+    {
+      request: {
+        downloadId,
       },
     }
   );

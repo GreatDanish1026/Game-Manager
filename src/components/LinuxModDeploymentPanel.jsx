@@ -4,16 +4,20 @@ import {
   ArrowUp,
   CheckCircle2,
   Download,
+  ExternalLink,
   FileArchive,
   Folder,
   FolderInput,
   FolderOpen,
+  GitMerge,
+  List,
   Loader2,
   PackagePlus,
   Power,
   RefreshCw,
   ShieldCheck,
   Trash2,
+  UserRoundCog,
   Wrench,
 } from "lucide-react";
 import {
@@ -50,6 +54,10 @@ import {
 } from "../services/pathActions";
 
 import NexusIntegrationPanel from "./NexusIntegrationPanel";
+import LinuxDependencyNotice, {
+  LINUX_DEPENDENCIES,
+} from "./LinuxDependencyNotice";
+import LinuxActionStatus from "./LinuxActionStatus";
 
 import {
   checkNexusModUpdates,
@@ -125,6 +133,52 @@ function remainingNexusQuota(
 }
 
 
+function announceNexusDownloadStage(
+  downloadId,
+  phase
+) {
+  if (!downloadId) {
+    return;
+  }
+  window.dispatchEvent(
+    new CustomEvent(
+      "gameatlas:nexus-download-stage",
+      {
+        detail: {
+          downloadId,
+          phase,
+        },
+      }
+    )
+  );
+}
+
+
+function focusDeploymentPreview() {
+  window.requestAnimationFrame(
+    () => window.requestAnimationFrame(
+      () => {
+        const target = document.getElementById(
+          "linux-mod-deployment-preview"
+        );
+        target?.scrollIntoView({
+          behavior:
+            window.matchMedia?.(
+              "(prefers-reduced-motion: reduce)"
+            ).matches
+              ? "auto"
+              : "smooth",
+          block: "start",
+        });
+        target?.focus({
+          preventScroll: true,
+        });
+      }
+    )
+  );
+}
+
+
 function NexusUpdateStatus({
   deployment,
   update,
@@ -132,6 +186,7 @@ function NexusUpdateStatus({
   busy,
   action,
   onSelect,
+  onReview,
 }) {
   if (!update) {
     return null;
@@ -139,14 +194,22 @@ function NexusUpdateStatus({
   if (update.status === "current") {
     return (
       <div className="mt-2 text-[10px] text-emerald-100/38">
-        Nexus check: no newer compatible files found.
+        Nexus check: no newer supported archives were found in the installed file&apos;s category.
       </div>
     );
   }
   if (update.status === "current-file-missing") {
     return (
       <div className="mt-2 rounded-md border border-amber-400/10 bg-amber-400/[0.035] px-2.5 py-2 text-[10px] leading-relaxed text-amber-100/45">
-        {update.message}
+        <div>{update.message}</div>
+        <button
+          type="button"
+          onClick={() => onReview(update, null)}
+          className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-300/15 px-2.5 py-1.5 text-[9px] font-semibold text-amber-100/55 hover:bg-amber-300/[0.06]"
+        >
+          <ExternalLink className="h-3 w-3" />
+          Review mod on Nexus
+        </button>
       </div>
     );
   }
@@ -154,50 +217,77 @@ function NexusUpdateStatus({
   return (
     <div className="mt-2 rounded-lg border border-violet-400/15 bg-violet-400/[0.04] p-2.5">
       <div className="text-[10px] font-semibold uppercase tracking-wide text-violet-100/55">
-        Nexus update candidates
+        Newer files in the same Nexus category
       </div>
       <div className="mt-1 text-[10px] leading-relaxed text-white/30">
-        Review the filename and category before replacing the current payload. GameAtlas does not assume that every newer upload is the same mod variant.
+        {update.message}
       </div>
-      <div className="mt-2 space-y-1.5">
-        {update.candidates.slice(0, 3).map((candidate) => (
+      {update.currentFile ? (
+        <div className="mt-2 rounded-md border border-cyan-300/10 bg-cyan-300/[0.025] px-2.5 py-2">
+          <div className="text-[9px] font-semibold uppercase tracking-wide text-cyan-100/45">
+            Installed Nexus file
+          </div>
+          <div className="mt-1 break-words text-[10px] font-semibold text-white/48">
+            {update.currentFile.name || `File ${update.currentFile.fileId}`}
+          </div>
+          <div className="mt-0.5 break-all font-mono text-[9px] text-white/28">
+            {update.currentFile.fileName || "Filename unavailable"}
+          </div>
+          <div className="mt-1 text-[9px] text-white/25">
+            {update.currentFile.categoryName || "Uncategorized"} · {update.currentFile.version ? `v${update.currentFile.version} · ` : ""}{formatBytes(update.currentFile.sizeBytes)} · uploaded {formatDate(update.currentFile.uploadedUnix)}
+          </div>
+        </div>
+      ) : null}
+      <div className="mt-2 max-h-80 space-y-1.5 overflow-y-auto pr-1">
+        {update.candidates.map((candidate) => (
           <div
             key={candidate.fileId}
             className="flex min-w-0 flex-col gap-2 rounded-md border border-white/[0.06] bg-black/10 px-2.5 py-2"
           >
             <div className="min-w-0">
-              <div className="truncate text-[10px] font-semibold text-white/50">
+              <div className="break-words text-[10px] font-semibold text-white/50">
                 {candidate.name || candidate.fileName}
               </div>
+              <div className="mt-0.5 break-all font-mono text-[9px] text-white/28">
+                {candidate.fileName || "Filename unavailable"}
+              </div>
               <div className="mt-0.5 text-[9px] text-white/25">
-                {candidate.categoryName || "Uncategorized"} · {candidate.version ? `v${candidate.version} · ` : ""}{formatBytes(candidate.sizeBytes)} · {formatDate(candidate.uploadedUnix)}
+                {candidate.categoryName || "Uncategorized"} · {candidate.version ? `v${candidate.version} · ` : ""}{formatBytes(candidate.sizeBytes)} · uploaded {formatDate(candidate.uploadedUnix)}
+              </div>
+              <div className="mt-1 text-[9px] leading-relaxed text-amber-100/42">
+                Newer upload in the same category; compatibility is not guaranteed. Review its description and requirements on Nexus before replacing the installed file.
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => onSelect(deployment, candidate)}
-              disabled={busy}
-              className="inline-flex min-w-0 w-full items-center justify-center gap-1.5 rounded-md border border-violet-300/15 bg-violet-300/[0.06] px-2.5 py-1.5 text-center text-[9px] font-semibold leading-tight text-violet-100/60 hover:bg-violet-300/[0.10] disabled:opacity-35"
-            >
-              {action === `upgrade-${deployment.id}-${candidate.fileId}` ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : isPremium ? (
-                <Download className="h-3 w-3" />
-              ) : (
-                <FolderOpen className="h-3 w-3" />
-              )}
-              <span className="min-w-0 whitespace-normal break-words">
-                {isPremium ? "Download & prepare" : "Open download"}
-              </span>
-            </button>
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => onReview(update, candidate)}
+                className="inline-flex min-w-0 w-full items-center justify-center gap-1.5 rounded-md border border-white/10 px-2.5 py-1.5 text-center text-[9px] font-semibold text-white/45 hover:bg-white/[0.05]"
+              >
+                <ExternalLink className="h-3 w-3" />
+                Review on Nexus
+              </button>
+              <button
+                type="button"
+                onClick={() => onSelect(deployment, candidate)}
+                disabled={busy}
+                className="inline-flex min-w-0 w-full items-center justify-center gap-1.5 rounded-md border border-violet-300/15 bg-violet-300/[0.06] px-2.5 py-1.5 text-center text-[9px] font-semibold leading-tight text-violet-100/60 hover:bg-violet-300/[0.10] disabled:opacity-35"
+              >
+                {action === `upgrade-${deployment.id}-${candidate.fileId}` ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : isPremium ? (
+                  <Download className="h-3 w-3" />
+                ) : (
+                  <FolderOpen className="h-3 w-3" />
+                )}
+                <span className="min-w-0 whitespace-normal break-words">
+                  {isPremium ? "Download & prepare" : "Choose browser download"}
+                </span>
+              </button>
+            </div>
           </div>
         ))}
       </div>
-      {update.candidates.length > 3 ? (
-        <div className="mt-1.5 text-[9px] text-white/22">
-          {update.candidates.length - 3} additional candidate{update.candidates.length - 3 === 1 ? "" : "s"} available on the Nexus file page.
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -211,6 +301,10 @@ export default function LinuxModDeploymentPanel({
     status,
     setStatus,
   ] = useState(null);
+  const [
+    activeView,
+    setActiveView,
+  ] = useState("mods");
   const [
     preview,
     setPreview,
@@ -362,6 +456,7 @@ export default function LinuxModDeploymentPanel({
       setMessage(null);
       setError(null);
       setNexusUpdateReport(null);
+      setActiveView("mods");
       loadStatus();
     },
     [
@@ -447,6 +542,7 @@ export default function LinuxModDeploymentPanel({
         );
 
       if (next) {
+        setActiveView("downloads");
         setPreview(next);
         if (!upgradeTargetId) {
           setPendingNexusMetadata(null);
@@ -532,9 +628,14 @@ export default function LinuxModDeploymentPanel({
     file,
     upgradeDeployment = null,
   }) {
+    setActiveView("downloads");
     setPreparingPath(download.path);
     setMessage(null);
     setError(null);
+    announceNexusDownloadStage(
+      download.downloadId,
+      "preparing"
+    );
     try {
       const next = await prepareLinuxStagedMod(
         game,
@@ -580,7 +681,16 @@ export default function LinuxModDeploymentPanel({
           ? `${download.fileName} was downloaded and safely extracted. Review the preview, then apply the transactional upgrade to ${upgradeDeployment.name}.`
           : `${download.fileName} was downloaded and safely extracted. Review the deployment preview; its Nexus metadata will be saved when installed.`
       );
+      announceNexusDownloadStage(
+        download.downloadId,
+        "ready"
+      );
+      focusDeploymentPreview();
     } catch (prepareError) {
+      announceNexusDownloadStage(
+        download.downloadId,
+        "preparation-error"
+      );
       setError(
         `The Nexus archive was downloaded, but preparation failed: ${String(prepareError)}`
       );
@@ -618,8 +728,8 @@ export default function LinuxModDeploymentPanel({
       );
       setMessage(
         report.updateCount > 0
-          ? `Checked ${report.checkedCount} Nexus mod${report.checkedCount === 1 ? "" : "s"}; ${report.updateCount} ${report.updateCount === 1 ? "has" : "have"} newer file candidates.`
-          : `Checked ${report.checkedCount} Nexus mod${report.checkedCount === 1 ? "" : "s"}; no newer compatible files were found.`
+          ? `Checked ${report.checkedCount} Nexus mod${report.checkedCount === 1 ? "" : "s"}; ${report.updateCount} ${report.updateCount === 1 ? "has" : "have"} newer files in the installed file's category to review.`
+          : `Checked ${report.checkedCount} Nexus mod${report.checkedCount === 1 ? "" : "s"}; no newer supported archives were found in the installed files' categories.`
       );
     } catch (updateError) {
       setError(String(updateError));
@@ -630,6 +740,23 @@ export default function LinuxModDeploymentPanel({
       }
     } finally {
       setNexusUpdateAction(null);
+    }
+  }
+
+
+  async function reviewNexusUpdate(
+    update,
+    candidate
+  ) {
+    const fileTarget = candidate?.fileId
+      ? `?tab=files&file_id=${candidate.fileId}`
+      : "?tab=files";
+    try {
+      await openUrl(
+        `https://www.nexusmods.com/${update.gameDomain}/mods/${update.modId}${fileTarget}`
+      );
+    } catch (openError) {
+      setError(String(openError));
     }
   }
 
@@ -660,6 +787,7 @@ export default function LinuxModDeploymentPanel({
           `https://www.nexusmods.com/${tracked.gameDomain}/mods/${tracked.modId}?tab=files&file_id=${candidate.fileId}`
         );
         setUpgradeTargetId(deployment.id);
+        setActiveView("downloads");
         setPreview(null);
         setPendingNexusMetadata(metadata);
         setMessage(
@@ -772,6 +900,7 @@ export default function LinuxModDeploymentPanel({
   function beginUpgrade(
     deployment
   ) {
+    setActiveView("downloads");
     setUpgradeTargetId(deployment.id);
     setPreview(null);
     setModName("");
@@ -1263,10 +1392,86 @@ export default function LinuxModDeploymentPanel({
         )
     ).length
     ?? 0;
+  const enabledCount =
+    status?.deployments?.filter(
+      (deployment) => deployment.enabled
+    ).length
+    ?? 0;
+  const activeProfile =
+    status?.profiles?.find(
+      (profile) => profile.id === status.activeProfileId
+    )
+    ?? status?.profiles?.find(
+      (profile) => profile.active
+    )
+    ?? null;
+  const views = [
+    {
+      id: "mods",
+      label: "Mods",
+      icon: List,
+      count: status?.deployments?.length ?? 0,
+    },
+    {
+      id: "downloads",
+      label: "Downloads & Staging",
+      icon: Download,
+      count: status?.stagedItems?.length ?? 0,
+    },
+    {
+      id: "conflicts",
+      label: "Rules & Conflicts",
+      icon: GitMerge,
+      count: status?.totalConflictCount ?? 0,
+    },
+    {
+      id: "profiles",
+      label: "Profiles",
+      icon: UserRoundCog,
+      count: status?.profiles?.length ?? 0,
+    },
+  ];
+
+  function handleViewKeyDown(
+    event,
+    index
+  ) {
+    const keys = [
+      "ArrowLeft",
+      "ArrowRight",
+      "Home",
+      "End",
+    ];
+
+    if (!keys.includes(event.key)) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? views.length - 1
+        : event.key === "ArrowRight"
+          ? (index + 1) % views.length
+          : (index - 1 + views.length) % views.length;
+    const next = views[nextIndex];
+
+    setActiveView(next.id);
+    window.requestAnimationFrame(() => {
+      document.querySelector(
+        `[data-linux-mod-tab="${next.id}"]`
+      )?.focus();
+    });
+  }
 
 
   return (
-    <div className="mt-5 overflow-hidden rounded-xl border border-white/[0.08] bg-black/10">
+    <div
+      aria-busy={busy}
+      className="mt-5 overflow-hidden rounded-xl border border-white/[0.08] bg-black/10"
+    >
       <div className="flex flex-col gap-3 border-b border-white/[0.06] p-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-300">
@@ -1335,25 +1540,104 @@ export default function LinuxModDeploymentPanel({
       </div>
 
 
-      {error ? (
-        <div className="border-b border-red-500/10 bg-red-500/[0.04] px-4 py-3 text-xs leading-relaxed text-red-200/70">
-          {error}
+      <LinuxActionStatus
+        type="error"
+        message={error}
+        className="mx-4 mt-3"
+      />
+
+      <LinuxActionStatus
+        type="success"
+        message={message}
+        className="mx-4 mt-3"
+      />
+
+
+      <div className="border-b border-white/[0.06] bg-white/[0.015] p-4">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+          <div className="rounded-lg border border-white/[0.07] bg-black/10 px-3 py-2.5">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-white/25">
+              Active profile
+            </div>
+            <div className="mt-1 truncate text-xs font-semibold text-violet-100/65">
+              {activeProfile?.name ?? "Default"}
+            </div>
+          </div>
+          <div className="rounded-lg border border-white/[0.07] bg-black/10 px-3 py-2.5">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-white/25">
+              Enabled mods
+            </div>
+            <div className="mt-1 text-xs font-semibold text-white/65">
+              {enabledCount} of {status?.deployments?.length ?? 0}
+            </div>
+          </div>
+          <div className="rounded-lg border border-white/[0.07] bg-black/10 px-3 py-2.5">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-white/25">
+              Deployment
+            </div>
+            <div className={`mt-1 text-xs font-semibold ${status?.purged ? "text-amber-200/65" : "text-emerald-200/65"}`}>
+              {status?.purged ? "Purged · redeploy pending" : enabledCount > 0 ? "Deployed" : "No enabled mods"}
+            </div>
+          </div>
+          <div className="rounded-lg border border-white/[0.07] bg-black/10 px-3 py-2.5">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-white/25">
+              File conflicts
+            </div>
+            <div className={`mt-1 text-xs font-semibold ${status?.totalConflictCount > 0 ? "text-amber-200/65" : "text-white/65"}`}>
+              {(status?.totalConflictCount ?? 0).toLocaleString()}
+            </div>
+          </div>
         </div>
-      ) : null}
 
+        <div
+          role="tablist"
+          aria-label="Linux Mod Manager views"
+          className="mt-3 flex gap-1 overflow-x-auto rounded-xl border border-white/[0.07] bg-black/15 p-1"
+        >
+          {views.map((view) => {
+            const ViewIcon = view.icon;
+            const selected = activeView === view.id;
 
-      {message ? (
-        <div className="flex items-start gap-2 border-b border-emerald-500/10 bg-emerald-500/[0.035] px-4 py-3 text-xs leading-relaxed text-emerald-100/65">
-          <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          {message}
+            return (
+              <button
+                key={view.id}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                aria-controls={`linux-mod-view-${view.id}`}
+                tabIndex={selected ? 0 : -1}
+                data-linux-mod-tab={view.id}
+                onClick={() => setActiveView(view.id)}
+                onKeyDown={(event) => handleViewKeyDown(event, views.indexOf(view))}
+                className={`inline-flex min-w-max flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition ${selected ? "bg-cyan-500/10 text-cyan-100/80 shadow-sm" : "text-white/40 hover:bg-white/[0.04] hover:text-white/65"}`}
+              >
+                <ViewIcon className="h-3.5 w-3.5" />
+                {view.label}
+                <span className={`rounded-full px-1.5 py-0.5 text-[9px] ${selected ? "bg-cyan-300/10 text-cyan-100/60" : "bg-white/[0.05] text-white/30"}`}>
+                  {view.count}
+                </span>
+              </button>
+            );
+          })}
         </div>
-      ) : null}
+      </div>
 
 
+      <div
+        id="linux-mod-view-downloads"
+        role="tabpanel"
+        aria-label="Downloads and staging"
+        hidden={activeView !== "downloads"}
+      >
       <NexusIntegrationPanel
         game={game}
         onArchiveReady={prepareNexusArchive}
         onAccountStatusChange={setNexusAccountStatus}
+        onOpenStagingFolder={status?.stagingPath
+          ? () => openFolder(status.stagingPath)
+          : null
+        }
+        onRefreshStaging={loadStatus}
       />
 
 
@@ -1409,9 +1693,21 @@ export default function LinuxModDeploymentPanel({
             </div>
           </div>
 
-          <div className="mt-2 text-[10px] text-white/25">
-            RAR/7z support: {status.rarSupported ? status.rarProvider : "Unavailable — install the unar package"}
-          </div>
+          {status.rarSupported ? (
+            <div className="mt-2 flex items-center gap-1.5 text-[10px] text-emerald-100/45">
+              <CheckCircle2 className="h-3 w-3" />
+              RAR/7z extraction available through {status.rarProvider}
+            </div>
+          ) : (
+            <div className="mt-3 max-w-2xl">
+              <LinuxDependencyNotice
+                dependency={LINUX_DEPENDENCIES.unar}
+                onRefresh={loadStatus}
+                refreshing={loading}
+                compact
+              />
+            </div>
+          )}
 
           {status.stagedItems.length > 0 ? (
             <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
@@ -1488,7 +1784,11 @@ export default function LinuxModDeploymentPanel({
 
 
       {preview ? (
-        <div className="border-b border-white/[0.06] p-4">
+        <div
+          id="linux-mod-deployment-preview"
+          tabIndex="-1"
+          className="scroll-mt-16 border-b border-white/[0.06] p-4 outline-none"
+        >
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-white/35">
             <ShieldCheck className="h-4 w-4 text-cyan-300/70" />
             Deployment preview
@@ -1628,18 +1928,27 @@ export default function LinuxModDeploymentPanel({
         </div>
       ) : null}
 
+      </div>
 
-      <div className="p-4">
+
+      {activeView === "mods" || activeView === "profiles" ? (
+      <div
+        id={`linux-mod-view-${activeView}`}
+        role="tabpanel"
+        aria-label={activeView === "profiles" ? "Profiles" : "Mods"}
+        className="p-4"
+      >
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-white/30">
-            Managed Mod Library
-            {status?.purged ? (
+            {activeView === "profiles" ? "Profiles" : "Mods"}
+            {activeView === "mods" && status?.purged ? (
               <span className="rounded-full border border-amber-400/15 bg-amber-400/[0.05] px-2 py-0.5 text-[9px] text-amber-100/55">
                 Purged
               </span>
             ) : null}
           </div>
-          {status?.deployments?.length > 0 ? (
+          {activeView === "mods"
+          && status?.deployments?.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {status.deployments.some((deployment) => deployment.nexusModId && deployment.nexusFileId) ? (
                 <button
@@ -1678,7 +1987,7 @@ export default function LinuxModDeploymentPanel({
                 className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.08] px-2.5 py-1.5 text-[10px] font-semibold text-emerald-100/70 hover:bg-emerald-400/[0.13] disabled:opacity-30"
               >
                 {libraryAction === "redeploy" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                Redeploy
+                Deploy Mods
               </button>
               {!status?.purged ? (
                 <button
@@ -1688,15 +1997,30 @@ export default function LinuxModDeploymentPanel({
                   className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/20 bg-amber-400/[0.055] px-2.5 py-1.5 text-[10px] font-semibold text-amber-100/65 hover:bg-amber-400/[0.10] disabled:opacity-30"
                 >
                   {libraryAction === "purge" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Power className="h-3.5 w-3.5" />}
-                  Purge
+                  Purge Mods
                 </button>
               ) : null}
             </div>
           ) : null}
         </div>
 
-        {status?.profiles?.length > 0 ? (
+        {activeView === "profiles"
+        && status?.profiles?.length > 0 ? (
           <div className="mb-3 rounded-lg border border-violet-400/10 bg-violet-400/[0.025] p-3">
+            <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="rounded-lg border border-white/[0.06] bg-black/10 px-3 py-2">
+                <div className="text-[10px] uppercase tracking-wide text-white/25">Active</div>
+                <div className="mt-1 truncate text-xs font-semibold text-violet-100/65">{activeProfile?.name ?? "Default"}</div>
+              </div>
+              <div className="rounded-lg border border-white/[0.06] bg-black/10 px-3 py-2">
+                <div className="text-[10px] uppercase tracking-wide text-white/25">Profiles</div>
+                <div className="mt-1 text-xs font-semibold text-white/65">{status.profiles.length}</div>
+              </div>
+              <div className="rounded-lg border border-white/[0.06] bg-black/10 px-3 py-2">
+                <div className="text-[10px] uppercase tracking-wide text-white/25">Enabled in active profile</div>
+                <div className="mt-1 text-xs font-semibold text-emerald-100/65">{enabledCount}</div>
+              </div>
+            </div>
             <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
               <div className="min-w-0 flex-1">
                 <label htmlFor="linux-mod-profile" className="text-[10px] font-semibold uppercase tracking-wide text-violet-100/45">
@@ -1760,7 +2084,8 @@ export default function LinuxModDeploymentPanel({
           </div>
         ) : null}
 
-        {verification ? (
+        {activeView === "mods"
+        && verification ? (
           <div className={`mb-3 rounded-lg border p-3 ${verification.healthy ? "border-emerald-400/15 bg-emerald-400/[0.035]" : "border-amber-400/15 bg-amber-400/[0.04]"}`}>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className={`text-xs font-semibold ${verification.healthy ? "text-emerald-100/65" : "text-amber-100/65"}`}>
@@ -1785,12 +2110,14 @@ export default function LinuxModDeploymentPanel({
           </div>
         ) : null}
 
-        {loading && !status ? (
+        {activeView === "mods"
+        && loading && !status ? (
           <div className="flex items-center gap-2 py-3 text-xs text-white/35">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading managed mod library…
           </div>
-        ) : status?.deployments?.length > 0 ? (
+        ) : activeView === "mods"
+        && status?.deployments?.length > 0 ? (
           <div className="space-y-2">
             {status.deployments.map((deployment) => (
               <div key={deployment.id} className="rounded-lg border border-white/[0.07] bg-black/10 p-3">
@@ -1857,6 +2184,7 @@ export default function LinuxModDeploymentPanel({
                       busy={busy}
                       action={nexusUpdateAction}
                       onSelect={prepareNexusUpdate}
+                      onReview={reviewNexusUpdate}
                     />
                     {deployment.updatedUnix > deployment.deployedUnix ? (
                       <div className="mt-1 text-[10px] text-white/22">
@@ -2014,16 +2342,22 @@ export default function LinuxModDeploymentPanel({
               </div>
             ))}
           </div>
-        ) : (
+        ) : activeView === "mods" ? (
           <div className="rounded-lg border border-dashed border-white/[0.08] px-3 py-5 text-center text-xs text-white/30">
             No mods are installed in the GameAtlas library for this game.
           </div>
-        )}
+        ) : null}
       </div>
+      ) : null}
 
 
-      {status?.deployments?.length > 0 ? (
-        <div className="border-t border-white/[0.06] p-4">
+      {activeView === "conflicts" ? (
+        <div
+          id="linux-mod-view-conflicts"
+          role="tabpanel"
+          aria-label="Rules and conflicts"
+          className="border-t border-white/[0.06] p-4"
+        >
           <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <div className="text-xs font-semibold uppercase tracking-wide text-white/30">
@@ -2038,7 +2372,8 @@ export default function LinuxModDeploymentPanel({
             </div>
           </div>
 
-          {status.totalConflictCount > 0 ? (
+          {status?.deployments?.length > 0
+          && status.totalConflictCount > 0 ? (
             <div className="mt-3 space-y-2">
               {status.conflicts.map((conflict) => (
                 <div key={conflict.relativePath} className="rounded-lg border border-amber-400/12 bg-amber-400/[0.03] p-3">
@@ -2058,9 +2393,13 @@ export default function LinuxModDeploymentPanel({
                 </div>
               ) : null}
             </div>
-          ) : (
+          ) : status?.deployments?.length > 0 ? (
             <div className="mt-3 rounded-lg border border-dashed border-white/[0.08] px-3 py-4 text-center text-xs text-white/28">
               Enabled mods do not currently overwrite the same files.
+            </div>
+          ) : (
+            <div className="mt-3 rounded-lg border border-dashed border-white/[0.08] px-3 py-4 text-center text-xs text-white/28">
+              Install and enable mods to inspect file conflicts.
             </div>
           )}
         </div>

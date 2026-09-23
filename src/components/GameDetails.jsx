@@ -83,6 +83,7 @@ import {
 } from "../services/libraryInsights";
 import ProtonToolboxPanel from "./ProtonToolboxPanel";
 import LinuxPerformancePanel from "./LinuxPerformancePanel";
+import LinuxReadinessOverview from "./LinuxReadinessOverview";
 import WindowsPerformanceDiagnosticsPanel from "./WindowsPerformanceDiagnosticsPanel";
 import BackgroundConflictPanel from "./BackgroundConflictPanel";
 import CleanLaunchPanel from "./CleanLaunchPanel";
@@ -1118,6 +1119,13 @@ export default function GameDetails({
         
         <GameSectionNavigator key={game.id} />
 
+        {isLinux ? (
+          <LinuxReadinessOverview
+            key={`linux-readiness-${game.id}`}
+            game={game}
+          />
+        ) : null}
+
 
         <CollapsibleSection
           id="overview"
@@ -1409,6 +1417,9 @@ export default function GameDetails({
             <StorageInstallPanel
               game={
                 game
+              }
+              isLinux={
+                isLinux
               }
             />
           </div>

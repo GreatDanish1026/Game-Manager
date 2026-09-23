@@ -170,8 +170,10 @@ if ((SKIP_BUILD == 0)); then
   step "Build and sign AppImage"
   (
     cd "$PROJECT_ROOT"
-    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-      npm run tauri:build -- --bundles appimage
+    # Keep the caller's PATH so version-managed or Homebrew Node installations
+    # and the Rust toolchain in ~/.cargo/bin remain available on immutable
+    # distributions such as Bazzite.
+    npm run tauri:build -- --bundles appimage
   )
 
   cleanup_secret
@@ -281,4 +283,3 @@ echo "  $MANIFEST_PATH"
 echo "  $RELEASE_DIR/SHA256SUMS-LINUX.txt"
 echo
 echo "If the Windows script has already written the same release directory, its platform entry was preserved."
-

@@ -198,6 +198,7 @@ pub fn run() {
             nexus_integration::disconnect_nexus_account,
             nexus_integration::lookup_nexus_mod,
             nexus_integration::download_nexus_file,
+            nexus_integration::cancel_nexus_download,
             nexus_integration::check_nexus_mod_updates,
             nexus_integration::inspect_nxm_link,
             nexus_integration::get_pending_nxm_links,

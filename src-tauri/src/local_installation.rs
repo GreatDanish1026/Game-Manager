@@ -8,6 +8,9 @@ use std::{
 
 use serde::Serialize;
 
+#[cfg(target_os = "linux")]
+use std::process::Command;
+
 const MAX_SCAN_DEPTH: usize = 5;
 const MAX_FILES_VISITED: usize = 25000;
 
@@ -1560,7 +1563,7 @@ fn directory_storage_info(raw_path: Option<&str>, install_path: &Path) -> Direct
 }
 
 #[cfg(target_os = "windows")]
-fn windows_drive_space(path: &Path) -> (Option<String>, Option<u64>, Option<u64>) {
+fn drive_space(path: &Path) -> (Option<String>, Option<u64>, Option<u64>) {
     use std::os::windows::ffi::OsStrExt;
 
     #[link(name = "kernel32")]
@@ -1604,8 +1607,58 @@ fn windows_drive_space(path: &Path) -> (Option<String>, Option<u64>, Option<u64>
     (drive_root, Some(available), Some(total))
 }
 
-#[cfg(not(target_os = "windows"))]
-fn windows_drive_space(_path: &Path) -> (Option<String>, Option<u64>, Option<u64>) {
+#[cfg(target_os = "linux")]
+fn parse_linux_drive_space(output: &str) -> (Option<String>, Option<u64>, Option<u64>) {
+    let fields = output
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .last()
+        .unwrap_or_default()
+        .split_whitespace()
+        .collect::<Vec<_>>();
+
+    if fields.len() < 6 {
+        return (None, None, None);
+    }
+
+    let total = fields
+        .get(1)
+        .and_then(|value| value.parse::<u64>().ok())
+        .and_then(|blocks| blocks.checked_mul(1024));
+    let available = fields
+        .get(3)
+        .and_then(|value| value.parse::<u64>().ok())
+        .and_then(|blocks| blocks.checked_mul(1024));
+    let mount_point = fields[5..]
+        .join(" ")
+        .replace("\\040", " ")
+        .replace("\\011", "\t")
+        .replace("\\134", "\\");
+
+    if total.is_none() || available.is_none() || mount_point.is_empty() {
+        return (None, None, None);
+    }
+
+    (Some(mount_point), available, total)
+}
+
+#[cfg(target_os = "linux")]
+fn drive_space(path: &Path) -> (Option<String>, Option<u64>, Option<u64>) {
+    let output = Command::new("df").arg("-Pk").arg("--").arg(path).output();
+
+    let Ok(output) = output else {
+        return (None, None, None);
+    };
+
+    if !output.status.success() {
+        return (None, None, None);
+    }
+
+    parse_linux_drive_space(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn drive_space(_path: &Path) -> (Option<String>, Option<u64>, Option<u64>) {
     (None, None, None)
 }
 
@@ -1650,7 +1703,7 @@ fn build_storage_details(
 
     largest_files.truncate(5);
 
-    let (drive_root, drive_free_bytes, drive_total_bytes) = windows_drive_space(root);
+    let (drive_root, drive_free_bytes, drive_total_bytes) = drive_space(root);
 
     StorageDetailsInfo {
         install_size_bytes,
@@ -2079,4 +2132,37 @@ pub async fn inspect_local_installation(
     })
     .await
     .map_err(|error| format!("Local installation worker failed: {error}"))?
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_drive_space_tests {
+    use super::parse_linux_drive_space;
+
+    #[test]
+    fn parses_posix_df_output_as_bytes() {
+        let output = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/nvme0n1p3 2048000 512000 1536000 25% /var/home\n";
+        let (mount, available, total) = parse_linux_drive_space(output);
+
+        assert_eq!(mount.as_deref(), Some("/var/home"));
+        assert_eq!(available, Some(1_572_864_000));
+        assert_eq!(total, Some(2_097_152_000));
+    }
+
+    #[test]
+    fn decodes_escaped_mount_point_spaces() {
+        let output = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sdb1 1000 250 750 25% /run/media/Player/Game\\040Drive\n";
+        let (mount, available, total) = parse_linux_drive_space(output);
+
+        assert_eq!(mount.as_deref(), Some("/run/media/Player/Game Drive"));
+        assert_eq!(available, Some(768_000));
+        assert_eq!(total, Some(1_024_000));
+    }
+
+    #[test]
+    fn rejects_incomplete_df_output() {
+        assert_eq!(
+            parse_linux_drive_space("Filesystem 1024-blocks Used\n"),
+            (None, None, None)
+        );
+    }
 }

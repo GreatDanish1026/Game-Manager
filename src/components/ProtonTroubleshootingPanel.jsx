@@ -11,6 +11,7 @@ import {
   getProtonTroubleshootingInfo,
   saveLastKnownWorkingRuntime,
 } from "../services/protonTroubleshooting";
+import LinuxActionStatus from "./LinuxActionStatus";
 
 
 function statusClasses(
@@ -421,41 +422,17 @@ export default function ProtonTroubleshootingPanel({
         </>
       ) : null}
 
-      {state.error ? (
-        <div
-          className="
-            mt-3
-            rounded-lg
-            border
-            border-red-500/15
-            bg-red-500/[0.04]
-            px-3
-            py-2
-            text-xs
-            text-red-200/70
-          "
-        >
-          {state.error}
-        </div>
-      ) : null}
+      <LinuxActionStatus
+        type="error"
+        message={state.error}
+        className="mt-3"
+      />
 
-      {state.message ? (
-        <div
-          className="
-            mt-3
-            rounded-lg
-            border
-            border-emerald-500/15
-            bg-emerald-500/[0.04]
-            px-3
-            py-2
-            text-xs
-            text-emerald-200/70
-          "
-        >
-          {state.message}
-        </div>
-      ) : null}
+      <LinuxActionStatus
+        type="success"
+        message={state.message}
+        className="mt-3"
+      />
     </div>
   );
 }

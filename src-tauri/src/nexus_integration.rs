@@ -1,9 +1,12 @@
 use reqwest::{header::HeaderMap, Client, StatusCode, Url};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock,
+    },
 };
 use tauri::Emitter;
 
@@ -23,6 +26,7 @@ const MAX_NEXUS_DOWNLOAD_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 
 static NEXUS_SESSION: OnceLock<Mutex<Option<NexusSession>>> = OnceLock::new();
 static PENDING_NXM_LINKS: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
+static ACTIVE_NEXUS_DOWNLOADS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
 
 #[derive(Clone)]
 struct NexusSession {
@@ -61,6 +65,7 @@ pub struct NexusLookupRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusDownloadRequest {
+    pub download_id: String,
     pub game_name: String,
     pub game_domain: String,
     pub mod_id: u64,
@@ -97,10 +102,41 @@ struct ParsedNxmLink {
 #[serde(rename_all = "camelCase")]
 pub struct NexusDownloadResult {
     pub success: bool,
+    pub download_id: String,
     pub file_name: String,
     pub path: String,
     pub bytes_downloaded: u64,
     pub message: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelNexusDownloadRequest {
+    pub download_id: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NexusDownloadProgress {
+    download_id: String,
+    file_name: String,
+    destination: String,
+    phase: String,
+    bytes_downloaded: u64,
+    total_bytes: Option<u64>,
+    bytes_per_second: u64,
+}
+
+struct ActiveNexusDownload {
+    download_id: String,
+}
+
+impl Drop for ActiveNexusDownload {
+    fn drop(&mut self) {
+        if let Ok(mut active) = active_nexus_downloads().lock() {
+            active.remove(&self.download_id);
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,6 +176,7 @@ pub struct NexusTrackedModUpdate {
     pub game_domain: String,
     pub mod_id: u64,
     pub current_file_id: u64,
+    pub current_file: Option<NexusFileMetadata>,
     pub status: String,
     pub message: String,
     pub candidates: Vec<NexusFileMetadata>,
@@ -255,6 +292,61 @@ fn session() -> &'static Mutex<Option<NexusSession>> {
 
 fn pending_nxm_links() -> &'static Mutex<VecDeque<String>> {
     PENDING_NXM_LINKS.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+fn active_nexus_downloads() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
+    ACTIVE_NEXUS_DOWNLOADS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn validate_download_id(value: &str) -> Result<String, String> {
+    let download_id = value.trim();
+    if download_id.is_empty()
+        || download_id.len() > 160
+        || !download_id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+    {
+        return Err("The Nexus download identifier is invalid.".to_string());
+    }
+    Ok(download_id.to_string())
+}
+
+fn register_nexus_download(
+    download_id: String,
+) -> Result<(ActiveNexusDownload, Arc<AtomicBool>), String> {
+    let cancellation = Arc::new(AtomicBool::new(false));
+    let mut active = active_nexus_downloads()
+        .lock()
+        .map_err(|_| "The active Nexus downloads could not be updated.".to_string())?;
+    if !active.is_empty() {
+        return Err("Another Nexus download is already active. Wait for it to finish or cancel it before starting a new one.".to_string());
+    }
+    active.insert(download_id.clone(), cancellation.clone());
+    Ok((ActiveNexusDownload { download_id }, cancellation))
+}
+
+fn emit_download_progress(
+    app: &tauri::AppHandle,
+    download_id: &str,
+    file_name: &str,
+    destination: &str,
+    phase: &str,
+    bytes_downloaded: u64,
+    total_bytes: Option<u64>,
+    bytes_per_second: u64,
+) {
+    let _ = app.emit(
+        "gameatlas:nexus-download-progress",
+        NexusDownloadProgress {
+            download_id: download_id.to_string(),
+            file_name: file_name.to_string(),
+            destination: destination.to_string(),
+            phase: phase.to_string(),
+            bytes_downloaded,
+            total_bytes,
+            bytes_per_second,
+        },
+    );
 }
 
 fn client() -> Result<Client, String> {
@@ -665,13 +757,24 @@ pub fn queue_nxm_link(app: &tauri::AppHandle, value: &str) {
     if !accepted_scheme || value.len() > 4_096 {
         return;
     }
-    if let Ok(mut pending) = pending_nxm_links().lock() {
-        if !pending.iter().any(|existing| existing == value) {
-            if pending.len() >= 10 {
-                pending.pop_front();
-            }
+    let queued = if let Ok(mut pending) = pending_nxm_links().lock() {
+        if pending.iter().any(|existing| existing == value) {
+            true
+        } else if pending.len() >= 10 {
+            false
+        } else {
             pending.push_back(value.to_string());
+            true
         }
+    } else {
+        false
+    };
+    if !queued {
+        let _ = app.emit(
+            "gameatlas:nxm-link-error",
+            "The Nexus download queue is full. Finish or dismiss a pending request, then select Mod Manager Download again.",
+        );
+        return;
     }
     let _ = app.emit("gameatlas:nxm-link", ());
 }
@@ -721,14 +824,14 @@ fn archive_signature_matches(file_name: &str, signature: &[u8]) -> bool {
     }
 }
 
-fn obsolete_category(value: &str) -> bool {
-    let category = value.to_ascii_lowercase();
-    category.contains("old") || category.contains("archiv") || category.contains("delete")
-}
-
-fn replacement_category(value: &str) -> bool {
-    let category = value.to_ascii_lowercase();
-    category.contains("main") || category.contains("update")
+fn same_file_category(left: &FileResponse, right: &FileResponse) -> bool {
+    match (left.category_id, right.category_id) {
+        (Some(left_id), Some(right_id)) => left_id == right_id,
+        _ => left
+            .category_name
+            .trim()
+            .eq_ignore_ascii_case(right.category_name.trim()),
+    }
 }
 
 fn update_candidates(
@@ -736,20 +839,13 @@ fn update_candidates(
     current_file_id: u64,
 ) -> Option<Vec<NexusFileMetadata>> {
     let current = files.iter().find(|file| file.file_id == current_file_id)?;
-    let current_is_obsolete = obsolete_category(&current.category_name);
     let mut candidates = files
         .iter()
         .filter(|file| {
             file.file_id != current.file_id
                 && file.uploaded_timestamp > current.uploaded_timestamp
                 && supported_archive_name(&file.file_name)
-                && !obsolete_category(&file.category_name)
-                && if current_is_obsolete {
-                    file.is_primary || replacement_category(&file.category_name)
-                } else {
-                    file.category_id == current.category_id
-                        || (current.is_primary && file.is_primary)
-                }
+                && same_file_category(file, current)
         })
         .cloned()
         .collect::<Vec<_>>();
@@ -1016,6 +1112,11 @@ pub async fn check_nexus_mod_updates(
             cache.insert(key.clone(), response.files);
         }
         let files = cache.get(&key).expect("Nexus file cache was populated");
+        let current_file = files
+            .iter()
+            .find(|file| file.file_id == tracked.file_id)
+            .cloned()
+            .map(file_metadata);
         let candidates = update_candidates(files, tracked.file_id);
         let (status, message, candidates) = match candidates {
             None => (
@@ -1026,13 +1127,14 @@ pub async fn check_nexus_mod_updates(
             ),
             Some(candidates) if candidates.is_empty() => (
                 "current".to_string(),
-                "No newer compatible file candidates were found.".to_string(),
+                "No newer supported archives were found in the installed file's Nexus category."
+                    .to_string(),
                 candidates,
             ),
             Some(candidates) => (
                 "update-available".to_string(),
                 format!(
-                    "{} newer compatible file candidate{} found. Review the selected file before upgrading.",
+                    "{} newer file{} found in the installed file's Nexus category. This is not a compatibility guarantee; review the file before replacing the installed payload.",
                     candidates.len(),
                     if candidates.len() == 1 { " was" } else { "s were" }
                 ),
@@ -1045,6 +1147,7 @@ pub async fn check_nexus_mod_updates(
             game_domain: domain,
             mod_id: tracked.mod_id,
             current_file_id: tracked.file_id,
+            current_file,
             status,
             message,
             candidates,
@@ -1069,11 +1172,27 @@ pub async fn check_nexus_mod_updates(
 }
 
 #[tauri::command]
+pub fn cancel_nexus_download(request: CancelNexusDownloadRequest) -> Result<bool, String> {
+    let download_id = validate_download_id(&request.download_id)?;
+    let active = active_nexus_downloads()
+        .lock()
+        .map_err(|_| "The active Nexus downloads could not be accessed.".to_string())?;
+    let Some(cancellation) = active.get(&download_id) else {
+        return Ok(false);
+    };
+    cancellation.store(true, Ordering::Relaxed);
+    Ok(true)
+}
+
+#[tauri::command]
 pub async fn download_nexus_file(
+    app: tauri::AppHandle,
     request: NexusDownloadRequest,
 ) -> Result<NexusDownloadResult, String> {
     #[cfg(target_os = "linux")]
     {
+        let download_id = validate_download_id(&request.download_id)?;
+        let (_active_download, cancellation) = register_nexus_download(download_id.clone())?;
         if request.mod_id == 0 || request.file_id == 0 {
             return Err("The Nexus mod or file identifier is invalid.".to_string());
         }
@@ -1083,6 +1202,7 @@ pub async fn download_nexus_file(
         }
         let domain = validate_game_domain(&request.game_domain)?;
         let file_name = safe_archive_name(&request.file_name, request.mod_id, request.file_id)?;
+        emit_download_progress(&app, &download_id, &file_name, "", "resolving", 0, None, 0);
         let active = current_session()?;
         ensure_quota_capacity(&active.account, 1, "resolve this download")?;
         let nxm = request.nxm_url.as_deref().map(parse_nxm_url).transpose()?;
@@ -1157,6 +1277,9 @@ pub async fn download_nexus_file(
             request.file_id,
             file_id_seed()
         ));
+        if cancellation.load(Ordering::Relaxed) {
+            return Err("Nexus download canceled. No archive was saved.".to_string());
+        }
 
         let download_client = Client::builder()
             .user_agent(format!("{APP_NAME}/{APP_VERSION}"))
@@ -1170,6 +1293,9 @@ pub async fn download_nexus_file(
             .send()
             .await
             .map_err(|error| request_error(&error, "starting the file download"))?;
+        if cancellation.load(Ordering::Relaxed) {
+            return Err("Nexus download canceled. No archive was saved.".to_string());
+        }
         if !response.status().is_success() {
             return Err(match response.status() {
                 StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
@@ -1190,10 +1316,8 @@ pub async fn download_nexus_file(
                 ),
             });
         }
-        if response
-            .content_length()
-            .is_some_and(|length| length > MAX_NEXUS_DOWNLOAD_BYTES)
-        {
+        let total_bytes = response.content_length();
+        if total_bytes.is_some_and(|length| length > MAX_NEXUS_DOWNLOAD_BYTES) {
             return Err("The Nexus archive exceeds the 32 GiB safety limit.".to_string());
         }
 
@@ -1202,14 +1326,42 @@ pub async fn download_nexus_file(
             .write(true)
             .open(&temporary)
             .map_err(|error| format!("Could not create the temporary Nexus download: {error}"))?;
-        let result: Result<(u64, Vec<u8>), String> = async {
+        let destination_text = destination.to_string_lossy().to_string();
+        emit_download_progress(
+            &app,
+            &download_id,
+            &finalized_name,
+            &destination_text,
+            "downloading",
+            0,
+            total_bytes,
+            0,
+        );
+        let result: Result<(u64, Vec<u8>, u64), String> = async {
             let mut bytes_downloaded = 0_u64;
             let mut signature = Vec::with_capacity(8);
+            let started = Instant::now();
+            let mut last_progress = Instant::now();
             while let Some(chunk) = response
                 .chunk()
                 .await
                 .map_err(|error| request_error(&error, "downloading the archive"))?
             {
+                if cancellation.load(Ordering::Relaxed) {
+                    emit_download_progress(
+                        &app,
+                        &download_id,
+                        &finalized_name,
+                        &destination_text,
+                        "canceled",
+                        bytes_downloaded,
+                        total_bytes,
+                        0,
+                    );
+                    return Err(
+                        "Nexus download canceled. The partial file was removed.".to_string()
+                    );
+                }
                 if signature.len() < 8 {
                     signature.extend(chunk.iter().take(8_usize.saturating_sub(signature.len())));
                 }
@@ -1220,17 +1372,57 @@ pub async fn download_nexus_file(
                 output
                     .write_all(&chunk)
                     .map_err(|error| format!("Could not write the Nexus archive: {error}"))?;
+                if last_progress.elapsed() >= Duration::from_millis(200) {
+                    let elapsed = started.elapsed().as_secs_f64();
+                    let bytes_per_second = if elapsed > 0.0 {
+                        (bytes_downloaded as f64 / elapsed).round() as u64
+                    } else {
+                        0
+                    };
+                    emit_download_progress(
+                        &app,
+                        &download_id,
+                        &finalized_name,
+                        &destination_text,
+                        "downloading",
+                        bytes_downloaded,
+                        total_bytes,
+                        bytes_per_second,
+                    );
+                    last_progress = Instant::now();
+                }
+            }
+            if cancellation.load(Ordering::Relaxed) {
+                emit_download_progress(
+                    &app,
+                    &download_id,
+                    &finalized_name,
+                    &destination_text,
+                    "canceled",
+                    bytes_downloaded,
+                    total_bytes,
+                    0,
+                );
+                return Err("Nexus download canceled. The partial file was removed.".to_string());
             }
             output
                 .sync_all()
                 .map_err(|error| format!("Could not finalize the Nexus archive: {error}"))?;
-            Ok((bytes_downloaded, signature))
+            let elapsed = started.elapsed().as_secs_f64();
+            let bytes_per_second = if elapsed > 0.0 {
+                (bytes_downloaded as f64 / elapsed).round() as u64
+            } else {
+                0
+            };
+            Ok((bytes_downloaded, signature, bytes_per_second))
         }
         .await;
         drop(output);
 
-        let (bytes_downloaded, signature) = match result {
-            Ok((value, signature)) if value > 0 => (value, signature),
+        let (bytes_downloaded, signature, bytes_per_second) = match result {
+            Ok((value, signature, bytes_per_second)) if value > 0 => {
+                (value, signature, bytes_per_second)
+            }
             Ok(_) => {
                 let _ = fs::remove_file(&temporary);
                 return Err("The Nexus download completed without any file data.".to_string());
@@ -1247,6 +1439,20 @@ pub async fn download_nexus_file(
                     .to_string(),
             );
         }
+        if cancellation.load(Ordering::Relaxed) {
+            let _ = fs::remove_file(&temporary);
+            emit_download_progress(
+                &app,
+                &download_id,
+                &finalized_name,
+                &destination_text,
+                "canceled",
+                bytes_downloaded,
+                total_bytes,
+                0,
+            );
+            return Err("Nexus download canceled. The partial file was removed.".to_string());
+        }
         if let Err(error) = fs::hard_link(&temporary, &destination) {
             let _ = fs::remove_file(&temporary);
             return Err(format!(
@@ -1254,9 +1460,20 @@ pub async fn download_nexus_file(
             ));
         }
         let _ = fs::remove_file(&temporary);
+        emit_download_progress(
+            &app,
+            &download_id,
+            &finalized_name,
+            &destination_text,
+            "downloaded",
+            bytes_downloaded,
+            total_bytes,
+            bytes_per_second,
+        );
 
         return Ok(NexusDownloadResult {
             success: true,
+            download_id,
             file_name: finalized_name.clone(),
             path: destination.to_string_lossy().to_string(),
             bytes_downloaded,
@@ -1268,7 +1485,7 @@ pub async fn download_nexus_file(
 
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = request;
+        let _ = (app, request);
         Err(
             "Nexus downloads through the GameAtlas mod manager are available on Linux only."
                 .to_string(),
@@ -1489,7 +1706,7 @@ mod tests {
     }
 
     #[test]
-    fn obsolete_installed_file_finds_new_main_replacement() {
+    fn obsolete_installed_file_does_not_assume_main_file_compatibility() {
         let files = vec![
             FileResponse {
                 file_id: 202,
@@ -1530,8 +1747,6 @@ mod tests {
         ];
 
         let candidates = update_candidates(&files, 202).unwrap();
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].file_id, 250);
-        assert_eq!(candidates[0].category_name, "MAIN");
+        assert!(candidates.is_empty());
     }
 }
