@@ -1,6 +1,6 @@
 {
   "name": "game-manager",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "type": "module",
   "description": "An open-source desktop companion for managing and troubleshooting PC games on Windows and Linux.",
   "main": "src/index.js",
