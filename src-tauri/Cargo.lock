@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "GameManager"
-version = "2.4.0"
+version = "2.5.0"
 dependencies = [
  "hex",
  "quick-xml 0.38.4",

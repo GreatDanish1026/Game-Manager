@@ -4,6 +4,7 @@ import {
   Clock3,
   HeartPulse,
   Gamepad2,
+  LoaderCircle,
   MonitorUp,
   Puzzle,
   RefreshCcw,
@@ -27,6 +28,9 @@ import {
 import {
   getLibraryAnalysisSummary,
 } from "../services/analysisState";
+import { getRecentLibraryLaunches } from "../services/recentActivity";
+import { getGameFallbackInitial } from "../services/gameArtwork";
+import { useGameListArtwork } from "../services/useGameListArtwork";
 
 import {
   getSettings,
@@ -110,6 +114,22 @@ function StatCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function GameThumb({ game }) {
+  const [failedUrls, setFailedUrls] = useState([]);
+  const { elementRef, candidates: artworkUrls } = useGameListArtwork(game, failedUrls);
+  const artworkUrl = artworkUrls.find((url) => !failedUrls.includes(url));
+
+  return (
+    <span ref={elementRef} className="flex h-14 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] text-cyan-300/60" aria-hidden="true">
+      {artworkUrl ? (
+        <img src={artworkUrl} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" draggable={false} onError={() => setFailedUrls((current) => [...current, artworkUrl])} className="h-full w-full object-cover" />
+      ) : (
+        <span className="text-lg font-bold">{getGameFallbackInitial(game)}</span>
+      )}
+    </span>
   );
 }
 
@@ -242,6 +262,9 @@ export default function LibraryDashboard({
   onAnalyzeRemaining,
   onRefreshStale,
   libraryAnalysis,
+  onCancelLibraryAnalysis,
+  onRescanLibrary,
+  libraryScanLoading = false,
   onCheckForUpdates,
   updateCheckStatus,
   onSelectGame,
@@ -269,6 +292,7 @@ export default function LibraryDashboard({
           );
 
       const events = [
+        "game-manager-launch-history-changed",
         "game-manager-library-insights-changed",
         "game-manager-library-snapshot-changed",
         "game-manager-user-metadata-changed",
@@ -363,6 +387,9 @@ export default function LibraryDashboard({
           );
 
         return {
+          games:
+            installedGames,
+
           total:
             installedGames.length,
 
@@ -458,6 +485,17 @@ export default function LibraryDashboard({
           - left[1]
       );
 
+  const recentGames = useMemo(
+    () => getRecentLibraryLaunches(data.games, 3),
+    [data.games, revision]
+  );
+  const attentionGames = data.health.rows
+    .filter(({ record }) => record && ["needs-attention", "incomplete"].includes(record.category))
+    .sort((left, right) => (right.record.actionable + right.record.warnings) - (left.record.actionable + left.record.warnings))
+    .slice(0, 2);
+  const showStaleData = data.analysis.stale > 0;
+  const showPartialData = !showStaleData && data.analysis.partial > 0;
+
   const analysisRunning =
     libraryAnalysis?.state ===
       "running"
@@ -478,12 +516,16 @@ export default function LibraryDashboard({
   function showUnassessedGames() {
     setHealthFilter("unassessed");
 
+    window.dispatchEvent(new CustomEvent("game-manager-open-section", {
+      detail: { id: "dashboard-health-checks" },
+    }));
+
     window.setTimeout(() => {
       document.getElementById("installation-health-results")?.scrollIntoView({
         behavior: "smooth",
         block: "nearest",
       });
-    }, 0);
+    }, 120);
   }
 
   return (
@@ -556,7 +598,7 @@ export default function LibraryDashboard({
                   text-white/35
                 "
               >
-                Select a game from the sidebar or review items that need attention.
+                Pick up where you left off and keep your games in good shape.
               </p>
             </div>
           </div>
@@ -624,9 +666,89 @@ export default function LibraryDashboard({
         ) : null}
 
 
+        <section className="mt-7 rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5" aria-labelledby="recent-games-title">
+          <h2 id="recent-games-title" className="text-lg font-semibold text-white/85">{data.total === 0 ? "Welcome to GameAtlas" : "Recently opened"}</h2>
+          {data.total > 0 ? <p className="mt-1 text-xs text-white/50">Games launched through GameAtlas appear here. This is not launcher-reported playtime.</p> : null}
+          {recentGames.length > 0 ? (
+            <div className="mt-4 grid gap-3 lg:grid-cols-3">
+              {recentGames.map(({ game, entry }) => (
+                <div key={game.id ?? `${game.store}-${game.launcherId}-${game.name}`} className="flex min-w-0 items-center gap-3 rounded-xl border border-white/[0.08] bg-black/10 p-3">
+                  <GameThumb game={game} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold text-white/80" title={game.name}>{game.name}</div>
+                    <div className="mt-0.5 truncate text-xs text-white/50">Last launched {new Date(entry.launchedAt).toLocaleString()}</div>
+                    <div className="truncate text-[11px] text-white/45">{entry.profileName ?? "Normal"} profile</div>
+                  </div>
+                  <button type="button" onClick={() => onSelectGame?.(game)} className="shrink-0 rounded-lg border border-cyan-400/20 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300">Open</button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-4 rounded-xl border border-dashed border-white/10 p-5 text-sm text-white/55">
+              {data.total === 0 ? (
+                <>
+                  <div className="font-semibold text-white/75">Build your library</div>
+                  <p className="mt-1">Add a game manually or scan installed games to get started.</p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button type="button" onClick={() => window.dispatchEvent(new Event("game-manager-open-add-game"))} className="rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-400/20">Add a game</button>
+                    <button type="button" onClick={onRescanLibrary} disabled={libraryScanLoading} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-white/70 hover:bg-white/[0.05] disabled:opacity-40">Scan installed games</button>
+                  </div>
+                </>
+              ) : "Open a game from the sidebar. Games launched through GameAtlas will appear here for quick access."}
+            </div>
+          )}
+        </section>
+
+
+        {data.total > 0 ? <section className="mt-5 rounded-2xl border border-amber-400/15 bg-amber-400/[0.025] p-5" aria-labelledby="attention-title">
+          <div className="flex items-center gap-2">
+            <TriangleAlert className="h-4 w-4 text-amber-300/80" />
+            <h2 id="attention-title" className="text-lg font-semibold text-white/85">Needs your attention</h2>
+          </div>
+          {attentionGames.length > 0 || showStaleData || showPartialData ? (
+            <div className="mt-4 space-y-2">
+              {attentionGames.map(({ game, record }) => (
+                <div key={game.id ?? `${game.store}-${game.launcherId}-${game.name}`} className="flex flex-wrap items-center gap-3 rounded-xl border border-white/[0.07] bg-black/10 p-3 sm:flex-nowrap">
+                  <GameThumb game={game} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold text-white/80">{game.name}</div>
+                    <div className="text-xs text-white/55">Health check: {record.score}% · {healthCategoryLabel(record.category)}</div>
+                  </div>
+                  <button type="button" onClick={() => onSelectGame?.(game, { focus: "health" })} className="rounded-lg border border-amber-300/25 px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-300/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-200">Review Health</button>
+                </div>
+              ))}
+              {showStaleData || showPartialData ? (
+                <div className="flex flex-wrap items-center gap-3 rounded-xl border border-white/[0.07] bg-black/10 p-3 sm:flex-nowrap">
+                  <Activity className="mx-3 h-5 w-5 shrink-0 text-cyan-300/75" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-white/80">{showStaleData ? `${data.analysis.stale} game profiles have out-of-date data` : `${data.analysis.partial} game profiles have incomplete data`}</div>
+                    <div className="text-xs text-white/55">This concerns external game data, not installation health.</div>
+                  </div>
+                  <button type="button" disabled={analysisRunning || !networkOnline} onClick={showStaleData ? onRefreshStale : onAnalyzeRemaining} className="rounded-lg border border-cyan-300/25 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/10 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300">{showStaleData ? "Refresh Stale" : "Analyze Remaining"}</button>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-white/55">{data.health.assessed === 0 ? "No game health checks have been completed yet. Open a game to assess it." : "No assessed games currently need attention."}</p>
+          )}
+        </section> : null}
+
+        {analysisRunning || libraryScanLoading ? (
+          <section className="mt-5 flex flex-wrap items-center gap-3 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.035] p-4" aria-live="polite">
+            <LoaderCircle className="h-5 w-5 shrink-0 animate-spin text-cyan-300" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-white/80">{libraryScanLoading ? "Scanning installed games" : libraryAnalysis.state === "cancelling" ? "Finishing current lookups…" : "Analyzing game data in the background"}</div>
+              <div className="text-xs text-white/50">{libraryScanLoading ? "The library will update as the scan completes." : `${libraryAnalysis.completed} of ${libraryAnalysis.total} game profiles finished`}</div>
+            </div>
+            {!libraryScanLoading && libraryAnalysis.state === "running" ? <button type="button" onClick={onCancelLibraryAnalysis} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-white/65 hover:bg-white/[0.05]">Cancel</button> : null}
+          </section>
+        ) : null}
+
+        {data.total > 0 ? <>
+        <h2 className="mt-7 text-base font-semibold text-white/75">Library snapshot</h2>
         <div
           className="
-            mt-7
+            mt-3
             grid
             grid-cols-2
             gap-3
@@ -676,15 +798,22 @@ export default function LibraryDashboard({
             }
           />
         </div>
+        </> : null}
 
 
+        {data.total > 0 ? <>
+        <CollapsibleSection
+          id="dashboard-data-analysis"
+          title="Game Data Analysis"
+          description="External game-data freshness and analysis controls. Separate from installation health."
+          icon={Activity}
+          defaultOpen={false}
+          persistOpen={false}
+          summary={`${data.analysis.full} of ${data.analysis.total} fresh`}
+          className="mt-6"
+        >
         <section
           className="
-            mt-6
-            rounded-2xl
-            border
-            border-cyan-500/15
-            bg-cyan-500/[0.025]
             p-5
           "
         >
@@ -706,7 +835,7 @@ export default function LibraryDashboard({
                   text-white/80
                 "
               >
-                Game Data Analysis
+                Source breakdown
               </div>
 
               <div
@@ -898,19 +1027,19 @@ export default function LibraryDashboard({
             />
           </div>
         </section>
+        </CollapsibleSection>
 
 
-        <section
-          id="installation-health"
-          className="
-            mt-6
-            rounded-2xl
-            border
-            border-white/[0.08]
-            bg-black/10
-            p-5
-          "
+        <CollapsibleSection
+          id="dashboard-health-checks"
+          title="Game Health Checks"
+          description="Per-game Diagnostics Center assessments, separate from game-data freshness."
+          icon={HeartPulse}
+          defaultOpen={false}
+          persistOpen={false}
+          summary={`${data.health.assessed} of ${data.health.total} checked`}
         >
+        <section id="installation-health" className="p-5">
           <div className="flex items-start gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-300">
               <HeartPulse className="h-4 w-4" />
@@ -918,7 +1047,7 @@ export default function LibraryDashboard({
 
             <div>
               <div className="text-base font-semibold text-white/80">
-                Game Health Checks
+                Assessment breakdown
               </div>
               <div className="mt-1 text-xs text-white/35">
                 {data.health.assessed} of {data.health.total} games checked with Diagnostics Center. Game-data freshness above is separate. Click a category to filter.
@@ -1060,6 +1189,7 @@ export default function LibraryDashboard({
             </div>
           ) : null}
         </section>
+        </CollapsibleSection>
 
 
         <CollapsibleSection
@@ -1290,6 +1420,7 @@ export default function LibraryDashboard({
         </CollapsibleSection>
 
 
+        </> : null}
         <CollapsibleSection
           id="dashboard-system-services"
           title="System & Services"

@@ -183,6 +183,21 @@ export function getLaunchHistory(
     );
 }
 
+export function getRecentLibraryLaunches(games = [], limit = 3) {
+  const store = readStore();
+
+  return games
+    .map((game) => {
+      const entries = store[gameKey(game)];
+      const entry = Array.isArray(entries) ? entries[0] : null;
+      const timestamp = Date.parse(entry?.launchedAt ?? "");
+      return Number.isFinite(timestamp) ? { game, entry, timestamp } : null;
+    })
+    .filter(Boolean)
+    .sort((left, right) => right.timestamp - left.timestamp)
+    .slice(0, limit);
+}
+
 
 export function recordLaunchActivity(
   game,

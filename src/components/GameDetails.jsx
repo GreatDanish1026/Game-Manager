@@ -81,6 +81,7 @@ import {
 import {
   storeGameInsight,
 } from "../services/libraryInsights";
+import { getGameCoverArt } from "../services/gameArtwork";
 import ProtonToolboxPanel from "./ProtonToolboxPanel";
 import LinuxPerformancePanel from "./LinuxPerformancePanel";
 import LinuxReadinessOverview from "./LinuxReadinessOverview";
@@ -110,41 +111,6 @@ function runningOnLinux() {
     ?? ""
   );
 }
-function getGameCoverArt(game) {
-  if (!game) {
-    return null;
-  }
-
-  const explicitCover =
-    game.coverImageUrl
-    ?? game.coverArtUrl
-    ?? game.coverUrl
-    ?? game.imageUrl
-    ?? null;
-
-  if (explicitCover) {
-    return explicitCover;
-  }
-
-  const store =
-    String(game.store ?? "")
-      .trim()
-      .toLowerCase();
-
-  const launcherId =
-    String(game.launcherId ?? "")
-      .trim();
-
-  if (
-    store === "steam"
-    && launcherId
-  ) {
-    return `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${launcherId}/library_600x900.jpg`;
-  }
-
-  return null;
-}
-
 
 function InfoRow({
   icon: Icon,
@@ -650,6 +616,9 @@ export default function GameDetails({
   onAnalyzeRemaining,
   onRefreshStale,
   libraryAnalysis,
+  onCancelLibraryAnalysis,
+  onRescanLibrary,
+  libraryScanLoading = false,
   onCheckForUpdates,
   updateCheckStatus,
   onSelectGame,
@@ -767,6 +736,15 @@ export default function GameDetails({
         }
         libraryAnalysis={
           libraryAnalysis
+        }
+        onCancelLibraryAnalysis={
+          onCancelLibraryAnalysis
+        }
+        onRescanLibrary={
+          onRescanLibrary
+        }
+        libraryScanLoading={
+          libraryScanLoading
         }
         onCheckForUpdates={
           onCheckForUpdates

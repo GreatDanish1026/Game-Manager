@@ -49,6 +49,8 @@ import {
 import {
   getBatchHealthResult,
 } from "../services/installationHealthBatch";
+import { getGameFallbackInitial } from "../services/gameArtwork";
+import { useGameListArtwork } from "../services/useGameListArtwork";
 
 const CAPABILITY_FILTERS = [
   { id: "hdr", label: "HDR", group: "Graphics" },
@@ -565,6 +567,35 @@ function saveLibraryPreferences(
 }
 
 
+function GameArtworkThumb({ game, compact }) {
+  const [failedUrls, setFailedUrls] = useState([]);
+  const { elementRef, candidates: artworkUrls } = useGameListArtwork(game, failedUrls);
+  const artworkUrl = artworkUrls.find((url) => !failedUrls.includes(url));
+
+  return (
+    <span
+      ref={elementRef}
+      className={`flex shrink-0 items-center justify-center overflow-hidden rounded-md border border-white/[0.09] bg-white/[0.04] text-cyan-300/60 ${compact ? "h-7 w-7" : "h-9 w-9"}`}
+      aria-hidden="true"
+    >
+      {artworkUrl ? (
+        <img
+          src={artworkUrl}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          draggable={false}
+          onError={() => setFailedUrls((current) => [...current, artworkUrl])}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <span className={compact ? "text-xs font-bold" : "text-sm font-bold"}>{getGameFallbackInitial(game)}</span>
+      )}
+    </span>
+  );
+}
+
 function GameRow({
   game,
   selected,
@@ -626,6 +657,8 @@ function GameRow({
               gap-2
             "
           >
+            <GameArtworkThumb game={game} compact />
+
             {metadata.favorite ? (
               <Star
                 className="
@@ -694,6 +727,8 @@ function GameRow({
               gap-2
             "
           >
+            <GameArtworkThumb game={game} compact={false} />
+
             <div
               className="
                 min-w-0
@@ -900,6 +935,12 @@ export default function Sidebar({
     setAddGameOpen,
   ] =
     useState(false);
+
+  useEffect(() => {
+    const openAddGame = () => setAddGameOpen(true);
+    window.addEventListener("game-manager-open-add-game", openAddGame);
+    return () => window.removeEventListener("game-manager-open-add-game", openAddGame);
+  }, []);
 
   const [
     query,
@@ -2448,7 +2489,7 @@ export default function Sidebar({
                 opacity-55
               "
             >
-              Dashboard & library statistics
+              Recent games & library status
             </div>
           </div>
         </button>

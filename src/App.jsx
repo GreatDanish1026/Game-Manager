@@ -4173,6 +4173,15 @@ onAnalyzeRemaining={
             libraryAnalysis={
               libraryAnalysis
             }
+            onCancelLibraryAnalysis={
+              cancelLibraryAnalysis
+            }
+            onRescanLibrary={
+              scanGames
+            }
+            libraryScanLoading={
+              loading
+            }
             onCheckForUpdates={
               () =>
                 runUpdateCheck({
@@ -4210,7 +4219,7 @@ onAnalyzeRemaining={
       </AppErrorBoundary>
 
 
-      <LibraryAnalysisPanel
+      {selectedGame ? <LibraryAnalysisPanel
         analysis={
           libraryAnalysis
         }
@@ -4223,7 +4232,7 @@ onAnalyzeRemaining={
         onCancel={
           cancelLibraryAnalysis
         }
-      />
+      /> : null}
 
 
       {/* GAME_LOADING_OVERLAY_PHASE1 */}

@@ -39,6 +39,7 @@ mod steam_keyvalues;
 mod steam_launch_options;
 mod steam_launch_store;
 mod steam_rating;
+mod steam_artwork;
 mod system_hardware;
 mod updater_metadata;
 mod vortex;
@@ -172,6 +173,7 @@ pub fn run() {
             manual_games::pick_manual_game_executable,
             pcgamingwiki::get_pcgw_game_data,
             steam_rating::get_steam_community_rating,
+            steam_artwork::find_steam_app_id_for_artwork,
             renodx::get_renodx_mod_status,
             rhi::get_rhi_status,
             rhi::launch_rhi,
