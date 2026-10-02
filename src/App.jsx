@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -15,6 +16,8 @@ import LibraryAnalysisPanel from "./components/LibraryAnalysisPanel";
 import SettingsScreen from "./components/SettingsScreen";
 import GameLoadingOverlay from "./components/GameLoadingOverlay";
 import NxmLinkNotification from "./components/NxmLinkNotification";
+import PreLaunchReview from "./components/PreLaunchReview";
+import { getLaunchRestoreCount, restoreLaunchApps } from "./services/launchCleanup";
 
 import {
   gameMatchesLauncher,
@@ -1819,6 +1822,49 @@ import {
 } from "./services/libraryOverrides";
 
 export default function App() {
+  const [preLaunchRequest, setPreLaunchRequest] = useState(null);
+  const preLaunchRequestRef = useRef(null);
+  const [launchRestoreCount, setLaunchRestoreCount] = useState(0);
+  const [launchRestoreError, setLaunchRestoreError] = useState("");
+
+  const finishPreLaunchReview = useCallback((proceed) => {
+    const request = preLaunchRequestRef.current;
+    preLaunchRequestRef.current = null;
+    setPreLaunchRequest(null);
+    request?.resolve(proceed);
+  }, []);
+
+  useEffect(() => {
+    const onRequest = (event) => {
+      preLaunchRequestRef.current?.resolve(false);
+      preLaunchRequestRef.current = event.detail;
+      setPreLaunchRequest(event.detail);
+    };
+    window.addEventListener("gameatlas-prelaunch-review", onRequest);
+    return () => {
+      window.removeEventListener("gameatlas-prelaunch-review", onRequest);
+      preLaunchRequestRef.current?.resolve(false);
+    };
+  }, []);
+
+  useEffect(() => {
+    getLaunchRestoreCount().then(setLaunchRestoreCount).catch(() => {});
+    const updateCount = (event) => setLaunchRestoreCount(event.detail?.count ?? 0);
+    window.addEventListener("gameatlas-launch-apps-closed", updateCount);
+    return () => window.removeEventListener("gameatlas-launch-apps-closed", updateCount);
+  }, []);
+
+  async function reopenLaunchApps() {
+    setLaunchRestoreError("");
+    try {
+      const result = await restoreLaunchApps();
+      setLaunchRestoreCount(result.restorableCount ?? 0);
+      if (result.failures?.length) setLaunchRestoreError(result.failures.join(" • "));
+    } catch (error) {
+      setLaunchRestoreError(String(error));
+    }
+  }
+
   const [
     networkOnline,
     setNetworkOnline,
@@ -4275,6 +4321,22 @@ onAnalyzeRemaining={
           }
         }
       />
+
+      {preLaunchRequest ? (
+        <PreLaunchReview
+          key={preLaunchRequest.gameName}
+          request={preLaunchRequest}
+          onFinish={finishPreLaunchReview}
+        />
+      ) : null}
+
+      {launchRestoreCount > 0 ? (
+        <div className="fixed bottom-4 right-4 z-[90] max-w-sm rounded-xl border border-cyan-400/25 bg-[#14212a] p-4 text-sm text-white shadow-xl" role="status">
+          <div>{launchRestoreCount} app(s) closed for a game launch.</div>
+          <button type="button" onClick={reopenLaunchApps} className="mt-2 rounded-lg border border-cyan-300/25 px-3 py-1.5 text-xs text-cyan-100">Reopen apps</button>
+          {launchRestoreError ? <p className="mt-2 text-xs text-red-200">{launchRestoreError}</p> : null}
+        </div>
+      ) : null}
 
 
     </div>

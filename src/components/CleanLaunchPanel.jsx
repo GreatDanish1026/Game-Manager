@@ -223,7 +223,8 @@ export default function CleanLaunchPanel({
       }
 
       await launchDefaultProfile(
-        game
+        game,
+        { skipPreLaunchReview: true }
       );
 
       const stopped =

@@ -9,6 +9,7 @@ import {
   LoaderCircle,
   RefreshCcw,
   RotateCcw,
+  Rocket,
   Settings2,
   Sparkles,
   Stethoscope,
@@ -55,6 +56,7 @@ import {
 } from "../services/saveBackups";
 
 import DiagnosticsPanel from "./DiagnosticsPanel";
+import LaunchCleanupSettings from "./LaunchCleanupSettings";
 
 
 const REPOSITORY_URL =
@@ -81,6 +83,11 @@ const SECTIONS = [
 
     icon:
       Library,
+  },
+  {
+    id: "launch",
+    label: "Launch",
+    icon: Rocket,
   },
   {
     id:
@@ -1019,6 +1026,12 @@ export default function SettingsScreen({
               </SectionCard>
             ) : null}
 
+
+            {activeSection === "launch" ? (
+              <SectionCard title="Launch" description="App-wide pre-launch cleanup and GPU/RAM memory review." icon={Rocket}>
+                <LaunchCleanupSettings settings={settings} onSettingsChange={setSettings} />
+              </SectionCard>
+            ) : null}
 
             {activeSection ===
             "library" ? (

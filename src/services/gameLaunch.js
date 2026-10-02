@@ -6,10 +6,12 @@ import {
   createSaveBackup,
   getGamePreLaunchBackupEnabled,
 } from "./saveBackups";
+import { reviewBeforeGameLaunch } from "./launchCleanup";
 
 
 export async function launchGame(
-  game
+  game,
+  { skipPreLaunchReview = false } = {}
 ) {
   let preLaunchBackupCreated =
     false;
@@ -43,6 +45,8 @@ export async function launchGame(
       );
     }
   }
+
+  if (!skipPreLaunchReview) await reviewBeforeGameLaunch(game);
 
   const result =
     await invoke(

@@ -28,6 +28,15 @@ export const DEFAULT_SETTINGS = {
 
   backupBeforeLaunch:
     false,
+
+  launchCleanupEnabled:
+    false,
+
+  preLaunchMemoryReview:
+    false,
+
+  launchCleanupPaths:
+    [],
 };
 
 
@@ -108,6 +117,17 @@ function sanitizeSettings(
       Boolean(
         source.backupBeforeLaunch
       ),
+
+    launchCleanupEnabled:
+      Boolean(source.launchCleanupEnabled),
+
+    preLaunchMemoryReview:
+      Boolean(source.preLaunchMemoryReview),
+
+    launchCleanupPaths:
+      Array.isArray(source.launchCleanupPaths)
+        ? [...new Set(source.launchCleanupPaths.filter((path) => typeof path === "string" && path.length > 2 && path.length < 1024))].slice(0, 30)
+        : [],
   };
 }
 

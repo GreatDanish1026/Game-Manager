@@ -13,6 +13,7 @@ import {
 import {
   launchGame,
 } from "./gameLaunch";
+import { reviewBeforeGameLaunch } from "./launchCleanup";
 
 import {
   recordLaunchActivity,
@@ -576,7 +577,8 @@ async function createPreLaunchBackupIfEnabled(
 
 export async function launchConfiguredProfile(
   game,
-  profile
+  profile,
+  { skipPreLaunchReview = false } = {}
 ) {
   const normalized =
     normalizeProfile(
@@ -604,7 +606,8 @@ export async function launchConfiguredProfile(
 
     const result =
       await launchGame(
-        game
+        game,
+        { skipPreLaunchReview }
       );
 
     recordLaunchActivity(
@@ -640,6 +643,8 @@ export async function launchConfiguredProfile(
     await createPreLaunchBackupIfEnabled(
       game
     );
+
+  if (!skipPreLaunchReview) await reviewBeforeGameLaunch(game);
 
   const result =
     await invoke(
@@ -679,7 +684,8 @@ export async function launchConfiguredProfile(
 
 
 export async function launchDefaultProfile(
-  game
+  game,
+  options = {}
 ) {
   const state =
     getLaunchProfileState(
@@ -698,6 +704,7 @@ export async function launchDefaultProfile(
 
   return launchConfiguredProfile(
     game,
-    profile
+    profile,
+    options
   );
 }
