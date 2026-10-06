@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>GameAtlas</title>
+  <rect width="512" height="512" rx="104" fill="#071827"/>
+  <path d="M145 198h222c38 0 68 25 77 62l26 110c8 35-25 63-57 45l-78-43c-12-7-26-10-40-10h-78c-14 0-28 3-40 10l-78 43c-32 18-65-10-57-45l26-110c9-37 39-62 77-62Z" fill="#20c8f8"/>
+  <path d="M166 247v78M127 286h78" fill="none" stroke="#071827" stroke-linecap="round" stroke-width="25"/>
+  <circle cx="341" cy="263" r="17" fill="#071827"/>
+  <circle cx="381" cy="303" r="17" fill="#071827"/>
+</svg>

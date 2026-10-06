@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { closeLaunchProcesses, getLaunchProcesses, sortLaunchProcessesByVram } from "../services/launchCleanup";
+import ProcessMemoryMetrics from "./ProcessMemoryMetrics";
 
-const formatMemory = (bytes) => bytes == null ? "Not reported" : `${(bytes / 1048576).toFixed(0)} MiB`;
 const samePath = (left, right) => String(left).toLowerCase() === String(right).toLowerCase();
 
 export default function PreLaunchReview({ request, onFinish }) {
@@ -75,10 +75,10 @@ export default function PreLaunchReview({ request, onFinish }) {
         <p className="mt-2 text-xs text-white/45">Sorted by dedicated VRAM, highest first. Unreported readings appear last.</p>
         <div className="mt-2 min-h-0 flex-1 overflow-y-auto rounded-lg border border-white/10">
           {loading ? <p className="p-4 text-sm text-white/55">Checking running apps and GPU memory…</p> : rows.length === 0 ? <p className="p-4 text-sm text-white/55">No matching user apps found. You can launch without closing anything.</p> : rows.map((row) => (
-            <label key={`${row.pid}-${row.startedAt}`} className="flex cursor-pointer items-center gap-3 border-b border-white/[0.06] px-3 py-2 last:border-0 hover:bg-white/[0.04]">
+            <label key={`${row.pid}-${row.startedAt}`} className="flex cursor-pointer flex-wrap items-center gap-3 border-b border-white/[0.06] px-3 py-3 last:border-0 hover:bg-white/[0.04] sm:flex-nowrap">
               <input type="checkbox" checked={selected.includes(row.pid)} onChange={() => setSelected((current) => current.includes(row.pid) ? current.filter((pid) => pid !== row.pid) : [...current, row.pid])} className="accent-cyan-400" />
-              <span className="min-w-0 flex-1"><span className="block truncate text-sm text-white/85">{row.name}</span><span className="block truncate text-[11px] text-white/40" title={row.path}>{row.path}</span></span>
-              <span className="shrink-0 text-right text-xs text-white/60"><span className="block text-white/40">{row.gpuLabel ?? "GPU not identified"}</span><span className="block">VRAM: {formatMemory(row.dedicatedBytes)}</span><span className="block text-white/40">Shared GPU: {formatMemory(row.sharedBytes)}</span><span className="block">RAM: {formatMemory(row.ramBytes)}</span></span>
+              <span className="min-w-0 flex-1 basis-[calc(100%-2rem)] sm:basis-0"><span className="block truncate text-sm font-medium text-white/90" title={row.name}>{row.name}</span><span className="block truncate text-xs text-white/45" title={row.path}>{row.path}</span></span>
+              <div className="ml-7 min-w-0 flex-1 sm:ml-0 sm:flex-none"><ProcessMemoryMetrics row={row} showShared /></div>
             </label>
           ))}
         </div>
