@@ -133,6 +133,27 @@ function remainingNexusQuota(
 }
 
 
+function safeNexusGameDomain(
+  value
+) {
+  const domain = String(value ?? "").trim();
+  return /^[a-z0-9_-]+$/i.test(domain)
+    ? domain
+    : null;
+}
+
+
+function nexusGameSlug(
+  value
+) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/gi, "")
+    .toLowerCase();
+}
+
+
 function announceNexusDownloadStage(
   downloadId,
   phase
@@ -1352,6 +1373,16 @@ export default function LinuxModDeploymentPanel({
   }
 
 
+  async function openNexusGameMods() {
+    try {
+      setError(null);
+      await openUrl(nexusGameModsUrl);
+    } catch (openError) {
+      setError(String(openError));
+    }
+  }
+
+
   const busy =
     loading
     || picking
@@ -1405,6 +1436,17 @@ export default function LinuxModDeploymentPanel({
       (profile) => profile.active
     )
     ?? null;
+  const resolvedNexusGameDomain = safeNexusGameDomain(
+    status?.deployments?.find(
+      (deployment) => deployment.nexusGameDomain
+    )?.nexusGameDomain
+    ?? game?.vortex?.gameId
+  );
+  const nexusGamePageSlug = resolvedNexusGameDomain
+    ?? nexusGameSlug(game?.name);
+  const nexusGameModsUrl = nexusGamePageSlug
+    ? `https://www.nexusmods.com/games/${nexusGamePageSlug}`
+    : "https://www.nexusmods.com/games";
   const views = [
     {
       id: "mods",
@@ -1501,6 +1543,19 @@ export default function LinuxModDeploymentPanel({
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={openNexusGameMods}
+            title={resolvedNexusGameDomain
+              ? `Open the ${game?.name ?? "game"} mods page on Nexus Mods`
+              : `Open the Nexus Mods game page for ${game?.name ?? "this game"}`
+            }
+            className="inline-flex items-center gap-2 rounded-lg border border-violet-300/20 bg-violet-300/[0.07] px-3 py-2 text-xs font-semibold text-violet-100/75 hover:bg-violet-300/[0.12]"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Browse Nexus Mods
+          </button>
+
           {status?.stagingPath ? (
             <button
               type="button"

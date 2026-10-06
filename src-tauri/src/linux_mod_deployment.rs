@@ -520,6 +520,103 @@ fn is_mod_documentation(path: &Path) -> bool {
 }
 
 #[cfg(target_os = "linux")]
+fn unreal_paks_suffix(path: &Path) -> Option<PathBuf> {
+    let components = path
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => value.to_str(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let paks_index = components.windows(2).position(|pair| {
+        pair[0].eq_ignore_ascii_case("Content") && pair[1].eq_ignore_ascii_case("Paks")
+    })? + 2;
+    if paks_index >= components.len() {
+        return None;
+    }
+    Some(components[paks_index..].iter().collect())
+}
+
+#[cfg(target_os = "linux")]
+fn has_complete_unreal_iostore_sets(files: &[SourceFile]) -> bool {
+    let mut package_sets = BTreeMap::<String, BTreeSet<String>>::new();
+    for file in files {
+        let extension = file
+            .relative
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(str::to_ascii_lowercase);
+        let Some(extension) =
+            extension.filter(|value| matches!(value.as_str(), "pak" | "ucas" | "utoc"))
+        else {
+            continue;
+        };
+        let Some(stem) = file.relative.file_stem().and_then(|value| value.to_str()) else {
+            return false;
+        };
+        package_sets
+            .entry(stem.to_ascii_lowercase())
+            .or_default()
+            .insert(extension);
+    }
+    !package_sets.is_empty()
+        && package_sets.values().all(|extensions| {
+            ["pak", "ucas", "utoc"]
+                .iter()
+                .all(|required| extensions.contains(*required))
+        })
+}
+
+#[cfg(target_os = "linux")]
+fn plan_loose_unreal_iostore_mod(
+    paks_relative: &Path,
+    files: Vec<SourceFile>,
+) -> Result<DeploymentPlan, String> {
+    let destination_relative = paks_relative.join("~mods");
+    let destination_root = safe_relative_text(&destination_relative)?;
+    let skipped_file_count = files
+        .iter()
+        .filter(|file| is_mod_documentation(&file.relative))
+        .count();
+    let mut planned = Vec::new();
+    let mut seen = HashSet::new();
+    for mut file in files
+        .into_iter()
+        .filter(|file| is_unreal_package_file(&file.relative))
+    {
+        let file_name = file
+            .relative
+            .file_name()
+            .ok_or_else(|| "An Unreal package file has no file name.".to_string())?;
+        let relative = destination_relative.join(file_name);
+        let relative_text = safe_relative_text(&relative)?;
+        if !seen.insert(relative_text.to_ascii_lowercase()) {
+            return Err(format!(
+                "Multiple Unreal package files would use the same destination: {relative_text}"
+            ));
+        }
+        file.relative = relative;
+        file.relative_text = relative_text;
+        planned.push(file);
+    }
+    planned.sort_by(|left, right| left.relative_text.cmp(&right.relative_text));
+    let mut warning = "GameAtlas detected a complete Unreal IoStore package set and will keep its PAK, UCAS, and UTOC files together in Content/Paks/~mods. The ~mods folder will be created during deployment if it does not exist. Confirm the preview and fully exit the game before deploying.".to_string();
+    if skipped_file_count > 0 {
+        warning.push_str(&format!(
+            " {skipped_file_count} documentation file{} will remain in staging.",
+            if skipped_file_count == 1 { "" } else { "s" }
+        ));
+    }
+    Ok(DeploymentPlan {
+        files: planned,
+        mode: "Unreal IoStore package mod".to_string(),
+        destination_root,
+        skipped_file_count,
+        warning,
+    })
+}
+
+#[cfg(target_os = "linux")]
 fn find_unreal_paks_directory(install: &Path) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
     let mut stack = vec![(install.to_path_buf(), 0_usize)];
@@ -575,7 +672,7 @@ fn find_unreal_paks_directory(install: &Path) -> Result<PathBuf, String> {
     match candidates.as_slice() {
         [candidate] => Ok(candidate.clone()),
         [] => Err(
-            "This payload contains Unreal PAK files, but GameAtlas could not find the game's Content/Paks folder. Deployment was stopped instead of copying them to the game root."
+            "This payload contains Unreal package files, but GameAtlas could not find the game's Content/Paks folder. Deployment was stopped instead of copying them to the game root."
                 .to_string(),
         ),
         _ => {
@@ -595,8 +692,10 @@ fn find_unreal_paks_directory(install: &Path) -> Result<PathBuf, String> {
 
 #[cfg(target_os = "linux")]
 fn deployment_plan(install: &Path, files: Vec<SourceFile>) -> Result<DeploymentPlan, String> {
-    let has_pak = files.iter().any(|file| extension_is(&file.relative, "pak"));
-    if !has_pak {
+    let has_unreal_package = files
+        .iter()
+        .any(|file| is_unreal_package_file(&file.relative));
+    if !has_unreal_package {
         return Ok(DeploymentPlan {
             files,
             mode: "Game root".to_string(),
@@ -611,17 +710,58 @@ fn deployment_plan(install: &Path, files: Vec<SourceFile>) -> Result<DeploymentP
         !is_unreal_package_file(&file.relative) && !is_mod_documentation(&file.relative)
     }) {
         return Err(format!(
-            "This archive mixes Unreal PAK files with an unsupported payload file ({}). GameAtlas stopped because it cannot safely infer one installation layout.",
+            "This archive mixes Unreal package files with an unsupported payload file ({}). GameAtlas stopped because it cannot safely infer one installation layout.",
+            file.relative_text
+        ));
+    }
+
+    if let Some(file) = files.iter().find(|file| {
+        is_unreal_package_file(&file.relative) && unreal_paks_suffix(&file.relative).is_none()
+    }) {
+        let all_packages_are_loose = files
+            .iter()
+            .filter(|candidate| is_unreal_package_file(&candidate.relative))
+            .all(|candidate| unreal_paks_suffix(&candidate.relative).is_none());
+        if all_packages_are_loose && has_complete_unreal_iostore_sets(&files) {
+            let paks = find_unreal_paks_directory(install)?;
+            let paks_relative = paks.strip_prefix(install).map_err(|_| {
+                "The Unreal IoStore mod destination escaped the game folder.".to_string()
+            })?;
+            return plan_loose_unreal_iostore_mod(paks_relative, files);
+        }
+        return Err(format!(
+            "GameAtlas cannot safely infer where {} belongs. A loose Unreal package may require ~mods, LogicMods, UE4SS, or another game-specific location. Use an archive that includes its Content/Paks/... folder structure, arrange an extracted staging folder to mirror that structure, or follow the mod author's manual installation instructions.",
             file.relative_text
         ));
     }
 
     let paks = find_unreal_paks_directory(install)?;
-    let destination = paks.join("~mods");
-    let destination_relative = destination
+    let paks_relative = paks
         .strip_prefix(install)
         .map_err(|_| "The Unreal mod destination escaped the game folder.".to_string())?;
-    let destination_root = safe_relative_text(destination_relative)?;
+    let uses_mods_folder = files
+        .iter()
+        .filter(|file| is_unreal_package_file(&file.relative))
+        .all(|file| {
+            unreal_paks_suffix(&file.relative)
+                .and_then(|suffix| {
+                    suffix
+                        .components()
+                        .next()
+                        .map(|component| component.as_os_str().to_owned())
+                })
+                .and_then(|component| {
+                    component
+                        .to_str()
+                        .map(|value| value.eq_ignore_ascii_case("~mods"))
+                })
+                .unwrap_or(false)
+        });
+    let destination_root = safe_relative_text(&if uses_mods_folder {
+        paks_relative.join("~mods")
+    } else {
+        paks_relative.to_path_buf()
+    })?;
     let skipped_file_count = files
         .iter()
         .filter(|file| is_mod_documentation(&file.relative))
@@ -632,11 +772,13 @@ fn deployment_plan(install: &Path, files: Vec<SourceFile>) -> Result<DeploymentP
         .into_iter()
         .filter(|file| is_unreal_package_file(&file.relative))
     {
-        let file_name = file
-            .relative
-            .file_name()
-            .ok_or_else(|| "An Unreal package file has no file name.".to_string())?;
-        let relative = destination_relative.join(file_name);
+        let suffix = unreal_paks_suffix(&file.relative).ok_or_else(|| {
+            format!(
+                "GameAtlas cannot safely infer where {} belongs.",
+                file.relative_text
+            )
+        })?;
+        let relative = paks_relative.join(suffix);
         let relative_text = safe_relative_text(&relative)?;
         if !seen.insert(relative_text.to_ascii_lowercase()) {
             return Err(format!(
@@ -651,15 +793,23 @@ fn deployment_plan(install: &Path, files: Vec<SourceFile>) -> Result<DeploymentP
 
     Ok(DeploymentPlan {
         files: planned,
-        mode: "Unreal PAK mod".to_string(),
+        mode: "Explicit Unreal package layout".to_string(),
         destination_root,
         skipped_file_count,
-        warning: if skipped_file_count == 0 {
-            "GameAtlas detected an Unreal PAK payload and will deploy it to the game's Content/Paks/~mods folder. Fully exit the game before deploying."
+        warning: if uses_mods_folder && skipped_file_count == 0 {
+            "This payload explicitly requires Content/Paks/~mods. GameAtlas will create the ~mods folder during deployment if it does not exist. Confirm the preview matches the mod author's instructions and fully exit the game before deploying."
+                .to_string()
+        } else if uses_mods_folder {
+            format!(
+                "This payload explicitly requires Content/Paks/~mods. GameAtlas will create the ~mods folder during deployment if it does not exist. {skipped_file_count} documentation file{} will remain in staging. Confirm the preview matches the mod author's instructions and fully exit the game before deploying.",
+                if skipped_file_count == 1 { "" } else { "s" }
+            )
+        } else if skipped_file_count == 0 {
+            "GameAtlas found an explicit Content/Paks layout in this payload and will preserve everything after that folder. It did not infer a ~mods, LogicMods, or UE4SS destination. Confirm the preview matches the mod author's instructions and fully exit the game before deploying."
                 .to_string()
         } else {
             format!(
-                "GameAtlas detected an Unreal PAK payload and will deploy it to the game's Content/Paks/~mods folder. {skipped_file_count} documentation file{} will remain in staging. Fully exit the game before deploying.",
+                "GameAtlas found an explicit Content/Paks layout in this payload and will preserve everything after that folder. It did not infer a ~mods, LogicMods, or UE4SS destination. {skipped_file_count} documentation file{} will remain in staging. Confirm the preview matches the mod author's instructions and fully exit the game before deploying.",
                 if skipped_file_count == 1 { "" } else { "s" }
             )
         },
@@ -4073,7 +4223,7 @@ pub fn remove_linux_mod_deployment(
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::{
-        activate_layer, deactivate_layer, deployment_id, deployment_plan, file_sha256,
+        activate_layer, copy_atomic, deactivate_layer, deployment_id, deployment_plan, file_sha256,
         normalized_zip_entry_path, profile_mod_ids, safe_relative_text, validate_deployment_id,
         validate_rar_listing, verify_library_at, write_library_state, write_manifest,
         DeploymentManifest, LsarEntry, LsarListing, ManifestFile, ModLibraryState, SourceFile,
@@ -4153,14 +4303,14 @@ mod tests {
     }
 
     #[test]
-    fn routes_loose_unreal_packages_to_mods_directory() {
+    fn rejects_loose_unreal_packages_without_a_destination_rule() {
         let root = std::env::temp_dir().join(format!("gameatlas-pak-test-{}", deployment_id()));
         let install = root.join("HighOnLife");
         fs::create_dir_all(install.join("Oregon/Content/Paks")).unwrap();
         fs::create_dir_all(install.join("Engine/Programs/CrashReportClient/Content/Paks")).unwrap();
         let source = root.join("Health_P.pak");
         fs::write(&source, b"test").unwrap();
-        let plan = deployment_plan(
+        let error = deployment_plan(
             &install,
             vec![SourceFile {
                 source,
@@ -4169,14 +4319,84 @@ mod tests {
                 size_bytes: 4,
             }],
         )
+        .unwrap_err();
+
+        assert!(error.contains("cannot safely infer"));
+        assert!(error.contains("~mods, LogicMods, UE4SS"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn routes_complete_loose_iostore_sets_to_a_created_mods_folder() {
+        let root = std::env::temp_dir().join(format!("gameatlas-iostore-test-{}", deployment_id()));
+        let install = root.join("ExampleGame");
+        fs::create_dir_all(install.join("Example/Content/Paks")).unwrap();
+        assert!(!install.join("Example/Content/Paks/~mods").exists());
+
+        let files = ["pak", "ucas", "utoc"]
+            .into_iter()
+            .map(|extension| {
+                let file_name = format!("ExampleVisuals_P.{extension}");
+                let source = root.join(&file_name);
+                fs::write(&source, extension.as_bytes()).unwrap();
+                SourceFile {
+                    source,
+                    relative: format!("ArchiveWrapper/{file_name}").into(),
+                    relative_text: format!("ArchiveWrapper/{file_name}"),
+                    size_bytes: extension.len() as u64,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let plan = deployment_plan(&install, files).unwrap();
+        assert_eq!(plan.mode, "Unreal IoStore package mod");
+        assert_eq!(plan.destination_root, "Example/Content/Paks/~mods");
+        assert_eq!(plan.files.len(), 3);
+        assert!(plan.files.iter().all(|file| {
+            file.relative_text
+                .starts_with("Example/Content/Paks/~mods/ExampleVisuals_P.")
+        }));
+
+        for (index, file) in plan.files.iter().enumerate() {
+            let destination = install.join(&file.relative);
+            let temporary =
+                install.join(format!("Example/Content/Paks/.gameatlas-test-{index}.tmp"));
+            copy_atomic(&file.source, &destination, &temporary).unwrap();
+        }
+        assert!(install.join("Example/Content/Paks/~mods").is_dir());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn creates_an_explicit_unreal_mods_destination_when_missing() {
+        let root = std::env::temp_dir().join(format!("gameatlas-pak-test-{}", deployment_id()));
+        let install = root.join("ExampleGame");
+        fs::create_dir_all(install.join("Example/Content/Paks")).unwrap();
+        assert!(!install.join("Example/Content/Paks/~mods").exists());
+        let source = root.join("Health_P.pak");
+        fs::write(&source, b"test").unwrap();
+        let plan = deployment_plan(
+            &install,
+            vec![SourceFile {
+                source: source.clone(),
+                relative: "ArchiveWrapper/Example/Content/Paks/~mods/Health_P.pak".into(),
+                relative_text: "ArchiveWrapper/Example/Content/Paks/~mods/Health_P.pak".to_string(),
+                size_bytes: 4,
+            }],
+        )
         .unwrap();
 
-        assert_eq!(plan.mode, "Unreal PAK mod");
-        assert_eq!(plan.destination_root, "Oregon/Content/Paks/~mods");
+        assert_eq!(plan.mode, "Explicit Unreal package layout");
+        assert_eq!(plan.destination_root, "Example/Content/Paks/~mods");
         assert_eq!(
             plan.files[0].relative_text,
-            "Oregon/Content/Paks/~mods/Health_P.pak"
+            "Example/Content/Paks/~mods/Health_P.pak"
         );
+        let destination = install.join(&plan.files[0].relative);
+        let temporary = install.join("Example/Content/Paks/.gameatlas-test.tmp");
+        copy_atomic(&source, &destination, &temporary).unwrap();
+        assert!(destination.is_file());
+        assert!(install.join("Example/Content/Paks/~mods").is_dir());
         fs::remove_dir_all(root).unwrap();
     }
 
