@@ -834,6 +834,20 @@ fn same_file_category(left: &FileResponse, right: &FileResponse) -> bool {
     }
 }
 
+// Archived, deleted and old-version files are never offered as updates, even
+// when the category id alone would match the installed file.
+fn retired_file_category(file: &FileResponse) -> bool {
+    matches!(file.category_id, Some(4 | 6 | 7))
+        || matches!(
+            file.category_name
+                .trim()
+                .to_ascii_uppercase()
+                .replace(' ', "_")
+                .as_str(),
+            "OLD_VERSION" | "DELETED" | "ARCHIVED"
+        )
+}
+
 fn update_candidates(
     files: &[FileResponse],
     current_file_id: u64,
@@ -846,6 +860,7 @@ fn update_candidates(
                 && file.uploaded_timestamp > current.uploaded_timestamp
                 && supported_archive_name(&file.file_name)
                 && same_file_category(file, current)
+                && !retired_file_category(file)
         })
         .cloned()
         .collect::<Vec<_>>();

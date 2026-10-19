@@ -130,10 +130,9 @@ fn accounts_in_roots(
             Some(n) => kv::object(n)?,
             None => &[],
         };
-        let userdata = root.join("userdata");
-        if !userdata.exists() {
+        let Ok(userdata) = fs::canonicalize(root.join("userdata")) else {
             continue;
-        }
+        };
         for entry in fs::read_dir(&userdata).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
             let id = entry.file_name().to_string_lossy().into_owned();
@@ -225,6 +224,17 @@ fn ensure_stopped() -> Result<(), String> {
         Ok(())
     }
 }
+// Directory fsync makes the rename durable on Unix; Windows cannot open a
+// directory as a File and NTFS journals the rename itself.
+fn sync_dir(dir: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    File::open(dir)
+        .and_then(|f| f.sync_all())
+        .map_err(|e| e.to_string())?;
+    #[cfg(not(unix))]
+    let _ = dir;
+    Ok(())
+}
 struct Cleanup(PathBuf);
 impl Drop for Cleanup {
     fn drop(&mut self) {
@@ -308,15 +318,15 @@ fn transaction(
     if fs::read(&backup_path).map_err(|e| e.to_string())? != original.as_bytes() {
         return Err("Backup verification failed".into());
     }
-    File::open(config.parent().ok_or("Missing config directory")?)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())?;
+    sync_dir(config.parent().ok_or("Missing config directory")?)?;
     let (temporary, mut file) = unique_file(config, "tmp")?;
     let _temp_cleanup = Cleanup(temporary.clone());
     file.set_permissions(metadata.permissions())
         .and_then(|_| file.write_all(updated.as_bytes()))
         .and_then(|_| file.sync_all())
         .map_err(|e| e.to_string())?;
+    // Windows cannot rename a file that still has an open handle.
+    drop(file);
     guard()?;
     if fs::symlink_metadata(config)
         .map_err(|e| e.to_string())?
@@ -335,9 +345,7 @@ fn transaction(
         )
     })?;
     let verify = || -> Result<(), String> {
-        File::open(config.parent().ok_or("Missing config directory")?)
-            .and_then(|f| f.sync_all())
-            .map_err(|e| e.to_string())?;
+        sync_dir(config.parent().ok_or("Missing config directory")?)?;
         let actual = read_text(config)?;
         if actual != updated || kv::launch_value(&actual, app)?.as_deref() != Some(value) {
             return Err("Read-back did not match saved data".into());
@@ -371,12 +379,27 @@ pub fn write(
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture() -> (PathBuf, Cleanup) {
-        let (path, mut file) =
-            unique_file(&env::temp_dir().join("localconfig.vdf"), "test").unwrap();
+    // Aborted transactions intentionally keep their backup, so each fixture
+    // gets its own directory that is removed as a whole.
+    struct DirCleanup(PathBuf);
+    impl Drop for DirCleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    fn fixture() -> (PathBuf, DirCleanup) {
+        let dir = env::temp_dir().join(format!(
+            "gameatlas-launch-store-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let (path, mut file) = unique_file(&dir.join("localconfig.vdf"), "test").unwrap();
         file.write_all(b"UserLocalConfigStore { Software { Valve { Steam { apps { 42 { LaunchOptions old } 43 { LaunchOptions keep } } } } } }").unwrap();
-        let cleanup = Cleanup(path.clone());
-        (path, cleanup)
+        (path, DirCleanup(dir))
     }
     #[test]
     fn backup_atomic_write_clear_and_stale_rejection() {
