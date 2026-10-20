@@ -50,8 +50,8 @@ const SYMPTOMS = [
       {
         label: "Check known issues",
         detail: "Look for game-specific fixes and unresolved problems.",
-        targetId: "troubleshooting-known-issues",
-        sectionIds: ["technical-troubleshooting"],
+        targetId: "game-known-issues",
+        sectionIds: ["known-issues"],
       },
       {
         label: "Validate configuration",

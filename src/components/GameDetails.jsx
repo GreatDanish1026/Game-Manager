@@ -1,22 +1,17 @@
 import {
   BadgeCheck,
   CalendarDays,
-  Code2,
-  Cpu,
   ExternalLink,
-  FileCode2,
   FolderOpen,
+  Archive,
   Gamepad2,
   HardDrive,
-  HeartPulse,
   MonitorCog,
   Info,
   Monitor,
   Package,
   Play,
-  LoaderCircle,
   Puzzle,
-  Radio,
   Settings2,
   Store,
   TriangleAlert,
@@ -25,7 +20,9 @@ import {
 } from "lucide-react";
 
 import {
+  forwardRef,
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -33,7 +30,6 @@ import {
   openUrl,
 } from "@tauri-apps/plugin-opener";
 
-import StoreBadge from "./StoreBadge";
 import ControllerCompatibility from "./ControllerCompatibility";
 import EssentialImprovements from "./EssentialImprovements";
 import CollapsibleSection from "./CollapsibleSection";
@@ -41,7 +37,7 @@ import CompactFeatureGrid from "./CompactFeatureGrid";
 import ModDashboard from "./ModDashboard";
 import ModConflictInspectorPanel from "./ModConflictInspectorPanel";
 import LinuxModDeploymentPanel from "./LinuxModDeploymentPanel";
-import QuickStatusBar from "./QuickStatusBar";
+import GameHeader from "./GameHeader";
 import LaunchProfilesPanel from "./LaunchProfilesPanel";
 import PlayStatusNotesPanel from "./PlayStatusNotesPanel";
 import RecentActivityPanel from "./RecentActivityPanel";
@@ -65,23 +61,14 @@ import LibraryEntryEditor from "./LibraryEntryEditor";
 import ModChangeTimeline from "./ModChangeTimeline";
 import GameVersionPanel from "./GameVersionPanel";
 import CompatibilitySetupPanel from "./CompatibilitySetupPanel";
-import GameSectionNavigator from "./GameSectionNavigator";
 import {
   error as logError,
 } from "../services/logging";
 
-import {
-  openGamePath,
-} from "../services/pathActions";
-
-import {
-  launchDefaultProfile,
-} from "../services/launchProfiles";
 
 import {
   storeGameInsight,
 } from "../services/libraryInsights";
-import { getGameCoverArt } from "../services/gameArtwork";
 import ProtonToolboxPanel from "./ProtonToolboxPanel";
 import LinuxPerformancePanel from "./LinuxPerformancePanel";
 import LinuxReadinessOverview from "./LinuxReadinessOverview";
@@ -609,10 +596,155 @@ function modSummary(
 }
 
 
+const GAME_TABS = [
+  { id: "overview", label: "Overview", icon: Info },
+  { id: "setup", label: "Setup & performance", icon: MonitorCog },
+  { id: "mods", label: "Mods", icon: Puzzle },
+  { id: "files", label: "Files & saves", icon: HardDrive },
+  { id: "troubleshoot", label: "Troubleshoot", icon: Wrench },
+];
+
+
+// Section ids predate the tabs and are still used by links across the app.
+const SECTION_TABS = {
+  overview: "overview",
+  "known-issues": "overview",
+  "my-game": "overview",
+  "compatibility-performance": "setup",
+  "launch-profiles": "setup",
+  "pc-features": "setup",
+  "controller-support": "setup",
+  mods: "mods",
+  "mod-tools-shortcuts": "mods",
+  "files-installation": "files",
+  "saves-screenshots": "files",
+  "technical-troubleshooting": "troubleshoot",
+  "advanced-diagnostics": "troubleshoot",
+};
+
+
+function PageSection({
+  id,
+  icon: Icon,
+  title,
+  description,
+  children,
+}) {
+  return (
+    <section
+      id={`game-section-${id}`}
+      aria-labelledby={`game-section-${id}-title`}
+      className="mb-10 scroll-mt-20"
+    >
+      <div className="mb-4 flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-300">
+          <Icon className="h-4 w-4" />
+        </div>
+
+        <div className="min-w-0">
+          <h2 id={`game-section-${id}-title`} className="text-lg font-semibold text-white/90">
+            {title}
+          </h2>
+          {description ? (
+            <p className="mt-0.5 text-sm text-white/45">{description}</p>
+          ) : null}
+        </div>
+      </div>
+
+      {children}
+    </section>
+  );
+}
+
+
+const GameTabBar = forwardRef(function GameTabBar({
+  activeTab,
+  onSelect,
+}, ref) {
+  function handleKeyDown(event) {
+    const index = GAME_TABS.findIndex((tab) => tab.id === activeTab);
+    const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
+
+    if (!step) return;
+
+    event.preventDefault();
+    const next = GAME_TABS[(index + step + GAME_TABS.length) % GAME_TABS.length];
+    onSelect(next.id);
+    document.getElementById(`game-tab-${next.id}`)?.focus();
+  }
+
+  return (
+    <div
+      ref={ref}
+      className="sticky top-0 z-20 -mx-2 mb-6 border-b border-white/[0.07] bg-[#0b0f17]/95 px-2 backdrop-blur-xl"
+    >
+      <div
+        role="tablist"
+        aria-label="Game sections"
+        onKeyDown={handleKeyDown}
+        className="flex gap-1 overflow-x-auto"
+      >
+        {GAME_TABS.map((tab) => {
+          const Icon = tab.icon;
+          const active = tab.id === activeTab;
+
+          return (
+            <button
+              key={tab.id}
+              id={`game-tab-${tab.id}`}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              aria-controls={`game-tabpanel-${tab.id}`}
+              tabIndex={active ? 0 : -1}
+              onClick={() => onSelect(tab.id)}
+              className={`-mb-px inline-flex shrink-0 items-center gap-2 border-b-2 px-3 py-3.5 xl:px-4 text-sm font-semibold whitespace-nowrap transition focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-300 ${
+                active
+                  ? "border-cyan-300 text-white"
+                  : "border-transparent text-white/50 hover:text-white/80"
+              }`}
+            >
+              <Icon className={`h-4 w-4 ${active ? "text-cyan-300" : ""}`} />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
+
+// Tabs mount on first visit and then stay mounted (hidden) so panel state
+// and in-progress checks survive switching back and forth.
+function TabPanel({
+  id,
+  activeTab,
+  visitedTabs,
+  children,
+}) {
+  if (!visitedTabs.has(id)) {
+    return null;
+  }
+
+  return (
+    <div
+      id={`game-tabpanel-${id}`}
+      role="tabpanel"
+      aria-labelledby={`game-tab-${id}`}
+      hidden={activeTab !== id}
+    >
+      {children}
+    </div>
+  );
+}
+
+
 export default function GameDetails({
   game,
   focusTarget = null,
   libraryGames = [],
+  hiddenGameIds = [],
   onAnalyzeRemaining,
   onRefreshStale,
   libraryAnalysis,
@@ -625,33 +757,47 @@ export default function GameDetails({
   networkOnline = true,
 }) {
   const [
-    pathError,
-    setPathError,
+    activeTab,
+    setActiveTab,
   ] =
-    useState(null);
+    useState("overview");
 
   const [
-    launchingGame,
-    setLaunchingGame,
+    visitedTabs,
+    setVisitedTabs,
   ] =
-    useState(false);
+    useState(() => new Set(["overview"]));
 
-  const [
-    launchError,
-    setLaunchError,
-  ] =
-    useState(null);
+  const tabBarRef =
+    useRef(null);
 
-  const [
-    coverImageFailed,
-    setCoverImageFailed,
-  ] =
-    useState(false);
+  function showTab(
+    tabId,
+    { scrollToTabs = false } = {}
+  ) {
+    setActiveTab(tabId);
+    setVisitedTabs((current) => (current.has(tabId) ? current : new Set([...current, tabId])));
 
-  const coverArtUrl =
-    getGameCoverArt(
-      game
-    );
+    // Keep the tab bar in view when switching from far down a long tab.
+    if (scrollToTabs && tabBarRef.current?.getBoundingClientRect().top <= 1) {
+      tabBarRef.current.scrollIntoView({ block: "start" });
+    }
+  }
+
+  // Older links (troubleshooting guide, health checks, NXM links) open
+  // sections by id; switch to the tab that now holds that section.
+  useEffect(() => {
+    function handleOpenSection(event) {
+      const tabId = SECTION_TABS[event?.detail?.id];
+
+      if (tabId) {
+        showTab(tabId);
+      }
+    }
+
+    window.addEventListener("game-manager-open-section", handleOpenSection);
+    return () => window.removeEventListener("game-manager-open-section", handleOpenSection);
+  }, []);
 
   useEffect(() => {
     if (!game || focusTarget !== "health") {
@@ -690,18 +836,6 @@ export default function GameDetails({
 
   useEffect(
     () => {
-      setCoverImageFailed(
-        false
-      );
-    },
-    [
-      coverArtUrl,
-    ]
-  );
-
-
-  useEffect(
-    () => {
       if (game) {
         storeGameInsight(
           game
@@ -728,6 +862,9 @@ export default function GameDetails({
         games={
           libraryGames
         }
+        hiddenGameIds={
+          hiddenGameIds
+        }
         onAnalyzeRemaining={
           onAnalyzeRemaining
         }
@@ -746,12 +883,6 @@ export default function GameDetails({
         libraryScanLoading={
           libraryScanLoading
         }
-        onCheckForUpdates={
-          onCheckForUpdates
-        }
-        updateCheckStatus={
-          updateCheckStatus
-        }
         onSelectGame={
           onSelectGame
         }
@@ -769,63 +900,6 @@ export default function GameDetails({
 
   const isLinux =
     runningOnLinux();
-
-
-  async function handleLaunchGame() {
-    setLaunchingGame(
-      true
-    );
-
-    setLaunchError(
-      null
-    );
-
-    try {
-      await launchDefaultProfile(
-        game
-      );
-    } catch (error) {
-      logError(
-        "[Launch] Failed:",
-        error
-      );
-
-      setLaunchError(
-        String(
-          error
-        )
-      );
-    } finally {
-      setLaunchingGame(
-        false
-      );
-    }
-  }
-
-
-  async function handleOpenPath(
-    path
-  ) {
-    setPathError(
-      null
-    );
-
-    try {
-      await openGamePath(
-        path,
-        game.installPath
-      );
-    } catch (error) {
-      logError(
-        "[Paths] Failed to open:",
-        error
-      );
-
-      setPathError(
-        String(error)
-      );
-    }
-  }
 
 
   return (
@@ -847,817 +921,294 @@ export default function GameDetails({
           xl:px-8
         "
       >
-        {/* ====================================================
-            HEADER + AT-A-GLANCE STATUS
-        ==================================================== */}
+        <GameHeader
+          game={game}
+          networkOnline={networkOnline}
+        />
 
-        <section
-          className="
-            mb-7
-          "
-        >
-          <div
-            className="
-              flex
-              flex-col
-              gap-6
-              sm:flex-row
-              sm:items-start
-              sm:justify-between
-            "
+        <GameTabBar
+          ref={tabBarRef}
+          activeTab={activeTab}
+          onSelect={(tabId) => showTab(tabId, { scrollToTabs: true })}
+        />
+
+        <TabPanel id="overview" activeTab={activeTab} visitedTabs={visitedTabs}>
+          {isLinux ? (
+            <LinuxReadinessOverview
+              key={`linux-readiness-${game.id}`}
+              game={game}
+            />
+          ) : null}
+
+          <PageSection
+            id="known-issues"
+            icon={TriangleAlert}
+            title="Known issues & fixes"
+            description="Unresolved problems and recommended fixes from PCGamingWiki."
           >
-            <div
-              className="
-                min-w-0
-                flex-1
-              "
-            >
-              <StoreBadge
-                store={
-                  game.store
-                }
-              />
-
-              <h1
-                className="
-                  mt-3
-                  break-words
-                  text-3xl
-                  font-bold
-                  tracking-tight
-                  text-white
-                  xl:text-4xl
-                "
-              >
-                {game.name}
-              </h1>
-
-              <div
-                className="
-                  mt-3
-                  flex
-                  flex-wrap
-                  gap-5
-                  text-sm
-                  text-white/40
-                "
-              >
-                {game.developer ? (
-                  <div
-                    className="
-                      flex
-                      items-center
-                      gap-2
-                    "
-                  >
-                    <UserRoundCog
-                      className="h-4 w-4"
-                    />
-
-                    {game.developer}
-                  </div>
-                ) : null}
-
-                {game.releaseDate ? (
-                  <div
-                    className="
-                      flex
-                      items-center
-                      gap-2
-                    "
-                  >
-                    <CalendarDays
-                      className="h-4 w-4"
-                    />
-
-                    {game.releaseDate}
-                  </div>
-                ) : null}
-              </div>
-
-              <div
-                className="
-                  mt-5
-                  flex
-                  flex-wrap
-                  items-center
-                  gap-3
-                "
-              >
-                <button
-                  type="button"
-                  onClick={
-                    handleLaunchGame
-                  }
-                  disabled={
-                    launchingGame
-                  }
-                  className="
-                    inline-flex
-                    items-center
-                    justify-center
-                    gap-2
-                    rounded-xl
-                    border
-                    border-cyan-400/30
-                    bg-cyan-500/15
-                    px-5
-                    py-2.5
-                    text-sm
-                    font-semibold
-                    text-cyan-100
-                    shadow-lg
-                    shadow-cyan-950/20
-                    transition
-                    hover:border-cyan-300/40
-                    hover:bg-cyan-500/20
-                    disabled:cursor-not-allowed
-                    disabled:opacity-45
-                  "
-                >
-                  {launchingGame ? (
-                    <LoaderCircle
-                      className="
-                        h-4
-                        w-4
-                        animate-spin
-                      "
-                    />
-                  ) : (
-                    <Play
-                      className="
-                        h-4
-                        w-4
-                        fill-current
-                      "
-                    />
-                  )}
-
-                  {launchingGame
-                    ? "Launching..."
-                    : "Play Game"
-                  }
-                </button>
-
-                <div
-                  className="
-                    text-xs
-                    text-white/30
-                  "
-                >
-                  Launch through {game.store}
-                </div>
-              </div>
-
-              {launchError ? (
-                <div
-                  className="
-                    mt-3
-                    max-w-2xl
-                    rounded-xl
-                    border
-                    border-amber-500/20
-                    bg-amber-500/[0.06]
-                    px-4
-                    py-3
-                    text-xs
-                    leading-relaxed
-                    text-amber-200/75
-                  "
-                >
-                  {launchError}
-                </div>
-              ) : null}
-
-              <QuickStatusBar
-                game={
-                  game
-                }
-              />
+            <div id="game-known-issues" className="scroll-mt-20">
+              <KnownIssuesPanel game={game} />
             </div>
 
+            <div className="mt-5">
+              <EssentialImprovements game={game} />
+            </div>
+          </PageSection>
 
-            {coverArtUrl && !coverImageFailed ? (
-              <div
-                data-pcgw-cover
-                className="
-                  shrink-0
-                  self-start
-                "
-              >
-                <div
-                  className="
-                    overflow-hidden
-                    rounded-xl
-                    border
-                    border-white/10
-                    bg-white/[0.025]
-                    shadow-2xl
-                    shadow-black/25
-                  "
-                >
-                  <img
-                    src={
-                      coverArtUrl
-                    }
-                    alt={
-                      `${game.name} cover`
-                    }
-                    className="
-                      h-[210px]
-                      w-[145px]
-                      object-cover
-                      md:h-[240px]
-                      md:w-[165px]
-                      xl:h-[270px]
-                      xl:w-[185px]
-                    "
-                    loading="lazy"
-                    referrerPolicy="no-referrer"
-                    onError={
-                      () => {
-                        logError(
-                          "[PCGW] Cover image failed to load:",
-                          coverArtUrl
-                        );
+          <PageSection
+            id="my-game"
+            icon={UserRoundCog}
+            title="My game"
+            description="Your play status, rating, tags, notes, and recent activity."
+          >
+            <GamePersonalization game={game} />
+            <PersonalRatingPanel game={game} />
 
-                        setCoverImageFailed(
-                          true
-                        );
-                      }
-                    }
-                  />
-                </div>
+            <div className="mt-5">
+              <PlayStatusNotesPanel game={game} />
+            </div>
+
+            <div className="mt-5">
+              <RecentActivityPanel game={game} />
+            </div>
+          </PageSection>
+
+          <PageSection
+            id="overview"
+            icon={Info}
+            title="About"
+            description="Core game information, detected version, and technical details."
+          >
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <InfoRow icon={UserRoundCog} label="Developer" value={game.developer} />
+              <InfoRow icon={Package} label="Publisher" value={game.publisher} />
+              <InfoRow icon={CalendarDays} label="Release Date" value={game.releaseDate} />
+              <InfoRow icon={Store} label="Store" value={game.store} />
+            </div>
+
+            <div className="mt-4">
+              <GameVersionPanel game={game} />
+            </div>
+
+            <div className="mt-5">
+              <TechnicalDetailsPanel game={game} />
+            </div>
+
+            <div className="mt-5">
+              <PcgwMatch game={game} />
+            </div>
+          </PageSection>
+        </TabPanel>
+
+
+        <TabPanel id="setup" activeTab={activeTab} visitedTabs={visitedTabs}>
+          <PageSection
+            id="compatibility-performance"
+            icon={MonitorCog}
+            title="Compatibility & health"
+            description="System fit, verified settings, the game health check, and hardware capability."
+          >
+            <CompatibilitySetupPanel game={game} />
+
+            <div id="game-health-check" className="mt-5 scroll-mt-20">
+              <GameHealthPanel game={game} isWindows={!isLinux} />
+            </div>
+
+            <div className="mt-5">
+              <HardwareCapabilityPanel game={game} />
+            </div>
+
+            {isLinux ? (
+              <div className="mt-5">
+                <LinuxPerformancePanel game={game} />
               </div>
             ) : null}
-          </div>
-        </section>
+          </PageSection>
 
-
-        
-        <GameSectionNavigator key={game.id} />
-
-        {isLinux ? (
-          <LinuxReadinessOverview
-            key={`linux-readiness-${game.id}`}
-            game={game}
-          />
-        ) : null}
-
-
-        <CollapsibleSection
-          id="overview"
-          persistOpen={false}
-          title="Overview"
-          description="Core game information and the currently detected game version."
-          icon={Info}
-          defaultOpen={false}
-          summary={
-            game.developer
-              ? game.developer
-              : game.store
-          }
-        >
-          <div
-            className="
-              grid
-              grid-cols-1
-              gap-3
-              md:grid-cols-2
-              xl:grid-cols-4
-            "
+          <PageSection
+            id="launch-profiles"
+            icon={Play}
+            title="Launch profiles"
+            description="Saved launch options. The default profile is what Play uses."
           >
-            <InfoRow
-              icon={UserRoundCog}
-              label="Developer"
-              value={
-                game.developer
-              }
-            />
-
-            <InfoRow
-              icon={Package}
-              label="Publisher"
-              value={
-                game.publisher
-              }
-            />
-
-            <InfoRow
-              icon={CalendarDays}
-              label="Release Date"
-              value={
-                game.releaseDate
-              }
-            />
-
-            <InfoRow
-              icon={Store}
-              label="Store"
-              value={
-                game.store
-              }
-            />
-          </div>
-
-          <div className="mt-4">
-            <GameVersionPanel
-              game={
-                game
-              }
-            />
-          </div>
-        </CollapsibleSection>
-
-
-        <CollapsibleSection
-          id="my-game"
-          persistOpen={false}
-          title="My Game"
-          description="Your play status, rating, tags, launch profiles, notes, and recent activity."
-          icon={UserRoundCog}
-          defaultOpen={false}
-          summary="Status, rating, notes & profiles"
-        >
-          <GamePersonalization
-            game={
-              game
-            }
-          />
-
-          <PersonalRatingPanel
-            game={
-              game
-            }
-          />
-
-          <div className="mt-5">
-            <PlayStatusNotesPanel
-              game={
-                game
-              }
-            />
-          </div>
-
-          <div className="mt-5">
-            <LaunchProfilesPanel
-              game={
-                game
-              }
-            />
-          </div>
-
-          <div className="mt-5">
-            <RecentActivityPanel
-              game={
-                game
-              }
-            />
-          </div>
-        </CollapsibleSection>
-
-
-        <CollapsibleSection
-          id="compatibility-performance"
-          persistOpen={false}
-          title="Compatibility & Performance"
-          description="System fit, verified settings, hardware capability, and installation readiness."
-          icon={MonitorCog}
-          defaultOpen={false}
-          summary="Setup, health & hardware"
-        >
-          <CompatibilitySetupPanel
-            game={
-              game
-            }
-          />
-
-          <div className="mt-5">
-            <HardwareCapabilityPanel
-              game={
-                game
-              }
-            />
-          </div>
-
-          <div id="game-health-check" className="mt-5 scroll-mt-20">
-            <GameHealthPanel
-              game={
-                game
-              }
-              isWindows={
-                !isLinux
-              }
-            />
-          </div>
-
-          {isLinux ? (
-            <div className="mt-5">
-              <LinuxPerformancePanel
-                game={
-                  game
-                }
-              />
+            <div id="game-launch-profiles" className="scroll-mt-20">
+              <LaunchProfilesPanel game={game} />
             </div>
-          ) : null}
-        </CollapsibleSection>
+          </PageSection>
 
-
-        <CollapsibleSection
-          id="pc-features"
-          persistOpen={false}
-          title="Graphics & PC Features"
-          description="Graphics, display, frame-rate, widescreen, and controller capabilities from PCGamingWiki."
-          icon={Monitor}
-          defaultOpen={false}
-          summary="Graphics, display, frame rate & controllers"
-        >
-          <CompactFeatureGrid
-            features={
-              features
-            }
-          />
-
-          <WsgfInfo
-            features={
-              features
-            }
-          />
-
-          <CollapsibleSection
-            id="controller-support"
-            persistOpen={false}
-            title="Controller Support"
-            description="Controller families, prompts, connection modes, hotplugging, and DualSense features."
-            icon={Gamepad2}
-            defaultOpen={false}
-            summary="Open controller details"
-            className="mt-5"
+          <PageSection
+            id="pc-features"
+            icon={Monitor}
+            title="Graphics & PC features"
+            description="Graphics, display, frame-rate, widescreen, and controller capabilities from PCGamingWiki."
           >
-            <ControllerCompatibility
-              game={
-                game
-              }
-            />
-          </CollapsibleSection>
-        </CollapsibleSection>
+            <CompactFeatureGrid features={features} />
+            <WsgfInfo features={features} />
+
+            <CollapsibleSection
+              id="controller-support"
+              persistOpen={false}
+              title="Controller Support"
+              description="Controller families, prompts, connection modes, hotplugging, and DualSense features."
+              icon={Gamepad2}
+              defaultOpen={false}
+              summary={controllerSummary(game)}
+              className="mt-5"
+            >
+              <ControllerCompatibility game={game} />
+            </CollapsibleSection>
+          </PageSection>
+        </TabPanel>
 
 
-        <CollapsibleSection
-          id="mods"
-          persistOpen={false}
-          title="Mods & Enhancements"
-          description="Enhancement support, mod managers, local mod evidence, tools, and mod-change history."
-          icon={Puzzle}
-          defaultOpen={false}
-          summary={
-            modSummary(
-              game
-            )
-          }
-        >
-          <ModDashboard
-            game={
-              game
-            }
-          />
-
-          {isLinux ? (
-            <LinuxModDeploymentPanel
-              game={
-                game
-              }
-              isLinux={
-                isLinux
-              }
-            />
-          ) : null}
-
-          <ModConflictInspectorPanel
-            game={
-              game
-            }
-            isLinux={
-              isLinux
-            }
-          />
-
-          <RenoDxManagerPanel
-            game={
-              game
-            }
-          />
-
-          <div className="mt-5">
-            <ModChangeTimeline
-              game={
-                game
-              }
-            />
-          </div>
-
-          <CollapsibleSection
-            id="mod-tools-shortcuts"
-            persistOpen={false}
-            title="Tool launchers & shortcuts"
-            description="Launch installed mod managers, open game folders, and inspect additional local tools."
-            icon={Wrench}
-            defaultOpen={false}
-            summary="Apps, folders & tables"
-            className="mt-5"
+        <TabPanel id="mods" activeTab={activeTab} visitedTabs={visitedTabs}>
+          <PageSection
+            id="mods"
+            icon={Puzzle}
+            title="Mods & enhancements"
+            description={`${modSummary(game)}. Mod managers, local mod evidence, conflicts, and change history.`}
           >
-            <ExternalToolsPanel
-              game={
-                game
-              }
-            />
-          </CollapsibleSection>
-        </CollapsibleSection>
+            <ModDashboard game={game} />
+
+            {isLinux ? (
+              <LinuxModDeploymentPanel game={game} isLinux={isLinux} />
+            ) : null}
+
+            <ModConflictInspectorPanel game={game} isLinux={isLinux} />
+            <RenoDxManagerPanel game={game} />
+
+            <div className="mt-5">
+              <ModChangeTimeline game={game} />
+            </div>
+
+            <CollapsibleSection
+              id="mod-tools-shortcuts"
+              persistOpen={false}
+              title="Tool launchers & shortcuts"
+              description="Launch installed mod managers, open game folders, and inspect additional local tools."
+              icon={Wrench}
+              defaultOpen={false}
+              summary="Apps, folders & tables"
+              className="mt-5"
+            >
+              <ExternalToolsPanel game={game} />
+            </CollapsibleSection>
+          </PageSection>
+        </TabPanel>
 
 
-        <CollapsibleSection
-          id="files-installation"
-          persistOpen={false}
-          title="Files & Installation"
-          description="Local game-binary details, storage usage, file utilities, and installation-change history."
-          icon={HardDrive}
-          defaultOpen={false}
-          summary="Local files, storage, utilities & changes"
-        >
-          {/* GAMEATLAS_LOCAL_INSTALLATION_FAST_PATH_PHASE3 */}
-          <LocalInstallationPanel
-            game={
-              game
-            }
-          />
+        <TabPanel id="files" activeTab={activeTab} visitedTabs={visitedTabs}>
+          <PageSection
+            id="saves-screenshots"
+            icon={Archive}
+            title="Saves & screenshots"
+            description="Browse live save data, manage backups, and open detected screenshots."
+          >
+            <SaveBrowserPanel game={game} />
 
-          <div className="mt-5">
-            <StorageInstallPanel
-              game={
-                game
-              }
-              isLinux={
-                isLinux
-              }
-            />
-          </div>
+            <div id="game-save-backups" className="mt-5 scroll-mt-20">
+              <SaveBackupPanel game={game} />
+            </div>
 
-          <div className="mt-5">
-            <GameFileUtilitiesPanel
-              game={
-                game
-              }
-            />
-          </div>
+            <div className="mt-5">
+              <ScreenshotBrowserPanel game={game} />
+            </div>
+          </PageSection>
 
-          <div className="mt-5">
-            <LibraryEntryEditor
-              game={
-                game
-              }
-            />
-          </div>
+          <PageSection
+            id="files-installation"
+            icon={HardDrive}
+            title="Files & installation"
+            description="Local game-binary details, storage usage, file utilities, and installation-change history."
+          >
+            {/* GAMEATLAS_LOCAL_INSTALLATION_FAST_PATH_PHASE3 */}
+            <LocalInstallationPanel game={game} />
 
-          <div className="mt-5">
-            <ChangeHistoryPanel
-              game={
-                game
-              }
-            />
-          </div>
-        </CollapsibleSection>
+            <div className="mt-5">
+              <StorageInstallPanel game={game} isLinux={isLinux} />
+            </div>
+
+            <div className="mt-5">
+              <GameFileUtilitiesPanel game={game} />
+            </div>
+
+            <div className="mt-5">
+              <LibraryEntryEditor game={game} />
+            </div>
+
+            <div className="mt-5">
+              <ChangeHistoryPanel game={game} />
+            </div>
+          </PageSection>
+        </TabPanel>
 
 
-        <CollapsibleSection
-          id="saves-screenshots"
-          persistOpen={false}
-          title="Saves & Screenshots"
-          description="Browse live save data, manage backups, and open detected screenshots."
-          icon={HardDrive}
-          defaultOpen={false}
-          summary="Save browser, backups & screenshots"
-        >
-          <SaveBrowserPanel
-            game={
-              game
-            }
-          />
+        <TabPanel id="troubleshoot" activeTab={activeTab} visitedTabs={visitedTabs}>
+          <PageSection
+            id="technical-troubleshooting"
+            icon={Settings2}
+            title="Troubleshooting guide"
+            description="Pick a symptom to jump to the checks most likely to help."
+          >
+            <TroubleshootingGuide key={game.id} />
+          </PageSection>
 
-          <div className="mt-5">
-            <SaveBackupPanel
-              game={
-                game
-              }
-            />
-          </div>
-
-          <div className="mt-5">
-            <ScreenshotBrowserPanel
-              game={
-                game
-              }
-            />
-          </div>
-        </CollapsibleSection>
-
-
-        <CollapsibleSection
-          id="technical-troubleshooting"
-          persistOpen={false}
-          title="Technical & Troubleshooting"
-          description="Recommended fixes, known issues, diagnostics, technical details, and advanced tools."
-          icon={Settings2}
-          defaultOpen={false}
-          className="mb-10"
-          summary={
-            game.technical?.engine
-            ?? game.technical?.api
-            ?? "Technical details & fixes"
-          }
-        >
-          <TroubleshootingGuide key={game.id} />
-
-          <div className="mt-5">
-            <EssentialImprovements
-              game={
-                game
-              }
-            />
-          </div>
-
-          <div id="troubleshooting-known-issues" className="mt-5 scroll-mt-20">
-            <KnownIssuesPanel
-              game={
-                game
-              }
-            />
-          </div>
-
-          <CollapsibleSection
+          <PageSection
             id="advanced-diagnostics"
-            persistOpen={false}
-            title="All troubleshooting tools"
-            description="Open the full collection of diagnostic checks and technical details. The guide above links directly to recommended tools."
             icon={Wrench}
-            defaultOpen={false}
-            summary="Advanced tools"
-            className="mt-5"
+            title="Diagnostic tools"
+            description="Each tool runs only when you start it."
           >
-
-          <div
-            id="diagnostic-crash-detective"
-            className="scroll-mt-20"
-          >
-            <CrashDetectivePanel
-              game={
-                game
-              }
-              isLinux={
-                isLinux
-              }
-            />
-          </div>
-
-          <div
-            id="diagnostic-launch-failure"
-            className="scroll-mt-20"
-          >
-            <LaunchFailureAnalyzerPanel
-              game={
-                game
-              }
-              isLinux={
-                isLinux
-              }
-            />
-          </div>
-
-          <div
-            id="diagnostic-display"
-            className="scroll-mt-20"
-          >
-            <DisplayValidatorPanel
-              game={
-                game
-              }
-            />
-          </div>
-
-          <div
-            id="diagnostic-runtime-dependencies"
-            className="scroll-mt-20"
-          >
-            <RuntimeDependencyDoctorPanel
-              game={
-                game
-              }
-              isLinux={
-                isLinux
-              }
-            />
-          </div>
-
-          <div
-            id="diagnostic-windows-performance"
-            className="scroll-mt-20"
-          >
-            <WindowsPerformanceDiagnosticsPanel
-              game={
-                game
-              }
-              isLinux={
-                isLinux
-              }
-            />
-          </div>
-
-          <div
-            id="diagnostic-performance-capture"
-            className="scroll-mt-20"
-          >
-            <PerformanceCapturePanel
-              game={
-                game
-              }
-            />
-          </div>
-
-          <div
-            id="diagnostic-configuration-validator"
-            className="scroll-mt-20"
-          >
-            <ConfigurationValidatorPanel
-              game={
-                game
-              }
-              isLinux={
-                isLinux
-              }
-            />
-          </div>
-
-          <div
-            id="diagnostic-background-apps"
-            className="scroll-mt-20"
-          >
-            <BackgroundConflictPanel
-              isLinux={
-                isLinux
-              }
-            />
-          </div>
-
-          <div id="diagnostic-clean-launch" className="scroll-mt-20">
-            <CleanLaunchPanel
-              game={
-                game
-              }
-            />
-          </div>
-
-          <ShaderCachePanel
-            game={
-              game
-            }
-          />
-
-          <div
-            id="diagnostic-graphics-drivers"
-            className="scroll-mt-20"
-          >
-            <GraphicsDriverDiagnosticsPanel />
-          </div>
-
-          {isLinux ? (
-            <div className="mt-5">
-              <ProtonToolboxPanel
-                game={
-                  game
-                }
-              />
+            <div id="diagnostic-crash-detective" className="scroll-mt-20">
+              <CrashDetectivePanel game={game} isLinux={isLinux} />
             </div>
-          ) : null}
 
-          <div className="mt-5">
-            <TechnicalDetailsPanel
-              game={
-                game
-              }
-            />
-          </div>
+            <div id="diagnostic-launch-failure" className="scroll-mt-20">
+              <LaunchFailureAnalyzerPanel game={game} isLinux={isLinux} />
+            </div>
 
-          <div className="mt-5">
-            <PcgwMatch
-              game={
-                game
-              }
-            />
-          </div>
-          </CollapsibleSection>
-        </CollapsibleSection>
+            <div id="diagnostic-display" className="scroll-mt-20">
+              <DisplayValidatorPanel game={game} />
+            </div>
 
+            <div id="diagnostic-runtime-dependencies" className="scroll-mt-20">
+              <RuntimeDependencyDoctorPanel game={game} isLinux={isLinux} />
+            </div>
 
-</div>
+            <div id="diagnostic-windows-performance" className="scroll-mt-20">
+              <WindowsPerformanceDiagnosticsPanel game={game} isLinux={isLinux} />
+            </div>
+
+            <div id="diagnostic-performance-capture" className="scroll-mt-20">
+              <PerformanceCapturePanel game={game} />
+            </div>
+
+            <div id="diagnostic-configuration-validator" className="scroll-mt-20">
+              <ConfigurationValidatorPanel game={game} isLinux={isLinux} />
+            </div>
+
+            <div id="diagnostic-background-apps" className="scroll-mt-20">
+              <BackgroundConflictPanel isLinux={isLinux} />
+            </div>
+
+            <div id="diagnostic-clean-launch" className="scroll-mt-20">
+              <CleanLaunchPanel game={game} />
+            </div>
+
+            <ShaderCachePanel game={game} />
+
+            <div id="diagnostic-graphics-drivers" className="scroll-mt-20">
+              <GraphicsDriverDiagnosticsPanel />
+            </div>
+
+            {isLinux ? (
+              <div className="mt-5">
+                <ProtonToolboxPanel game={game} />
+              </div>
+            ) : null}
+          </PageSection>
+        </TabPanel>
+      </div>
     </main>
   );
 }

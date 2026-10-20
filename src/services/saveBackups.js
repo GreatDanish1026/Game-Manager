@@ -381,6 +381,20 @@ export async function getBackupStorageSummary() {
 }
 
 
+// Lets summaries outside the backup panel (e.g. the game header) refresh.
+function notifySaveBackupsChanged(
+  result
+) {
+  window.dispatchEvent(
+    new CustomEvent(
+      "game-manager-save-backups-changed"
+    )
+  );
+
+  return result;
+}
+
+
 export async function createSaveBackup(
   game,
   {
@@ -406,6 +420,8 @@ export async function createSaveBackup(
           ? "pre_launch"
           : "backup",
     }
+  ).then(
+    notifySaveBackupsChanged
   );
 }
 
@@ -423,6 +439,8 @@ export async function deleteSaveBackup(
 
       backupFileName,
     }
+  ).then(
+    notifySaveBackupsChanged
   );
 }
 
@@ -445,5 +463,7 @@ export async function restoreSaveBackup(
       retentionCount:
         0,
     }
+  ).then(
+    notifySaveBackupsChanged
   );
 }
