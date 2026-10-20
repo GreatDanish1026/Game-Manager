@@ -553,6 +553,10 @@ pub fn restore_save_backup(
 ) -> Result<SaveBackupStatus, String> {
     let resolved_save = resolve_game_path(&save_path, install_path.as_deref())?;
 
+    // Save locations come from PCGamingWiki and can be edited by anyone;
+    // never let a restore replace a broad folder such as Documents.
+    crate::local_paths::ensure_replaceable_folder(&resolved_save, "replace saves in")?;
+
     let backup_directory = game_backup_directory(&game_name, game_id.as_deref())?;
 
     let requested_name = valid_backup_file_name(&backup_file_name)?;

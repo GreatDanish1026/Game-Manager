@@ -216,15 +216,13 @@ pub fn create_diagnostics_support_bundle(
                 .map_err(|error| format!("Failed to replace existing support bundle: {}", error))?;
         }
 
-        let source = format!("{}\\*", bundle_directory.to_string_lossy());
-
-        let command = format!(
-            "Compress-Archive -Path '{}' -DestinationPath '{}' -CompressionLevel Optimal -Force",
-            source.replace('\'', "''"),
-            zip_path.to_string_lossy().replace('\'', "''")
-        );
+        // Paths travel in environment variables rather than being quoted into
+        // the script, which PowerShell's curly-quote handling would defeat.
+        let command = "Compress-Archive -Path (Join-Path -Path $env:GA_BUNDLE_SOURCE -ChildPath '*') -DestinationPath $env:GA_BUNDLE_ZIP -CompressionLevel Optimal -Force";
 
         let status = Command::new("powershell.exe")
+            .env("GA_BUNDLE_SOURCE", &bundle_directory)
+            .env("GA_BUNDLE_ZIP", &zip_path)
             .creation_flags(CREATE_NO_WINDOW)
             .args(["-WindowStyle", "Hidden"])
             .args([
@@ -233,7 +231,7 @@ pub fn create_diagnostics_support_bundle(
                 "-ExecutionPolicy",
                 "Bypass",
                 "-Command",
-                &command,
+                command,
             ])
             .status()
             .map_err(|error| {

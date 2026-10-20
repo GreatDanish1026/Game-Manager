@@ -303,7 +303,18 @@ pub fn launch_xbox_aumid(aumid: &str) -> Result<(), String> {
         return Err("Xbox / Microsoft Store launch ID is missing.".to_string());
     }
 
-    if !value.contains('!') {
+    // Package family name, '!', application ID: nothing else is passed to Explorer.
+    let well_formed = value.split_once('!').is_some_and(|(family, app)| {
+        let allowed = |part: &str| {
+            !part.is_empty()
+                && part
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-'))
+        };
+        allowed(family) && allowed(app)
+    });
+
+    if !well_formed {
         return Err(format!(
             "Xbox / Microsoft Store launch ID is not a valid AUMID: {value}"
         ));

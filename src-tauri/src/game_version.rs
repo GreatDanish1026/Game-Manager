@@ -113,22 +113,20 @@ fn find_executable(install_path: &Option<String>, explicit: &Option<String>) -> 
 
 #[cfg(target_os = "windows")]
 fn windows_version_info(path: &Path) -> (Option<String>, Option<String>) {
-    let escaped = path.to_string_lossy().replace('\'', "''");
-
+    // The path travels in an environment variable: PowerShell also treats
+    // curly quotes as quote characters, so escaping it into the script is unsafe.
     let script =
-        format!(
-            "$v=(Get-Item -LiteralPath '{}').VersionInfo; Write-Output ($v.ProductVersion); Write-Output ($v.FileVersion)",
-            escaped
-        );
+        "$v=(Get-Item -LiteralPath $env:GA_VERSION_PATH).VersionInfo; Write-Output ($v.ProductVersion); Write-Output ($v.FileVersion)";
 
     let output = Command::new("powershell")
+        .env("GA_VERSION_PATH", path)
         .args([
             "-NoProfile",
             "-NonInteractive",
             "-WindowStyle",
             "Hidden",
             "-Command",
-            &script,
+            script,
         ])
         .creation_flags(CREATE_NO_WINDOW)
         .output();

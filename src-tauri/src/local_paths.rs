@@ -741,8 +741,11 @@ fn validate_openable_game_file(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Hands a file or URI to its registered Windows handler without going
+/// through `cmd.exe`, so the target is never parsed as a command line.
+/// Returns the ShellExecute code on failure.
 #[cfg(target_os = "windows")]
-fn open_file_with_default_app(path: &Path) -> Result<(), String> {
+pub(crate) fn shell_open(target: &std::ffi::OsStr) -> Result<(), isize> {
     use std::{ffi::OsStr, os::windows::ffi::OsStrExt, ptr};
 
     #[link(name = "shell32")]
@@ -762,8 +765,7 @@ fn open_file_with_default_app(path: &Path) -> Result<(), String> {
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
 
-    let file = path
-        .as_os_str()
+    let file = target
         .encode_wide()
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
@@ -783,13 +785,20 @@ fn open_file_with_default_app(path: &Path) -> Result<(), String> {
      * ShellExecute returns a value greater than 32 on success.
      */
     if result <= 32 {
-        return Err(format!(
-            "Windows could not open the file with its default application (ShellExecute code {}).",
-            result
-        ));
+        return Err(result);
     }
 
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn open_file_with_default_app(path: &Path) -> Result<(), String> {
+    shell_open(path.as_os_str()).map_err(|code| {
+        format!(
+            "Windows could not open the file with its default application (ShellExecute code {}).",
+            code
+        )
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -852,4 +861,149 @@ pub fn open_game_path_with_context(
     );
 
     open_in_file_manager(&resolved)
+}
+
+fn comparable_path(path: &Path) -> String {
+    let text = path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .trim_start_matches("//?/")
+        .trim_end_matches('/')
+        .to_string();
+
+    if cfg!(target_os = "windows") {
+        text.to_lowercase()
+    } else {
+        text
+    }
+}
+
+/// Folders that a save restore or prefix reset must never delete, even if a
+/// community-edited save location or a bad prefix path resolves to them.
+fn protected_folders() -> Vec<PathBuf> {
+    let mut folders = Vec::new();
+    let mut push = |value: Option<std::ffi::OsString>, children: &[&str]| {
+        if let Some(value) = value {
+            let base = PathBuf::from(value);
+            folders.extend(children.iter().map(|child| base.join(child)));
+            folders.push(base);
+        }
+    };
+
+    let home_children = [
+        "Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos",
+        "Saved Games", "OneDrive", "AppData", "AppData/Local", "AppData/LocalLow",
+        "AppData/Roaming", "Documents/My Games", ".local", ".local/share",
+        ".config", ".steam", ".steam/steam", ".local/share/Steam", "Games",
+        ".var", ".var/app",
+    ];
+
+    push(env::var_os("USERPROFILE"), &home_children);
+    push(env::var_os("HOME"), &home_children);
+    push(env::var_os("APPDATA"), &[]);
+    push(env::var_os("LOCALAPPDATA"), &[]);
+    push(env::var_os("ProgramData"), &[]);
+    push(env::var_os("PUBLIC"), &["Documents"]);
+    push(env::var_os("SystemRoot"), &[]);
+    push(env::var_os("ProgramFiles"), &[]);
+    push(env::var_os("ProgramFiles(x86)"), &[]);
+    push(env::var_os("XDG_DATA_HOME"), &[]);
+    push(env::var_os("XDG_CONFIG_HOME"), &[]);
+
+    folders
+}
+
+/// Refuses to let a destructive action replace a folder that is too broad:
+/// drive roots, anything that contains the user profile, the profile's own
+/// standard folders, system folders, and Steam library roots. Game-specific
+/// folders below those are allowed.
+pub(crate) fn ensure_replaceable_folder(path: &Path, purpose: &str) -> Result<(), String> {
+    let refuse = || {
+        Err(format!(
+            "GameAtlas will not {purpose} {} because it is a top-level or system folder rather than a game-specific one.",
+            path.display()
+        ))
+    };
+
+    if !path.is_absolute() {
+        return Err(format!(
+            "GameAtlas will not {purpose} a relative path: {}",
+            path.display()
+        ));
+    }
+
+    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let candidate = comparable_path(&canonical);
+    let normal_components = canonical
+        .components()
+        .filter(|component| matches!(component, std::path::Component::Normal(_)))
+        .count();
+
+    if normal_components < 2 {
+        return refuse();
+    }
+
+    let file_name = canonical
+        .file_name()
+        .map(|name| name.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    if matches!(file_name.as_str(), "steamapps" | "common" | "compatdata" | "steamlibrary") {
+        return refuse();
+    }
+
+    for folder in protected_folders() {
+        let protected_path = std::fs::canonicalize(&folder).unwrap_or(folder);
+        let protected = comparable_path(&protected_path);
+
+        // Exactly a protected folder, or an ancestor of one (e.g. C:\Users).
+        if candidate == protected || protected.starts_with(&format!("{candidate}/")) {
+            return refuse();
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refuses_roots_and_profile_folders() {
+        let home = env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+            .map(PathBuf::from)
+            .expect("home directory");
+
+        assert!(ensure_replaceable_folder(&home, "replace").is_err());
+        assert!(ensure_replaceable_folder(&home.join("Documents"), "replace").is_err());
+        assert!(ensure_replaceable_folder(home.parent().unwrap(), "replace").is_err());
+        assert!(ensure_replaceable_folder(Path::new("relative/save"), "replace").is_err());
+        assert!(ensure_replaceable_folder(
+            &home.join("SteamLibrary").join("steamapps"),
+            "replace"
+        )
+        .is_err());
+
+        let root = if cfg!(windows) { Path::new("C:\\") } else { Path::new("/") };
+        assert!(ensure_replaceable_folder(root, "replace").is_err());
+    }
+
+    #[test]
+    fn allows_game_specific_folders() {
+        let home = env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+            .map(PathBuf::from)
+            .expect("home directory");
+
+        assert!(ensure_replaceable_folder(
+            &home.join("Documents").join("My Games").join("Alien Isolation"),
+            "replace"
+        )
+        .is_ok());
+        assert!(ensure_replaceable_folder(
+            &home.join("AppData").join("Local").join("Hogwarts Legacy").join("Saved"),
+            "replace"
+        )
+        .is_ok());
+    }
 }

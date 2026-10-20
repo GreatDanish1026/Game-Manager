@@ -496,28 +496,19 @@ fn launcher_status_for_store(store: &str) -> Option<LauncherStatus> {
 #[cfg(target_os = "windows")]
 fn open_protocol(uri: &str) -> Result<(), String> {
     /*
-     * `cmd /C start` can return exit code 1 for custom URI protocols even
-     * after Windows successfully hands the URI to the registered launcher.
-     * EA App is one confirmed example: the game starts, but waiting for the
-     * short-lived cmd.exe process reports a false failure.
+     * ShellExecute hands the URI straight to its registered launcher.
+     * `cmd /C start` was used before, but cmd.exe re-parses the URI, so
+     * characters such as `&` or `|` in a launcher ID became commands.
      *
-     * For protocol launches, the meaningful synchronous check is whether
-     * Windows was able to start the shell handoff process. The launcher itself
-     * is asynchronous, so its eventual game-start result cannot be inferred
-     * from cmd.exe's exit code.
+     * The launcher itself is asynchronous; success here only means Windows
+     * accepted the handoff, not that the game has started.
      */
-    Command::new("cmd.exe")
-        .args(["/C", "start", "", uri])
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .map_err(|error| {
-            format!(
-                "Windows could not hand the launch request to the game launcher: {}",
-                error
-            )
-        })?;
-
-    Ok(())
+    crate::local_paths::shell_open(std::ffi::OsStr::new(uri)).map_err(|code| {
+        format!(
+            "Windows could not hand the launch request to the game launcher (ShellExecute code {}).",
+            code
+        )
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -567,6 +558,23 @@ fn clean_launcher_id(launcher_id: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| value.trim_matches('"').trim_matches('\'').to_string())
+}
+
+/// Launcher IDs are interpolated into launch URIs, so only the characters
+/// real Epic, EA and Ubisoft IDs use are accepted.
+fn uri_safe_launcher_id(id: String, launcher: &str) -> Result<String, String> {
+    let valid = id.len() <= 512
+        && id.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | ':' | ',' | '%')
+        });
+
+    if valid {
+        Ok(id)
+    } else {
+        Err(format!(
+            "This game's {launcher} launcher ID contains characters GameAtlas will not pass to a launcher. Check the ID in Files & saves → Library entry."
+        ))
+    }
 }
 
 fn steam_id(launcher_id: Option<&str>, game_id: Option<&str>) -> Option<String> {
@@ -698,6 +706,7 @@ pub fn launch_game(
             "Epic Games Launcher is available, but this game is missing its Epic launcher ID."
                 .to_string()
         })?;
+        let app_id = uri_safe_launcher_id(app_id, "Epic")?;
 
         let uri = format!(
             "com.epicgames.launcher://apps/{}?action=launch&silent=true",
@@ -725,6 +734,7 @@ pub fn launch_game(
             .ok_or_else(|| {
                 "EA app is available, but this game is missing its EA Content ID.".to_string()
             })?;
+        let content_id = uri_safe_launcher_id(content_id, "EA")?;
 
         let uri = format!(
             "origin2://game/launch?offerIds={}&autoDownload=1",
@@ -750,6 +760,7 @@ pub fn launch_game(
             "Ubisoft Connect is available, but this game is missing its Ubisoft launcher ID."
                 .to_string()
         })?;
+        let app_id = uri_safe_launcher_id(app_id, "Ubisoft")?;
 
         let uri = format!("uplay://launch/{}/0", app_id);
 
@@ -784,4 +795,28 @@ pub fn launch_game(
         "Game launching is not yet implemented for the {} store.",
         store
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn launcher_ids_with_shell_characters_are_rejected() {
+        for id in ["Fortnite&calc", "abc|whoami", "id\"quoted", "a b", "x^y", "a>b", "id\n"] {
+            assert!(uri_safe_launcher_id(id.to_string(), "Epic").is_err(), "{id}");
+        }
+    }
+
+    #[test]
+    fn real_launcher_ids_are_accepted() {
+        for id in [
+            "4fe75bbc5a674f4f9b356b5c90567da5:Fortnite",
+            "Origin.OFR.50.0002148,Origin.OFR.50.0002149",
+            "720",
+            "Sugar_Dumpling-1.2%20",
+        ] {
+            assert!(uri_safe_launcher_id(id.to_string(), "Epic").is_ok(), "{id}");
+        }
+    }
 }

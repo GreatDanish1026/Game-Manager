@@ -56,6 +56,21 @@ fn home_dir() -> Result<PathBuf, String> {
         .ok_or_else(|| "HOME is not available.".to_string())
 }
 
+fn ensure_wine_prefix(prefix: &Path) -> Result<(), String> {
+    let looks_like_prefix = prefix.join("drive_c").is_dir()
+        || prefix.join("pfx").join("drive_c").is_dir()
+        || prefix.join("system.reg").is_file();
+
+    if looks_like_prefix {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} does not look like a Wine/Proton prefix (no drive_c or system.reg), so it was left untouched.",
+            prefix.display()
+        ))
+    }
+}
+
 fn timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -420,6 +435,10 @@ pub fn restore_prefix_backup(
     if !canonical_source.starts_with(&canonical_root) {
         return Err("Selected backup is outside GameAtlas's backup directory.".to_string());
     }
+    crate::local_paths::ensure_replaceable_folder(prefix, "restore a prefix over")?;
+    if prefix.exists() {
+        ensure_wine_prefix(prefix)?;
+    }
 
     let safety = if prefix.exists() {
         Some(create_backup_internal(
@@ -465,6 +484,8 @@ pub fn reset_prefix(
     if !prefix.exists() {
         return Err(format!("Prefix does not exist: {}", prefix.display()));
     }
+    crate::local_paths::ensure_replaceable_folder(prefix, "reset")?;
+    ensure_wine_prefix(prefix)?;
 
     let safety = create_backup_internal(&prefix_path, &game_key, "pre-reset-safety")?;
 

@@ -131,15 +131,12 @@ fn launch_target(
         .to_ascii_lowercase();
 
     if matches!(extension.as_str(), "bat" | "cmd") {
-        let mut command = Command::new("cmd.exe");
-
-        command
-            .arg("/C")
-            .arg(executable)
+        // Spawning the script directly lets the standard library apply
+        // cmd.exe's escaping rules to each argument (and refuse arguments it
+        // cannot escape safely). Wrapping it in `cmd.exe /C` bypassed that.
+        Command::new(executable)
             .args(arguments)
-            .current_dir(working_directory);
-
-        command
+            .current_dir(working_directory)
             .spawn()
             .map_err(|error| format!("Failed to launch the profile script: {}", error))?;
 
