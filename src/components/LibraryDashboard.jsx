@@ -1,531 +1,284 @@
 import {
   Activity,
-  CheckCircle2,
-  Clock3,
-  HeartPulse,
+  ChevronRight,
   Gamepad2,
+  HeartPulse,
   LoaderCircle,
-  MonitorUp,
-  Puzzle,
-  RefreshCcw,
+  Play,
   Star,
   TriangleAlert,
   Wifi,
   WifiOff,
+  Wrench,
 } from "lucide-react";
 
 import {
-  useEffect,
   useMemo,
   useState,
 } from "react";
 
-import {
-  getLibraryInsights,
-  getLibrarySnapshot,
-} from "../services/libraryInsights";
-
-import {
-  getLibraryAnalysisSummary,
-} from "../services/analysisState";
 import { getRecentLibraryLaunches } from "../services/recentActivity";
 import { getGameFallbackInitial } from "../services/gameArtwork";
-import { useGameListArtwork } from "../services/useGameListArtwork";
+import { useGameArtwork } from "../services/useGameListArtwork";
+import { formatRelativeDay } from "../services/relativeTime";
+import { launchDefaultProfile } from "../services/launchProfiles";
+import { error as logError } from "../services/logging";
+import { useLibraryOverviewData } from "../services/useLibraryOverviewData";
 
 import {
-  getSettings,
-} from "../services/settings";
-
-import {
-  getGameUserMetadata,
-} from "../services/userGameMetadata";
-
-import {
-  getInstallationHealthSummary,
   healthCategoryLabel,
 } from "../services/installationHealth";
 
-import AboutCard from "./AboutCard";
-import CollapsibleSection from "./CollapsibleSection";
-import ExternalServiceStatusPanel from "./ExternalServiceStatusPanel";
-import LauncherStatusPanel from "./LauncherStatusPanel";
-import LibraryHealthCenter from "./LibraryHealthCenter";
+import {
+  isLibraryAnalysisRunning,
+  LibraryActivityBanner,
+} from "./LibraryToolsScreen";
 
 
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  detail,
-}) {
-  return (
-    <div
-      className="
-        rounded-xl
-        border
-        border-white/[0.08]
-        bg-black/10
-        p-4
-      "
-    >
-      <div
-        className="
-          flex
-          items-center
-          gap-2
-          text-xs
-          font-semibold
-          uppercase
-          tracking-wide
-          text-white/30
-        "
-      >
-        <Icon
-          className="
-            h-4
-            w-4
-            text-cyan-300/70
-          "
-        />
+const RECENT_GAME_LIMIT = 6;
 
-        {label}
-      </div>
 
-      <div
-        className="
-          mt-3
-          text-2xl
-          font-bold
-          text-white/78
-        "
-      >
-        {value}
-      </div>
-
-      {detail ? (
-        <div
-          className="
-            mt-1
-            text-xs
-          text-white/45
-          "
-        >
-          {detail}
-        </div>
-      ) : null}
-    </div>
-  );
+function gameKeyOf(game) {
+  return game.id ?? `${game.store}-${game.launcherId}-${game.name}`;
 }
 
-function GameThumb({ game }) {
-  const [failedUrls, setFailedUrls] = useState([]);
-  const { elementRef, candidates: artworkUrls } = useGameListArtwork(game, failedUrls);
-  const artworkUrl = artworkUrls.find((url) => !failedUrls.includes(url));
 
+function openLibraryTools(focus = {}) {
+  window.dispatchEvent(new CustomEvent("game-manager-open-library-tools", {
+    detail: focus,
+  }));
+}
+
+
+// The default profile is implied; only call out launches that used another one.
+function launchProfileNote(entry) {
+  const name = entry?.profileName;
+  return name && name !== "Normal" ? `${name} profile` : null;
+}
+
+
+function Poster({ game, url, onError, className = "" }) {
   return (
-    <span ref={elementRef} className="flex h-14 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] text-cyan-300/60" aria-hidden="true">
-      {artworkUrl ? (
-        <img src={artworkUrl} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" draggable={false} onError={() => setFailedUrls((current) => [...current, artworkUrl])} className="h-full w-full object-cover" />
+    <span className={`flex shrink-0 items-center justify-center overflow-hidden border border-white/10 bg-white/[0.04] text-cyan-300/60 ${className}`} aria-hidden="true">
+      {url ? (
+        <img src={url} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" draggable={false} onError={() => onError(url)} className="h-full w-full object-cover" />
       ) : (
-        <span className="text-lg font-bold">{getGameFallbackInitial(game)}</span>
+        <span className="text-2xl font-bold">{getGameFallbackInitial(game)}</span>
       )}
     </span>
   );
 }
 
 
-function CountRow({
-  label,
-  value,
-}) {
-  return (
-    <div
-      className="
-        flex
-        items-center
-        justify-between
-        border-b
-        border-white/[0.055]
-        px-4
-        py-2.5
-        last:border-b-0
-      "
-    >
-      <span
-        className="
-          text-sm
-          text-white/45
-        "
-      >
-        {label}
-      </span>
+function GameThumb({ game }) {
+  const { elementRef, posterUrl, markFailed } = useGameArtwork(game);
 
-      <span
-        className="
-          text-sm
-          font-semibold
-          tabular-nums
-          text-white/70
-        "
-      >
-        {value}
-      </span>
+  return (
+    <span ref={elementRef} className="shrink-0">
+      <Poster game={game} url={posterUrl} onError={markFailed} className="h-14 w-12 rounded-lg" />
+    </span>
+  );
+}
+
+
+function PlayButton({ game, launching, onPlay, large = false }) {
+  const iconClass = large ? "h-4 w-4" : "h-3.5 w-3.5";
+
+  return (
+    <button
+      type="button"
+      onClick={() => onPlay(game)}
+      disabled={launching}
+      aria-label={`Play ${game.name}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-lg bg-cyan-400 font-semibold text-[#06121a] transition hover:bg-cyan-300 disabled:cursor-wait disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200 ${large ? "px-5 py-2.5 text-sm" : "px-3 py-1.5 text-xs"}`}
+    >
+      {launching ? (
+        <LoaderCircle className={`${iconClass} animate-spin`} />
+      ) : (
+        <Play className={`${iconClass} fill-current`} />
+      )}
+      {launching ? "Launching…" : "Play"}
+    </button>
+  );
+}
+
+
+function FeaturedGame({ game, entry, launching, launchError, onPlay, onOpen }) {
+  const { elementRef, heroUrl, posterUrl, markFailed } = useGameArtwork(game);
+  const backdropUrl = heroUrl ?? posterUrl;
+  const note = launchProfileNote(entry);
+
+  return (
+    <div ref={elementRef} className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-black/20">
+      {backdropUrl ? (
+        <img
+          src={backdropUrl}
+          alt=""
+          aria-hidden="true"
+          referrerPolicy="no-referrer"
+          draggable={false}
+          onError={() => markFailed(backdropUrl)}
+          className={`absolute inset-0 h-full w-full object-cover ${heroUrl ? "opacity-50" : "scale-110 opacity-30 blur-2xl"}`}
+        />
+      ) : null}
+      <div className="absolute inset-0 bg-gradient-to-r from-[#0b0f17] via-[#0b0f17]/85 to-[#0b0f17]/20" />
+
+      <div className="relative flex items-end gap-5 p-5 sm:p-6">
+        <button type="button" onClick={() => onOpen(game)} className="hidden rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300 sm:block" aria-label={`Open ${game.name}`}>
+          <Poster game={game} url={posterUrl} onError={markFailed} className="h-44 w-[118px] rounded-xl shadow-lg shadow-black/40" />
+        </button>
+
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-cyan-200/70">Continue playing</div>
+          <h3 className="mt-1 line-clamp-2 text-2xl font-bold text-white xl:text-3xl" title={game.name}>{game.name}</h3>
+          <div className="mt-1.5 text-sm text-white/60">
+            Last launched {formatRelativeDay(entry.launchedAt)}{note ? ` · ${note}` : ""}
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center gap-2">
+            <PlayButton game={game} launching={launching} onPlay={onPlay} large />
+            <button type="button" onClick={() => onOpen(game)} className="rounded-lg border border-white/15 bg-black/20 px-4 py-2.5 text-sm font-semibold text-white/80 hover:bg-white/[0.08] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300">
+              Game details
+            </button>
+          </div>
+
+          {launchError ? <p className="mt-3 text-xs text-red-200/90" role="alert">{launchError}</p> : null}
+        </div>
+      </div>
     </div>
   );
 }
 
 
-function AnalysisStateRow({
+function RecentGameCard({ game, entry, launching, launchError, onPlay, onOpen }) {
+  const { elementRef, posterUrl, markFailed } = useGameArtwork(game);
+  const note = launchProfileNote(entry);
+
+  return (
+    <div ref={elementRef} className="flex min-w-0 flex-col">
+      <button type="button" onClick={() => onOpen(game)} className="group rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300" aria-label={`Open ${game.name}`}>
+        <Poster game={game} url={posterUrl} onError={markFailed} className="aspect-[2/3] w-full rounded-xl transition group-hover:border-cyan-300/40" />
+      </button>
+      <div className="mt-2 line-clamp-2 text-sm font-semibold leading-snug text-white/85" title={game.name}>{game.name}</div>
+      <div className="mt-0.5 truncate text-xs text-white/45">
+        {formatRelativeDay(entry.launchedAt)}{note ? ` · ${note}` : ""}
+      </div>
+      <div className="mt-2">
+        <PlayButton game={game} launching={launching} onPlay={onPlay} />
+      </div>
+      {launchError ? <p className="mt-1.5 text-[11px] text-red-200/90" role="alert">{launchError}</p> : null}
+    </div>
+  );
+}
+
+
+function StatTile({
   icon: Icon,
   label,
   value,
   detail,
-  tone = "neutral",
+  onClick,
+  disabled = false,
 }) {
-  const toneClass =
-    {
-      good:
-        "text-emerald-300/75 bg-emerald-500/[0.06]",
-      warning:
-        "text-amber-300/75 bg-amber-500/[0.06]",
-      stale:
-        "text-orange-300/75 bg-orange-500/[0.06]",
-      neutral:
-        "text-white/45 bg-white/[0.025]",
-    }[
-      tone
-    ];
-
   return (
-    <div
-      className={`
-        flex
-        items-center
-        gap-3
-        rounded-xl
-        px-3
-        py-3
-        ${toneClass}
-      `}
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="group rounded-xl border border-white/[0.08] bg-black/10 p-4 text-left transition hover:border-cyan-300/25 hover:bg-white/[0.03] disabled:cursor-default disabled:hover:border-white/[0.08] disabled:hover:bg-black/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"
     >
-      <Icon
-        className="
-          h-4
-          w-4
-          shrink-0
-        "
-      />
-
-      <div
-        className="
-          min-w-0
-          flex-1
-        "
-      >
-        <div
-          className="
-            text-xs
-            font-semibold
-          "
-        >
-          {label}
-        </div>
-
-        <div
-          className="
-            mt-0.5
-            text-[10px]
-            opacity-55
-          "
-        >
-          {detail}
-        </div>
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-white/40">
+        <Icon className="h-4 w-4 text-cyan-300/70" />
+        <span className="flex-1">{label}</span>
+        {disabled ? null : <ChevronRight className="h-4 w-4 text-white/20 transition group-hover:translate-x-0.5 group-hover:text-cyan-200/70" />}
       </div>
 
-      <div
-        className="
-          text-lg
-          font-bold
-          tabular-nums
-          text-white/80
-        "
-      >
+      <div className="mt-3 text-2xl font-bold text-white/80">
         {value}
       </div>
-    </div>
+
+      {detail ? (
+        <div className="mt-1 text-xs text-white/45">
+          {detail}
+        </div>
+      ) : null}
+    </button>
   );
 }
 
 
 export default function LibraryDashboard({
   games = [],
+  hiddenGameIds = [],
   onAnalyzeRemaining,
   onRefreshStale,
   libraryAnalysis,
   onCancelLibraryAnalysis,
   onRescanLibrary,
   libraryScanLoading = false,
-  onCheckForUpdates,
-  updateCheckStatus,
   onSelectGame,
   networkOnline = true,
 }) {
-  const [
+  const {
+    data,
+    storeRows,
     revision,
-    setRevision,
-  ] =
-    useState(0);
-
-  const [
-    healthFilter,
-    setHealthFilter,
-  ] =
-    useState(null);
-
-  useEffect(
-    () => {
-      const refresh =
-        () =>
-          setRevision(
-            (value) =>
-              value + 1
-          );
-
-      const events = [
-        "game-manager-launch-history-changed",
-        "game-manager-library-insights-changed",
-        "game-manager-library-snapshot-changed",
-        "game-manager-user-metadata-changed",
-        "game-manager-analysis-state-changed",
-        "game-manager-settings-changed",
-        "game-manager-installation-health-changed",
-        "storage",
-      ];
-
-      events.forEach(
-        (event) =>
-          window.addEventListener(
-            event,
-            refresh
-          )
-      );
-
-      return () =>
-        events.forEach(
-          (event) =>
-            window.removeEventListener(
-              event,
-              refresh
-            )
-        );
-    },
-    []
-  );
-
-  const data =
-    useMemo(
-      () => {
-        const snapshot =
-          getLibrarySnapshot();
-
-        const snapshotGames =
-          Object.values(
-            snapshot.games
-            ?? {}
-          );
-
-        const installedGames =
-          games.length > 0
-            ? games
-            : snapshotGames;
-
-        const insights =
-          Object.values(
-            getLibraryInsights()
-          );
-
-        const stores =
-          installedGames.reduce(
-            (
-              result,
-              game
-            ) => {
-              const store =
-                game.store
-                ?? "Unknown";
-
-              result[store] =
-                (
-                  result[store]
-                  ?? 0
-                ) + 1;
-
-              return result;
-            },
-            {}
-          );
-
-        const count =
-          (predicate) =>
-            insights.filter(
-              predicate
-            ).length;
-
-        const settings =
-          getSettings();
-
-        const analysis =
-          getLibraryAnalysisSummary(
-            installedGames,
-            settings
-              .analysisFreshDays
-          );
-
-        const health =
-          getInstallationHealthSummary(
-            installedGames
-          );
-
-        return {
-          games:
-            installedGames,
-
-          total:
-            installedGames.length,
-
-          indexed:
-            installedGames.length,
-
-          analyzed:
-            insights.length,
-
-          favorites:
-            installedGames.filter(
-              (game) =>
-                getGameUserMetadata(
-                  game
-                ).favorite
-            ).length,
-
-          stores,
-
-          analysis,
-
-          health,
-
-          hdr:
-            count(
-              (row) =>
-                row.hdr === true
-            ),
-
-          rayTracing:
-            count(
-              (row) =>
-                row.rayTracing === true
-            ),
-
-          frameGeneration:
-            count(
-              (row) =>
-                row.frameGeneration === true
-            ),
-
-          ultrawide:
-            count(
-              (row) =>
-                row.ultrawide === true
-            ),
-
-          renodx:
-            count(
-              (row) =>
-                row.renodx
-            ),
-
-          luma:
-            count(
-              (row) =>
-                row.luma
-            ),
-
-          vortex:
-            count(
-              (row) =>
-                row.vortex
-            ),
-
-          fluffy:
-            count(
-              (row) =>
-                row.fluffy
-            ),
-        };
-      },
-      [
-        games,
-        revision,
-        libraryAnalysis
-          ?.state,
-        libraryAnalysis
-          ?.completed,
-      ]
+  } =
+    useLibraryOverviewData(
+      games,
+      libraryAnalysis
     );
 
-  const storeRows =
-    Object.entries(
-      data.stores
-    )
-      .sort(
-        (
-          left,
-          right
-        ) =>
-          right[1]
-          - left[1]
-      );
+  const [launchingKey, setLaunchingKey] = useState(null);
+  const [launchError, setLaunchError] = useState(null);
+
+  const hiddenIds = useMemo(() => new Set(hiddenGameIds), [hiddenGameIds]);
+  const isVisible = (game) => !hiddenIds.has(game.id);
+  const hiddenCount = data.games.length - data.games.filter(isVisible).length;
 
   const recentGames = useMemo(
-    () => getRecentLibraryLaunches(data.games, 3),
-    [data.games, revision]
+    () => getRecentLibraryLaunches(data.games.filter(isVisible), RECENT_GAME_LIMIT),
+    [data.games, hiddenIds, revision]
   );
+  const [featured, ...shelf] = recentGames;
+
   const attentionGames = data.health.rows
-    .filter(({ record }) => record && ["needs-attention", "incomplete"].includes(record.category))
+    .filter(({ game, record }) => isVisible(game) && record && ["needs-attention", "incomplete"].includes(record.category))
     .sort((left, right) => (right.record.actionable + right.record.warnings) - (left.record.actionable + left.record.warnings))
-    .slice(0, 2);
+    .slice(0, 3);
+
+  const analysisRunning = isLibraryAnalysisRunning(libraryAnalysis);
   const showStaleData = data.analysis.stale > 0;
   const showPartialData = !showStaleData && data.analysis.partial > 0;
+  const dataNoteCount = showStaleData ? data.analysis.stale : data.analysis.partial;
 
-  const analysisRunning =
-    libraryAnalysis?.state ===
-      "running"
-    ||
-    libraryAnalysis?.state ===
-      "cancelling";
+  async function playGame(game) {
+    const key = gameKeyOf(game);
 
-  const healthFilteredGames =
-    healthFilter
-      ? data.health.rows.filter(
-          ({ record }) =>
-            healthFilter === "unassessed"
-              ? !record
-              : record?.category === healthFilter
-        )
-      : [];
+    setLaunchingKey(key);
+    setLaunchError(null);
 
-  function showUnassessedGames() {
-    setHealthFilter("unassessed");
+    try {
+      await launchDefaultProfile(game);
+    } catch (error) {
+      logError("[Launch] Failed:", error);
+      setLaunchError({ key, message: String(error) });
+    } finally {
+      setLaunchingKey(null);
+    }
+  }
 
-    window.dispatchEvent(new CustomEvent("game-manager-open-section", {
-      detail: { id: "dashboard-health-checks" },
-    }));
+  function cardProps(game, entry) {
+    const key = gameKeyOf(game);
 
-    window.setTimeout(() => {
-      document.getElementById("installation-health-results")?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-      });
-    }, 120);
+    return {
+      game,
+      entry,
+      launching: launchingKey === key,
+      launchError: launchError?.key === key ? launchError.message : null,
+      onPlay: playGame,
+      onOpen: (selected) => onSelectGame?.(selected),
+    };
   }
 
   return (
@@ -666,798 +419,147 @@ export default function LibraryDashboard({
         ) : null}
 
 
-        <section className="mt-7 rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5" aria-labelledby="recent-games-title">
-          <h2 id="recent-games-title" className="text-lg font-semibold text-white/85">{data.total === 0 ? "Welcome to GameAtlas" : "Recently opened"}</h2>
-          {data.total > 0 ? <p className="mt-1 text-xs text-white/50">Games launched through GameAtlas appear here. This is not launcher-reported playtime.</p> : null}
-          {recentGames.length > 0 ? (
-            <div className="mt-4 grid gap-3 lg:grid-cols-3">
-              {recentGames.map(({ game, entry }) => (
-                <div key={game.id ?? `${game.store}-${game.launcherId}-${game.name}`} className="flex min-w-0 items-center gap-3 rounded-xl border border-white/[0.08] bg-black/10 p-3">
-                  <GameThumb game={game} />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold text-white/80" title={game.name}>{game.name}</div>
-                    <div className="mt-0.5 truncate text-xs text-white/50">Last launched {new Date(entry.launchedAt).toLocaleString()}</div>
-                    <div className="truncate text-[11px] text-white/45">{entry.profileName ?? "Normal"} profile</div>
+        <section className="mt-7" aria-labelledby="recent-games-title">
+          {featured ? (
+            <>
+              <h2 id="recent-games-title" className="sr-only">Continue playing</h2>
+              <FeaturedGame {...cardProps(featured.game, featured.entry)} />
+
+              {shelf.length > 0 ? (
+                <div className="mt-6">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-white/75">Recently played</h3>
+                    <span className="text-[11px] text-white/35">Launches through GameAtlas</span>
                   </div>
-                  <button type="button" onClick={() => onSelectGame?.(game)} className="shrink-0 rounded-lg border border-cyan-400/20 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300">Open</button>
+                  <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+                    {shelf.map(({ game, entry }) => (
+                      <RecentGameCard key={gameKeyOf(game)} {...cardProps(game, entry)} />
+                    ))}
+                  </div>
                 </div>
-              ))}
-            </div>
+              ) : null}
+            </>
           ) : (
-            <div className="mt-4 rounded-xl border border-dashed border-white/10 p-5 text-sm text-white/55">
-              {data.total === 0 ? (
-                <>
-                  <div className="font-semibold text-white/75">Build your library</div>
-                  <p className="mt-1">Add a game manually or scan installed games to get started.</p>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <button type="button" onClick={() => window.dispatchEvent(new Event("game-manager-open-add-game"))} className="rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-400/20">Add a game</button>
-                    <button type="button" onClick={onRescanLibrary} disabled={libraryScanLoading} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-white/70 hover:bg-white/[0.05] disabled:opacity-40">Scan installed games</button>
-                  </div>
-                </>
-              ) : "Open a game from the sidebar. Games launched through GameAtlas will appear here for quick access."}
+            <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5">
+              <h2 id="recent-games-title" className="text-lg font-semibold text-white/85">{data.total === 0 ? "Welcome to GameAtlas" : "Continue playing"}</h2>
+              <div className="mt-4 rounded-xl border border-dashed border-white/10 p-5 text-sm text-white/55">
+                {data.total === 0 ? (
+                  <>
+                    <div className="font-semibold text-white/75">Build your library</div>
+                    <p className="mt-1">Add a game manually or scan installed games to get started.</p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button type="button" onClick={() => window.dispatchEvent(new Event("game-manager-open-add-game"))} className="rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-400/20">Add a game</button>
+                      <button type="button" onClick={onRescanLibrary} disabled={libraryScanLoading} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-white/70 hover:bg-white/[0.05] disabled:opacity-40">Scan installed games</button>
+                    </div>
+                  </>
+                ) : "Pick a game from the sidebar and press Play. Games you launch through GameAtlas show up here."}
+              </div>
             </div>
           )}
         </section>
 
 
-        {data.total > 0 ? <section className="mt-5 rounded-2xl border border-amber-400/15 bg-amber-400/[0.025] p-5" aria-labelledby="attention-title">
+        <LibraryActivityBanner
+          libraryAnalysis={libraryAnalysis}
+          libraryScanLoading={libraryScanLoading}
+          onCancelLibraryAnalysis={onCancelLibraryAnalysis}
+        />
+
+
+        {!analysisRunning && (showStaleData || showPartialData) ? (
+          <div className="mt-5 flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-xs text-white/45">
+            <Activity className="h-3.5 w-3.5 shrink-0 text-white/35" />
+            <span>
+              {dataNoteCount} {dataNoteCount === 1 ? "game has" : "games have"} {showStaleData ? "out-of-date" : "incomplete"} info from PCGamingWiki and mod sources.
+            </span>
+            {networkOnline ? (
+              <button type="button" onClick={showStaleData ? onRefreshStale : onAnalyzeRemaining} className="font-semibold text-cyan-200/80 underline-offset-2 hover:text-cyan-100 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300">
+                {showStaleData ? "Refresh now" : "Retry"}
+              </button>
+            ) : (
+              <span>It will refresh when you are back online.</span>
+            )}
+          </div>
+        ) : null}
+
+
+        {attentionGames.length > 0 ? <section className="mt-7 rounded-2xl border border-amber-400/15 bg-amber-400/[0.025] p-5" aria-labelledby="attention-title">
           <div className="flex items-center gap-2">
             <TriangleAlert className="h-4 w-4 text-amber-300/80" />
             <h2 id="attention-title" className="text-lg font-semibold text-white/85">Needs your attention</h2>
           </div>
-          {attentionGames.length > 0 || showStaleData || showPartialData ? (
-            <div className="mt-4 space-y-2">
-              {attentionGames.map(({ game, record }) => (
-                <div key={game.id ?? `${game.store}-${game.launcherId}-${game.name}`} className="flex flex-wrap items-center gap-3 rounded-xl border border-white/[0.07] bg-black/10 p-3 sm:flex-nowrap">
-                  <GameThumb game={game} />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold text-white/80">{game.name}</div>
-                    <div className="text-xs text-white/55">Health check: {record.score}% · {healthCategoryLabel(record.category)}</div>
-                  </div>
-                  <button type="button" onClick={() => onSelectGame?.(game, { focus: "health" })} className="rounded-lg border border-amber-300/25 px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-300/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-200">Review Health</button>
+          <div className="mt-4 space-y-2">
+            {attentionGames.map(({ game, record }) => (
+              <div key={gameKeyOf(game)} className="flex flex-wrap items-center gap-3 rounded-xl border border-white/[0.07] bg-black/10 p-3 sm:flex-nowrap">
+                <GameThumb game={game} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-white/80">{game.name}</div>
+                  <div className="text-xs text-white/55">Health check: {record.score}% · {healthCategoryLabel(record.category)}</div>
                 </div>
-              ))}
-              {showStaleData || showPartialData ? (
-                <div className="flex flex-wrap items-center gap-3 rounded-xl border border-white/[0.07] bg-black/10 p-3 sm:flex-nowrap">
-                  <Activity className="mx-3 h-5 w-5 shrink-0 text-cyan-300/75" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-white/80">{showStaleData ? `${data.analysis.stale} game profiles have out-of-date data` : `${data.analysis.partial} game profiles have incomplete data`}</div>
-                    <div className="text-xs text-white/55">This concerns external game data, not installation health.</div>
-                  </div>
-                  <button type="button" disabled={analysisRunning || !networkOnline} onClick={showStaleData ? onRefreshStale : onAnalyzeRemaining} className="rounded-lg border border-cyan-300/25 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/10 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300">{showStaleData ? "Refresh Stale" : "Analyze Remaining"}</button>
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <p className="mt-3 text-sm text-white/55">{data.health.assessed === 0 ? "No game health checks have been completed yet. Open a game to assess it." : "No assessed games currently need attention."}</p>
-          )}
-        </section> : null}
-
-        {analysisRunning || libraryScanLoading ? (
-          <section className="mt-5 flex flex-wrap items-center gap-3 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.035] p-4" aria-live="polite">
-            <LoaderCircle className="h-5 w-5 shrink-0 animate-spin text-cyan-300" />
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-white/80">{libraryScanLoading ? "Scanning installed games" : libraryAnalysis.state === "cancelling" ? "Finishing current lookups…" : "Analyzing game data in the background"}</div>
-              <div className="text-xs text-white/50">{libraryScanLoading ? "The library will update as the scan completes." : `${libraryAnalysis.completed} of ${libraryAnalysis.total} game profiles finished`}</div>
-            </div>
-            {!libraryScanLoading && libraryAnalysis.state === "running" ? <button type="button" onClick={onCancelLibraryAnalysis} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-white/65 hover:bg-white/[0.05]">Cancel</button> : null}
-          </section>
-        ) : null}
-
-        {data.total > 0 ? <>
-        <h2 className="mt-7 text-base font-semibold text-white/75">Library snapshot</h2>
-        <div
-          className="
-            mt-3
-            grid
-            grid-cols-2
-            gap-3
-            lg:grid-cols-4
-          "
-        >
-          <StatCard
-            icon={
-              Gamepad2
-            }
-            label="Installed"
-            value={
-              data.total
-            }
-            detail={`${storeRows.length} storefront${storeRows.length === 1 ? "" : "s"}`}
-          />
-
-          <StatCard
-            icon={
-              Activity
-            }
-            label="Game Data Fresh"
-            value={
-              `${data.analysis.coverage}%`
-            }
-            detail={`${data.analysis.full} of ${data.analysis.total} game profiles`}
-          />
-
-          <StatCard
-            icon={
-              HeartPulse
-            }
-            label="Health Assessed"
-            value={
-              `${data.health.assessed}/${data.health.total}`
-            }
-            detail={`${data.health.unassessed} not yet checked`}
-          />
-
-          <StatCard
-            icon={
-              Star
-            }
-            label="Favorites"
-            value={
-              data.favorites
-            }
-          />
-        </div>
-        </> : null}
-
-
-        {data.total > 0 ? <>
-        <CollapsibleSection
-          id="dashboard-data-analysis"
-          title="Game Data Analysis"
-          description="External game-data freshness and analysis controls. Separate from installation health."
-          icon={Activity}
-          defaultOpen={false}
-          persistOpen={false}
-          summary={`${data.analysis.full} of ${data.analysis.total} fresh`}
-          className="mt-6"
-        >
-        <section
-          className="
-            p-5
-          "
-        >
-          <div
-            className="
-              flex
-              flex-col
-              gap-4
-              lg:flex-row
-              lg:items-center
-              lg:justify-between
-            "
-          >
-            <div>
-              <div
-                className="
-                  text-base
-                  font-semibold
-                  text-white/80
-                "
-              >
-                Source breakdown
+                <button type="button" onClick={() => onSelectGame?.(game, { focus: "health" })} className="rounded-lg border border-amber-300/25 px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-300/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-200">Review Health</button>
               </div>
-
-              <div
-                className="
-                  mt-1
-                  text-xs
-                  text-white/35
-                "
-              >
-                Shows whether external game data is current. This does not assess installation health below.
-              </div>
-            </div>
-
-            <div
-              className="
-                flex
-                flex-wrap
-                gap-2
-              "
-            >
-              <button
-                type="button"
-                onClick={
-                  onAnalyzeRemaining
-                }
-                disabled={
-                  analysisRunning
-                  ||
-                  data.analysis
-                    .remaining === 0
-                }
-                className="
-                  rounded-lg
-                  bg-cyan-500/15
-                  px-3
-                  py-2
-                  text-xs
-                  font-semibold
-                  text-cyan-200
-                  transition
-                  hover:bg-cyan-500/25
-                  disabled:cursor-not-allowed
-                  disabled:opacity-35
-                "
-              >
-                Analyze Remaining
-              </button>
-
-              <button
-                type="button"
-                onClick={
-                  onRefreshStale
-                }
-                disabled={
-                  analysisRunning
-                  ||
-                  data.analysis
-                    .stale === 0
-                }
-                className="
-                  inline-flex
-                  items-center
-                  gap-2
-                  rounded-lg
-                  border
-                  border-white/[0.08]
-                  bg-white/[0.025]
-                  px-3
-                  py-2
-                  text-xs
-                  font-semibold
-                  text-white/55
-                  transition
-                  hover:bg-white/[0.06]
-                  hover:text-white/75
-                  disabled:cursor-not-allowed
-                  disabled:opacity-35
-                "
-              >
-                <RefreshCcw
-                  className="h-3.5 w-3.5"
-                />
-
-                Refresh Stale
-              </button>
-            </div>
-          </div>
-
-
-          <div
-            className="
-              mt-5
-              h-2.5
-              overflow-hidden
-              rounded-full
-              bg-white/[0.055]
-            "
-          >
-            <div
-              className="
-                h-full
-                rounded-full
-                bg-cyan-400
-                transition-[width]
-                duration-300
-              "
-              style={{
-                width:
-                  `${data.analysis.coverage}%`,
-              }}
-            />
-          </div>
-
-          <div
-            className="
-              mt-2
-              flex
-              items-center
-              justify-between
-              text-[11px]
-              text-white/35
-            "
-          >
-            <span>
-              {data.analysis.full} of {data.analysis.total} fully analyzed
-            </span>
-
-            <span>
-              {data.analysis.coverage}%
-            </span>
-          </div>
-
-
-          <div
-            className="
-              mt-4
-              grid
-              grid-cols-1
-              gap-2
-              sm:grid-cols-2
-              xl:grid-cols-4
-            "
-          >
-            <AnalysisStateRow
-              icon={
-                CheckCircle2
-              }
-              label="Fully analyzed"
-              value={
-                data.analysis.full
-              }
-              detail="Complete and fresh"
-              tone="good"
-            />
-
-            <AnalysisStateRow
-              icon={
-                TriangleAlert
-              }
-              label="Partially analyzed"
-              value={
-                data.analysis.partial
-              }
-              detail="One or more sources incomplete"
-              tone="warning"
-            />
-
-            <AnalysisStateRow
-              icon={
-                Clock3
-              }
-              label="Out of date"
-              value={
-                data.analysis.stale
-              }
-              detail="Older than freshness setting"
-              tone="stale"
-            />
-
-            <AnalysisStateRow
-              icon={
-                Activity
-              }
-              label="Never analyzed"
-              value={
-                data.analysis.never
-              }
-              detail="No analysis record yet"
-            />
-          </div>
-        </section>
-        </CollapsibleSection>
-
-
-        <CollapsibleSection
-          id="dashboard-health-checks"
-          title="Game Health Checks"
-          description="Per-game Diagnostics Center assessments, separate from game-data freshness."
-          icon={HeartPulse}
-          defaultOpen={false}
-          persistOpen={false}
-          summary={`${data.health.assessed} of ${data.health.total} checked`}
-        >
-        <section id="installation-health" className="p-5">
-          <div className="flex items-start gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-300">
-              <HeartPulse className="h-4 w-4" />
-            </div>
-
-            <div>
-              <div className="text-base font-semibold text-white/80">
-                Assessment breakdown
-              </div>
-              <div className="mt-1 text-xs text-white/35">
-                {data.health.assessed} of {data.health.total} games checked with Diagnostics Center. Game-data freshness above is separate. Click a category to filter.
-              </div>
-            </div>
-          </div>
-
-          {data.health.unassessed > 0 ? (
-            <div className="mt-4 flex flex-col gap-3 rounded-xl border border-amber-300/20 bg-amber-300/[0.055] p-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <div className="text-sm font-semibold text-amber-100/85">
-                  {data.health.unassessed} {data.health.unassessed === 1 ? "game has" : "games have"} not been checked
-                </div>
-                <div className="mt-0.5 text-xs leading-relaxed text-white/60">
-                  The Needs Attention count covers checked games only. Open an unchecked game to run its full diagnostic.
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={showUnassessedGames}
-                className="shrink-0 rounded-lg border border-amber-300/25 bg-amber-300/[0.08] px-3 py-2 text-xs font-semibold text-amber-100/85 hover:bg-amber-300/[0.14] focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-200"
-              >
-                Review unchecked games
-              </button>
-            </div>
-          ) : null}
-
-          <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-5">
-            {[
-              ["excellent", "Excellent", data.health.excellent],
-              ["good", "Good", data.health.good],
-              ["needs-attention", "Needs Attention", data.health["needs-attention"]],
-              ["incomplete", "Incomplete", data.health.incomplete],
-              ["unassessed", "Not Assessed", data.health.unassessed],
-            ].map(([category, label, value]) => (
-              <button
-                key={category}
-                type="button"
-                aria-pressed={healthFilter === category}
-                onClick={
-                  () =>
-                    setHealthFilter(
-                      (current) =>
-                        current === category
-                          ? null
-                          : category
-                    )
-                }
-                className={`
-                  rounded-xl
-                  border
-                  p-3
-                  text-left
-                  transition
-                  hover:border-white/[0.15]
-                  ${
-                    healthFilter === category
-                      ? "border-cyan-400/30 bg-cyan-500/[0.06] ring-1 ring-cyan-400/25"
-                      : "border-white/[0.08] bg-white/[0.02]"
-                  }
-                `}
-              >
-                <div className="text-2xl font-bold text-white/75">
-                  {value}
-                </div>
-                <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-white/30">
-                  {label}
-                </div>
-              </button>
             ))}
           </div>
-
-          {healthFilter ? (
-            <div id="installation-health-results" className="mt-4 scroll-mt-20 overflow-hidden rounded-xl border border-white/[0.07]">
-              <div className="flex items-center justify-between border-b border-white/[0.06] bg-white/[0.02] px-4 py-2.5">
-                <div className="text-xs font-semibold text-white/55">
-                  {healthFilter === "unassessed"
-                    ? "Not Assessed"
-                    : healthCategoryLabel(healthFilter)}
-                  {" · "}
-                  {healthFilteredGames.length}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setHealthFilter(null)}
-                  className="text-[10px] font-semibold text-white/30 hover:text-white/60"
-                >
-                  Clear
-                </button>
-              </div>
-
-              <div className="max-h-64 overflow-y-auto">
-                {healthFilteredGames.length > 0 ? (
-                  healthFilteredGames.map(
-                    ({ game, record }) => (
-                      <button
-                        key={
-                          game.id
-                          ?? `${game.store}-${game.launcherId}-${game.name}`
-                        }
-                        type="button"
-                        onClick={
-                          () =>
-                            onSelectGame?.(game, record ? undefined : { focus: "health" })
-                        }
-                        className="flex w-full items-center justify-between gap-4 border-b border-white/[0.045] px-4 py-3 text-left transition last:border-b-0 hover:bg-white/[0.025]"
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-medium text-white/65">
-                            {game.name}
-                          </div>
-                          <div className="mt-0.5 text-[10px] text-white/25">
-                            {game.store ?? "Unknown store"}
-                          </div>
-                        </div>
-
-                        <div className="shrink-0 text-right">
-                          <div className="text-sm font-semibold text-white/55">
-                            {record
-                              ? `${record.score}%`
-                              : "—"}
-                          </div>
-                          <div className="text-[9px] uppercase tracking-wide text-white/20">
-                            {record
-                              ? `${record.warnings} attention`
-                              : "Open health check"}
-                          </div>
-                        </div>
-                      </button>
-                    )
-                  )
-                ) : (
-                  <div className="px-4 py-6 text-center text-xs text-white/30">
-                    No games are in this category.
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : null}
-        </section>
-        </CollapsibleSection>
+        </section> : null}
 
 
-        <CollapsibleSection
-          id="dashboard-health-scan"
-          title="Local Install-Path Scan"
-          description="Batch-check install paths and executable detection. This is separate from the per-game health assessments above."
-          icon={HeartPulse}
-          defaultOpen={false}
-          summary="Advanced local scan"
-          className="mt-6"
-        >
-          <LibraryHealthCenter
-            games={
-              games
-            }
-            onSelectGame={
-              onSelectGame
-            }
+        {data.total > 0 ? <>
+        <h2 className="mt-8 text-base font-semibold text-white/75">Library snapshot</h2>
+        <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatTile
+            icon={Gamepad2}
+            label="Installed"
+            value={data.total}
+            detail={[
+              `${storeRows.length} storefront${storeRows.length === 1 ? "" : "s"}`,
+              hiddenCount > 0 ? `${hiddenCount} hidden` : null,
+            ].filter(Boolean).join(" · ")}
+            onClick={() => openLibraryTools({ section: "dashboard-library-insights" })}
           />
-        </CollapsibleSection>
 
+          <StatTile
+            icon={Activity}
+            label="Info up to date"
+            value={`${data.analysis.coverage}%`}
+            detail={`${data.analysis.full} of ${data.analysis.total} games`}
+            onClick={() => openLibraryTools({ section: "dashboard-data-analysis" })}
+          />
 
-        <CollapsibleSection
-          id="dashboard-library-insights"
-          title="Library Insights"
-          description="Storefront distribution, graphics capabilities, and enhancement support."
-          icon={MonitorUp}
-          defaultOpen={false}
-          summary={`${storeRows.length} storefront${storeRows.length === 1 ? "" : "s"} · ${data.analyzed} analyzed`}
-        >
-        <div
-          className="
-            grid
-            grid-cols-1
-            gap-4
-            xl:grid-cols-3
-          "
-        >
-          <div
-            className="
-              overflow-hidden
-              rounded-xl
-              border
-              border-white/[0.08]
-              bg-black/10
-            "
-          >
-            <div
-              className="
-                border-b
-                border-white/[0.06]
-                px-4
-                py-3.5
-                text-sm
-                font-semibold
-                text-white/70
-              "
-            >
-              Storefronts
-            </div>
+          <StatTile
+            icon={HeartPulse}
+            label="Health checked"
+            value={`${data.health.assessed}/${data.health.total}`}
+            detail={data.health.unassessed > 0 ? `${data.health.unassessed} not checked yet` : "Every game checked"}
+            onClick={() => openLibraryTools({
+              section: "dashboard-health-checks",
+              healthFilter: data.health.unassessed > 0 ? "unassessed" : null,
+            })}
+          />
 
-            {storeRows.map(
-              (
-                [
-                  store,
-                  count,
-                ]
-              ) => (
-                <CountRow
-                  key={
-                    store
-                  }
-                  label={
-                    store
-                  }
-                  value={
-                    count
-                  }
-                />
-              )
-            )}
-          </div>
-
-          <div
-            className="
-              overflow-hidden
-              rounded-xl
-              border
-              border-white/[0.08]
-              bg-black/10
-            "
-          >
-            <div
-              className="
-                flex
-                items-center
-                gap-2
-                border-b
-                border-white/[0.06]
-                px-4
-                py-3.5
-                text-sm
-                font-semibold
-                text-white/70
-              "
-            >
-              <MonitorUp
-                className="
-                  h-4
-                  w-4
-                  text-cyan-300/70
-                "
-              />
-
-              Graphics
-            </div>
-
-            <CountRow
-              label="HDR"
-              value={
-                data.hdr
-              }
-            />
-
-            <CountRow
-              label="Ray Tracing"
-              value={
-                data.rayTracing
-              }
-            />
-
-            <CountRow
-              label="Frame Generation"
-              value={
-                data.frameGeneration
-              }
-            />
-
-            <CountRow
-              label="Ultrawide"
-              value={
-                data.ultrawide
-              }
-            />
-          </div>
-
-          <div
-            className="
-              overflow-hidden
-              rounded-xl
-              border
-              border-white/[0.08]
-              bg-black/10
-            "
-          >
-            <div
-              className="
-                flex
-                items-center
-                gap-2
-                border-b
-                border-white/[0.06]
-                px-4
-                py-3.5
-                text-sm
-                font-semibold
-                text-white/70
-              "
-            >
-              <Puzzle
-                className="
-                  h-4
-                  w-4
-                  text-cyan-300/70
-                "
-              />
-
-              Mods & Enhancements
-            </div>
-
-            <CountRow
-              label="RenoDX"
-              value={
-                data.renodx
-              }
-            />
-
-            <CountRow
-              label="Luma"
-              value={
-                data.luma
-              }
-            />
-
-            <CountRow
-              label="Vortex"
-              value={
-                data.vortex
-              }
-            />
-
-            <CountRow
-              label="Fluffy"
-              value={
-                data.fluffy
-              }
-            />
-          </div>
+          <StatTile
+            icon={Star}
+            label="Favorites"
+            value={data.favorites}
+            detail={data.favorites > 0 ? "Show in sidebar" : "Star a game to add it"}
+            disabled={data.favorites === 0}
+            onClick={() => window.dispatchEvent(new Event("game-manager-show-favorites"))}
+          />
         </div>
-
-          <div
-            className="
-              mt-4
-              rounded-xl
-              border
-              border-cyan-500/10
-              bg-cyan-500/[0.025]
-              p-4
-              text-xs
-              leading-relaxed
-              text-white/30
-            "
-          >
-            Capability counts use analyzed library data. Background analysis tracks
-            PCGamingWiki, RenoDX/Luma, and Vortex independently so a failed source
-            can be shown as partial instead of making the whole game appear unanalyzed.
-          </div>
-        </CollapsibleSection>
-
-
         </> : null}
-        <CollapsibleSection
-          id="dashboard-system-services"
-          title="System & Services"
-          description="Remote provider availability, detected launchers, updates, and application information."
-          icon={Wifi}
-          defaultOpen={false}
-          summary={
-            networkOnline
-              ? "Services, launchers & app info"
-              : "Remote services unavailable"
-          }
-          className="mb-10"
+
+
+        <button
+          type="button"
+          onClick={() => openLibraryTools()}
+          className="group mb-10 mt-6 flex w-full items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.02] px-4 py-3.5 text-left transition hover:border-white/[0.15] hover:bg-white/[0.04] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"
         >
-          <ExternalServiceStatusPanel
-            onCheckForUpdates={
-              onCheckForUpdates
-            }
-            updateCheckStatus={
-              updateCheckStatus
-            }
-          />
-
-          <div className="mt-5">
-            <LauncherStatusPanel />
-          </div>
-
-          <div className="mt-5">
-            <AboutCard
-              onCheckForUpdates={
-                onCheckForUpdates
-              }
-              updateCheckStatus={
-                updateCheckStatus
-              }
-            />
-          </div>
-        </CollapsibleSection>
+          <Wrench className="h-4 w-4 shrink-0 text-cyan-300/70" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-white/75">Library tools</span>
+            <span className="block text-xs text-white/40">Game data analysis, health checks, install-path scan, insights, services, and app info</span>
+          </span>
+          <ChevronRight className="h-4 w-4 text-white/25 transition group-hover:translate-x-0.5 group-hover:text-cyan-200/70" />
+        </button>
       </div>
     </main>
   );

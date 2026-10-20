@@ -13,6 +13,7 @@ import GameDetails from "./components/GameDetails";
 import AppErrorBoundary from "./components/AppErrorBoundary";
 import UpdateNotification from "./components/UpdateNotification";
 import LibraryAnalysisPanel from "./components/LibraryAnalysisPanel";
+import LibraryToolsScreen from "./components/LibraryToolsScreen";
 import SettingsScreen from "./components/SettingsScreen";
 import GameLoadingOverlay from "./components/GameLoadingOverlay";
 import NxmLinkNotification from "./components/NxmLinkNotification";
@@ -3645,6 +3646,99 @@ function hideGame(
   }
 
 
+  const [
+    libraryToolsFocus,
+    setLibraryToolsFocus,
+  ] =
+    useState(null);
+
+
+  useEffect(
+    () => {
+      function openLibraryTools(
+        event
+      ) {
+        setSelectedGame(
+          null
+        );
+
+        setShowHiddenGames(
+          false
+        );
+
+        // A fresh object re-runs the tools screen's scroll-to-section effect.
+        setLibraryToolsFocus({
+          ...(event?.detail ?? {}),
+        });
+
+        setActiveView(
+          "tools"
+        );
+      }
+
+      window.addEventListener(
+        "game-manager-open-library-tools",
+        openLibraryTools
+      );
+
+      return () =>
+        window.removeEventListener(
+          "game-manager-open-library-tools",
+          openLibraryTools
+        );
+    },
+    []
+  );
+
+
+  // Refresh out-of-date external game data once per session, in the
+  // background, instead of asking the user to press a button.
+  const automaticStaleRefreshDone =
+    useRef(false);
+
+  useEffect(
+    () => {
+      if (
+        automaticStaleRefreshDone.current
+        || loading
+        || games.length === 0
+        || !networkOnline
+        || libraryAnalysis.state === "running"
+        || libraryAnalysis.state === "cancelling"
+      ) {
+        return;
+      }
+
+      automaticStaleRefreshDone.current =
+        true;
+
+      const settings =
+        getSettings();
+
+      if (
+        settings.automaticStaleRefresh
+        && games.some(
+          (game) =>
+            getAnalysisState(
+              game,
+              settings.analysisFreshDays
+            ).status === "stale"
+        )
+      ) {
+        startLibraryAnalysis(
+          "stale"
+        );
+      }
+    },
+    [
+      loading,
+      games,
+      networkOnline,
+      libraryAnalysis.state,
+    ]
+  );
+
+
   function showDashboard() {
     setSelectedGame(
       null
@@ -3688,6 +3782,10 @@ function hideGame(
      */
     const analysisStarted =
       performance.now();
+
+    setActiveView(
+      "library"
+    );
 
     setGamePageFocus(
       options?.focus ?? null
@@ -4175,6 +4273,53 @@ function hideGame(
 
       <AppErrorBoundary>
         {activeView ===
+        "tools" ? (
+          <LibraryToolsScreen
+            games={
+              games
+            }
+            focus={
+              libraryToolsFocus
+            }
+            onBack={
+              showDashboard
+            }
+            onAnalyzeRemaining={
+              () =>
+                startLibraryAnalysis(
+                  "remaining"
+                )
+            }
+            onRefreshStale={
+              () =>
+                startLibraryAnalysis(
+                  "stale"
+                )
+            }
+            libraryAnalysis={
+              libraryAnalysis
+            }
+            onCancelLibraryAnalysis={
+              cancelLibraryAnalysis
+            }
+            onCheckForUpdates={
+              () =>
+                runUpdateCheck({
+                  manual:
+                    true,
+                })
+            }
+            updateCheckStatus={
+              updateCheckStatus
+            }
+            onSelectGame={
+              selectGame
+            }
+            networkOnline={
+              networkOnline
+            }
+          />
+        ) : activeView ===
         "settings" ? (
           <SettingsScreen
             onCheckForUpdates={
@@ -4257,6 +4402,9 @@ onAnalyzeRemaining={
             }
         libraryGames={
           games
+        }
+        hiddenGameIds={
+          hiddenGameIds
         }
         onSelectLibraryGame={
           selectGame

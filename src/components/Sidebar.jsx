@@ -956,6 +956,12 @@ export default function Sidebar({
       initial.favoritesOnly
     );
 
+  useEffect(() => {
+    const showFavorites = () => setFavoritesOnly(true);
+    window.addEventListener("game-manager-show-favorites", showFavorites);
+    return () => window.removeEventListener("game-manager-show-favorites", showFavorites);
+  }, []);
+
   const [
     selectedTag,
     setSelectedTag,
@@ -1306,6 +1312,12 @@ export default function Sidebar({
     ]
   );
 
+
+  // Search, tag and favorite filters narrow the list below this total.
+  const listTotal =
+    showHiddenGames
+      ? hiddenGameCount
+      : visibleGameCount;
 
   const filteredGames =
     useMemo(
@@ -2334,9 +2346,14 @@ export default function Sidebar({
                 text-white/30
               "
             >
-              {showHiddenGames
-                ? `${hiddenGameCount} hidden`
-                : `${visibleGameCount} of ${totalGames} installed`
+              {[
+                `${totalGames} installed`,
+                hiddenGameCount > 0
+                  ? `${hiddenGameCount} hidden`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")
               }
             </div>
           </div>
@@ -3864,10 +3881,9 @@ export default function Sidebar({
           "
         >
           <span>
-            {filteredGames.length}{" "}
-            {filteredGames.length === 1
-              ? "game"
-              : "games"
+            {filteredGames.length === listTotal
+              ? `${listTotal} ${showHiddenGames ? "hidden" : listTotal === 1 ? "game" : "games"}`
+              : `${filteredGames.length} of ${listTotal} shown`
             }
           </span>
 

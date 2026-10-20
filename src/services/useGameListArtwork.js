@@ -104,3 +104,20 @@ export function useGameListArtwork(game, failedUrls = []) {
   if (shouldLookup && match) candidates.push(...getSteamArtworkCandidates(match));
   return { elementRef, candidates };
 }
+
+const isHeroArtwork = (url) => url.endsWith("/library_hero.jpg");
+
+// Splits artwork candidates into a wide backdrop and a portrait cover, and
+// tracks failed URLs so each falls back to the next candidate.
+export function useGameArtwork(game) {
+  const [failedUrls, setFailedUrls] = useState([]);
+  const { elementRef, candidates } = useGameListArtwork(game, failedUrls);
+  const available = candidates.filter((url) => !failedUrls.includes(url));
+
+  return {
+    elementRef,
+    heroUrl: available.find(isHeroArtwork) ?? null,
+    posterUrl: available.find((url) => !isHeroArtwork(url)) ?? null,
+    markFailed: (url) => setFailedUrls((current) => (current.includes(url) ? current : [...current, url])),
+  };
+}

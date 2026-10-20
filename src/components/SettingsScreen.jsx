@@ -1209,6 +1209,25 @@ export default function SettingsScreen({
                   </Select>
                 </SettingRow>
 
+                <SettingRow
+                  title="Refresh out-of-date game data automatically"
+                  description="When GameAtlas opens online, quietly refresh games whose PCGamingWiki and mod-source data is older than the freshness setting."
+                >
+                  <Toggle
+                    checked={
+                      settings
+                        .automaticStaleRefresh
+                    }
+                    onChange={
+                      (value) =>
+                        changeSetting(
+                          "automaticStaleRefresh",
+                          value
+                        )
+                    }
+                  />
+                </SettingRow>
+
                 {settings.analysisConcurrency > 2 ? (
                   <div
                     className="

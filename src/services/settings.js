@@ -17,6 +17,9 @@ export const DEFAULT_SETTINGS = {
   analysisFreshDays:
     7,
 
+  automaticStaleRefresh:
+    true,
+
   automaticUpdateChecks:
     true,
 
@@ -90,6 +93,10 @@ function sanitizeSettings(
           )
         : DEFAULT_SETTINGS
             .analysisFreshDays,
+
+    automaticStaleRefresh:
+      source.automaticStaleRefresh
+      !== false,
 
     automaticUpdateChecks:
       source.automaticUpdateChecks
