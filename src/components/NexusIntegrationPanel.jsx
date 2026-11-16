@@ -25,8 +25,9 @@ import {
 } from "@tauri-apps/api/event";
 
 import {
+  beginNexusAccountConnection,
   cancelNexusDownload,
-  connectNexusAccount,
+  completeNexusAccountConnection,
   dismissNxmLink,
   downloadNexusFile,
   disconnectNexusAccount,
@@ -38,8 +39,8 @@ import {
 } from "../services/nexusIntegration";
 
 
-const NEXUS_API_SETTINGS =
-  "https://www.nexusmods.com/users/myaccount?tab=api";
+const NEXUS_ACCOUNT_SETTINGS =
+  "https://www.nexusmods.com/users/myaccount";
 
 const EXTERNAL_INSTALLER_EXTENSIONS = new Set([
   "appimage",
@@ -177,10 +178,6 @@ export default function NexusIntegrationPanel({
     account,
     setAccount,
   ] = useState(null);
-  const [
-    apiKey,
-    setApiKey,
-  ] = useState("");
   const [
     nexusUrl,
     setNexusUrl,
@@ -695,21 +692,18 @@ export default function NexusIntegrationPanel({
   );
 
 
-  async function connect(
-    event
-  ) {
-    event.preventDefault();
-    if (!apiKey.trim()) {
-      return;
-    }
+  async function connect() {
     setAction("connect");
     setError(null);
     setNotice(null);
     try {
-      const next = await connectNexusAccount(apiKey);
+      const { authorizeUrl } = await beginNexusAccountConnection();
+      await openUrl(authorizeUrl);
+      setNotice("Finish authorizing GameAtlas in your browser. This window will update automatically.");
+      const next = await completeNexusAccountConnection();
       setAccount(next);
       onAccountStatusChange?.(next);
-      setApiKey("");
+      setNotice("Your Nexus Mods account is connected for this GameAtlas session.");
       setAccountExpanded(false);
     } catch (connectError) {
       setError(String(connectError));
@@ -1087,11 +1081,11 @@ export default function NexusIntegrationPanel({
 
         <button
           type="button"
-          onClick={() => openExternal(NEXUS_API_SETTINGS)}
+          onClick={() => openExternal(NEXUS_ACCOUNT_SETTINGS)}
           className="inline-flex shrink-0 items-center gap-2 self-start rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] font-semibold text-white/45 hover:bg-white/[0.06]"
         >
           <ExternalLink className="h-3.5 w-3.5" />
-          Account & API help
+          Nexus account
         </button>
       </div>
 
@@ -1313,7 +1307,7 @@ export default function NexusIntegrationPanel({
                   <div className="mt-0.5 text-[11px] text-white/45">
                     {connected
                       ? `Quota: ${account.hourlyRemaining ?? "—"} hourly · ${account.dailyRemaining ?? "—"} daily remaining`
-                      : "Connect once per session to browse Nexus files and handle downloads."
+                      : "Sign in with Nexus Mods to browse files and handle downloads."
                     }
                   </div>
                 </div>
@@ -1342,7 +1336,7 @@ export default function NexusIntegrationPanel({
                       <span>Nexus quota is low. Automatic update checks pause to preserve remaining requests.</span>
                     </div>
                   ) : (
-                    <div className="text-xs text-white/45">Credentials remain in memory for this session only.</div>
+                    <div className="text-xs text-white/45">OAuth tokens remain in memory for this session only.</div>
                   )}
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
@@ -1352,7 +1346,7 @@ export default function NexusIntegrationPanel({
                       className="inline-flex items-center gap-1.5 rounded-md border border-white/10 px-2.5 py-1.5 text-[11px] font-semibold text-white/55 hover:bg-white/[0.05] disabled:opacity-35"
                     >
                       <RefreshCw className={`h-3 w-3 ${action === "refresh" ? "animate-spin" : ""}`} />
-                      Refresh quota
+                      Refresh account
                     </button>
                     <button
                       type="button"
@@ -1366,36 +1360,22 @@ export default function NexusIntegrationPanel({
                   </div>
                 </div>
               ) : (
-                <form id="nexus-account-details" onSubmit={connect} className="mt-3 border-t border-white/[0.06] pt-3">
-                  <label htmlFor="nexus-api-key" className="block text-[11px] font-semibold text-white/60">
-                    Personal Nexus Mods API key
-                  </label>
-                  <div className="mt-1.5 flex flex-col gap-2 sm:flex-row">
-                    <input
-                      id="nexus-api-key"
-                      type="password"
-                      value={apiKey}
-                      onChange={(event) => setApiKey(event.target.value)}
-                      placeholder="Paste API key"
-                      autoComplete="off"
-                      spellCheck="false"
-                      disabled={busy}
-                      aria-describedby="nexus-api-key-help"
-                      className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-white/75 outline-none placeholder:text-white/25 focus:border-violet-300/30 disabled:opacity-40"
-                    />
+                <div id="nexus-account-details" className="mt-3 border-t border-white/[0.06] pt-3">
+                  <div className="text-[11px] leading-relaxed text-white/45">
+                    GameAtlas opens Nexus Mods in your browser. Authorize the registered GameAtlas application, then return here to continue.
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
                     <button
-                      type="submit"
-                      disabled={busy || !apiKey.trim()}
+                      type="button"
+                      onClick={connect}
+                      disabled={busy}
                       className="inline-flex items-center justify-center gap-2 rounded-lg border border-violet-300/20 bg-violet-300/[0.08] px-3 py-2 text-xs font-semibold text-violet-100/75 hover:bg-violet-300/[0.12] disabled:opacity-35"
                     >
                       {action === "connect" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
-                      Connect
+                      Sign in with Nexus Mods
                     </button>
                   </div>
-                  <div id="nexus-api-key-help" className="mt-1.5 text-[11px] leading-relaxed text-white/40">
-                    The key is used only for this session. Create or manage it through Account & API help above.
-                  </div>
-                </form>
+                </div>
               )
             ) : null}
           </div>
@@ -1766,7 +1746,7 @@ export default function NexusIntegrationPanel({
         </summary>
         <div className="mt-2 space-y-1.5 text-[11px] leading-relaxed text-white/45">
           <p>
-            Your API key is held only in the GameAtlas process, sent only to the Nexus Mods API over HTTPS, and cleared when you disconnect or exit. GameAtlas does not write it to disk or include it in logs.
+            Nexus sign-in uses OAuth 2.0 Authorization Code with PKCE. Access and refresh tokens are held only in the GameAtlas process and cleared when you disconnect or exit. GameAtlas does not write them to disk or include them in logs.
           </p>
           <p>
             Mod Manager Download links can contain short-lived Nexus credentials. They remain in memory only until the download succeeds, you dismiss the request, or GameAtlas exits; the credentials are never displayed or logged.
@@ -1775,7 +1755,7 @@ export default function NexusIntegrationPanel({
             Archives are downloaded directly from a Nexus-provided HTTPS mirror into VortexMods. GameAtlas verifies the archive signature and applies path, link, entry-count, and size checks before previewing it. Downloaded installers and scripts are never executed automatically.
           </p>
           <p>
-            Metadata and quota requests occur when you look up, download, refresh, or check mods, plus one update check after a connected managed library loads. Public releases will replace testing-only personal-key entry with the Nexus-approved application sign-in flow.
+            Metadata and quota requests occur when you look up, download, refresh, or check mods, plus one update check after a connected managed library loads.
           </p>
         </div>
       </details>

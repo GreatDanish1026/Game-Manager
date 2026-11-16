@@ -10,16 +10,16 @@ export function getNexusAccountStatus() {
 }
 
 
-export function connectNexusAccount(
-  apiKey
-) {
+export function beginNexusAccountConnection() {
   return invoke(
-    "connect_nexus_account",
-    {
-      request: {
-        apiKey,
-      },
-    }
+    "begin_nexus_oauth"
+  );
+}
+
+
+export function completeNexusAccountConnection() {
+  return invoke(
+    "complete_nexus_oauth"
   );
 }
 

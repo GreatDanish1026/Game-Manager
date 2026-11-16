@@ -40,12 +40,12 @@ Removing GameAtlas may not automatically remove its application-data directory, 
 
 ## Nexus Mods integration
 
-During the testing phase, connecting a Nexus Mods account requires a personal API key supplied by the user.
+Connecting a Nexus Mods account uses OAuth 2.0 Authorization Code with PKCE through the registered GameAtlas application. Authorization occurs in the user's browser and returns through a loopback callback on the user's device.
 
-- The API key is held only in GameAtlas process memory.
-- It is sent directly from your device to the Nexus Mods API over HTTPS.
-- GameAtlas does not write the key to disk or intentionally include it in logs or error messages.
-- The key is cleared when you disconnect the account or exit GameAtlas.
+- OAuth access and refresh tokens are held only in GameAtlas process memory.
+- Tokens are sent directly from your device to Nexus Mods over HTTPS.
+- GameAtlas does not write tokens to disk or intentionally include them in logs or error messages.
+- Tokens are cleared when you disconnect the account or exit GameAtlas, so you must sign in again after restarting the application.
 
 An `nxm://` Mod Manager Download link can contain a short-lived Nexus download key, user identifier, and expiration time. GameAtlas keeps the complete link in process memory only until the download succeeds, you dismiss it, or the application exits. These credentials are not displayed or intentionally logged.
 
@@ -72,7 +72,7 @@ Diagnostic collection and export are initiated by the user. Reports are created 
 
 ## Security
 
-GameAtlas uses HTTPS for supported remote API and download operations and applies validation and safety limits to supported mod archives. No software can guarantee absolute security. Keep GameAtlas updated, obtain builds from the official repository, and do not share API keys or unreviewed diagnostic bundles.
+GameAtlas uses HTTPS for supported remote API and download operations and applies validation and safety limits to supported mod archives. No software can guarantee absolute security. Keep GameAtlas updated, obtain builds from the official repository, and do not share OAuth tokens, NXM credentials, or unreviewed diagnostic bundles.
 
 ## Changes to this notice
 

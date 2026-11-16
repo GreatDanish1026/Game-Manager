@@ -1,5 +1,11 @@
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use rand::RngCore;
 use reqwest::{header::HeaderMap, Client, StatusCode, Url};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use sha2::Digest;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpListener;
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{
     collections::{HashMap, VecDeque},
@@ -13,11 +19,15 @@ use tauri::Emitter;
 #[cfg(target_os = "linux")]
 use std::{
     fs,
-    io::Write,
     path::{Path, PathBuf},
 };
 
 const NEXUS_API_ROOT: &str = "https://api.nexusmods.com/v1";
+const NEXUS_OAUTH_ROOT: &str = "https://users.nexusmods.com/oauth";
+const NEXUS_OAUTH_CLIENT_ID: &str = "gameatlas";
+const NEXUS_OAUTH_REDIRECT_URI: &str = "http://127.0.0.1:48931/callback";
+const NEXUS_OAUTH_CALLBACK_ADDRESS: &str = "127.0.0.1:48931";
+const NEXUS_OAUTH_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const APP_NAME: &str = "GameAtlas";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_API_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
@@ -25,13 +35,24 @@ const MAX_API_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_NEXUS_DOWNLOAD_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 
 static NEXUS_SESSION: OnceLock<Mutex<Option<NexusSession>>> = OnceLock::new();
+static PENDING_NEXUS_OAUTH: OnceLock<Mutex<Option<PendingNexusOAuth>>> = OnceLock::new();
+static NEXUS_REFRESH_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 static PENDING_NXM_LINKS: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
 static ACTIVE_NEXUS_DOWNLOADS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
 
 #[derive(Clone)]
 struct NexusSession {
-    api_key: String,
+    access_token: String,
+    refresh_token: String,
+    expires_at: u64,
     account: NexusAccountStatus,
+}
+
+struct PendingNexusOAuth {
+    listener: TcpListener,
+    state: String,
+    code_verifier: String,
+    started: Instant,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -50,10 +71,17 @@ pub struct NexusAccountStatus {
     pub hourly_reset: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ConnectNexusRequest {
-    pub api_key: String,
+pub struct NexusOAuthStart {
+    pub authorize_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct NexusOAuthTokenResponse {
+    access_token: String,
+    refresh_token: Option<String>,
+    expires_in: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -290,6 +318,14 @@ fn session() -> &'static Mutex<Option<NexusSession>> {
     NEXUS_SESSION.get_or_init(|| Mutex::new(None))
 }
 
+fn pending_oauth() -> &'static Mutex<Option<PendingNexusOAuth>> {
+    PENDING_NEXUS_OAUTH.get_or_init(|| Mutex::new(None))
+}
+
+fn refresh_lock() -> &'static tokio::sync::Mutex<()> {
+    NEXUS_REFRESH_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 fn pending_nxm_links() -> &'static Mutex<VecDeque<String>> {
     PENDING_NXM_LINKS.get_or_init(|| Mutex::new(VecDeque::new()))
 }
@@ -401,7 +437,7 @@ fn quota_reset_hint(quota: &NexusQuota) -> String {
 fn api_error(status: StatusCode, quota: &NexusQuota) -> String {
     match status {
         StatusCode::UNAUTHORIZED => {
-            "Nexus Mods rejected the API key. It may be invalid or revoked; disconnect the account, create a new key in Nexus API settings, and reconnect."
+            "Nexus Mods rejected the sign-in session. It may have expired or been revoked; disconnect the account and sign in again."
                 .to_string()
         }
         StatusCode::FORBIDDEN => {
@@ -447,11 +483,11 @@ fn request_error(error: &reqwest::Error, action: &str) -> String {
 async fn get_json<T: DeserializeOwned>(
     client: &Client,
     url: String,
-    api_key: &str,
+    access_token: &str,
 ) -> Result<(T, NexusQuota), String> {
     let response = client
         .get(url)
-        .header("apikey", api_key)
+        .bearer_auth(access_token)
         .header("Application-Name", APP_NAME)
         .header("Application-Version", APP_VERSION)
         .send()
@@ -509,59 +545,261 @@ fn optional_u64(value: &serde_json::Value, names: &[&str]) -> Option<u64> {
         })
 }
 
-fn flexible_bool(value: &serde_json::Value, names: &[&str]) -> bool {
-    names
-        .iter()
-        .filter_map(|name| value.get(*name))
-        .any(|field| {
-            field.as_bool().unwrap_or_else(|| {
-                field.as_u64() == Some(1)
-                    || field.as_str().is_some_and(|text| {
-                        matches!(text.to_ascii_lowercase().as_str(), "true" | "1")
-                    })
-            })
-        })
-}
-
-fn account_from_json(
-    value: serde_json::Value,
-    quota: NexusQuota,
-) -> Result<NexusAccountStatus, String> {
+fn oauth_account_from_json(value: serde_json::Value) -> Result<NexusAccountStatus, String> {
     if !value.is_object() {
         return Err("Nexus Mods returned an unexpected account response.".to_string());
     }
 
-    let user_id = optional_u64(&value, &["user_id", "userId"]);
-    let name = optional_string(&value, &["name"]);
+    let user_id = optional_u64(&value, &["sub", "user_id", "userId"]);
+    let name = optional_string(&value, &["name", "preferred_username"]);
     if user_id.is_none() && name.is_none() {
         return Err(
-            "Nexus Mods accepted the request but did not return an account identity.".to_string(),
+            "Nexus Mods accepted the sign-in but did not return an account identity.".to_string(),
         );
     }
+    let roles = value
+        .get("membership_roles")
+        .and_then(serde_json::Value::as_array);
+    let has_role = |expected: &[&str]| {
+        roles.is_some_and(|roles| {
+            roles
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .any(|role| {
+                    expected
+                        .iter()
+                        .any(|expected| role.eq_ignore_ascii_case(expected))
+                })
+        })
+    };
 
     Ok(NexusAccountStatus {
         connected: true,
         session_only: true,
         user_id,
         name,
-        profile_url: optional_string(&value, &["profile_url", "profileUrl"]),
-        is_premium: flexible_bool(&value, &["is_premium", "is_premium?", "isPremium"]),
-        is_supporter: flexible_bool(&value, &["is_supporter", "is_supporter?", "isSupporter"]),
-        daily_remaining: quota.daily_remaining,
-        hourly_remaining: quota.hourly_remaining,
-        daily_reset: quota.daily_reset,
-        hourly_reset: quota.hourly_reset,
+        profile_url: optional_string(&value, &["profile_url", "profileUrl", "picture"]),
+        is_premium: has_role(&["premium", "lifetimepremium"]),
+        is_supporter: has_role(&["supporter"]),
+        ..NexusAccountStatus::default()
     })
 }
 
-async fn validate_account(api_key: &str) -> Result<NexusAccountStatus, String> {
-    let (value, quota) = get_json::<serde_json::Value>(
-        &client()?,
-        format!("{NEXUS_API_ROOT}/users/validate"),
-        api_key,
-    )
+async fn validate_oauth_account(access_token: &str) -> Result<NexusAccountStatus, String> {
+    let response = client()?
+        .get(format!("{NEXUS_OAUTH_ROOT}/userinfo"))
+        .bearer_auth(access_token)
+        .header("Application-Name", APP_NAME)
+        .header("Application-Version", APP_VERSION)
+        .send()
+        .await
+        .map_err(|error| request_error(&error, "validating the sign-in"))?;
+    if !response.status().is_success() {
+        return Err(api_error(response.status(), &NexusQuota::default()));
+    }
+    let value = response.json::<serde_json::Value>().await.map_err(|_| {
+        "Nexus Mods returned account data GameAtlas could not interpret.".to_string()
+    })?;
+    oauth_account_from_json(value)
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default()
+}
+
+fn random_oauth_value() -> String {
+    let mut bytes = [0_u8; 32];
+    rand::rng().fill_bytes(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+fn constant_time_eq(left: &str, right: &str) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.as_bytes()
+        .iter()
+        .zip(right.as_bytes())
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
+}
+
+fn oauth_authorize_url(state: &str, code_challenge: &str) -> Result<String, String> {
+    let mut url = Url::parse(&format!("{NEXUS_OAUTH_ROOT}/authorize"))
+        .map_err(|_| "Could not construct the Nexus sign-in URL.".to_string())?;
+    url.query_pairs_mut()
+        .append_pair("client_id", NEXUS_OAUTH_CLIENT_ID)
+        .append_pair("response_type", "code")
+        .append_pair("scope", "openid profile email")
+        .append_pair("redirect_uri", NEXUS_OAUTH_REDIRECT_URI)
+        .append_pair("state", state)
+        .append_pair("code_challenge_method", "S256")
+        .append_pair("code_challenge", code_challenge);
+    Ok(url.to_string())
+}
+
+fn write_oauth_browser_response(stream: &mut std::net::TcpStream, status: &str, message: &str) {
+    let body = format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>GameAtlas Nexus sign-in</title></head><body><h1>GameAtlas</h1><p>{message}</p></body></html>"
+    );
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = stream.write_all(response.as_bytes());
+    let _ = stream.flush();
+}
+
+fn wait_for_oauth_callback(pending: PendingNexusOAuth) -> Result<String, String> {
+    let deadline = pending.started + NEXUS_OAUTH_TIMEOUT;
+    loop {
+        if Instant::now() >= deadline {
+            return Err("Nexus sign-in timed out. Start the connection again.".to_string());
+        }
+        let (mut stream, peer) = match pending.listener.accept() {
+            Ok(connection) => connection,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(75));
+                continue;
+            }
+            Err(_) => {
+                return Err("GameAtlas could not receive the Nexus sign-in callback.".to_string())
+            }
+        };
+        if !peer.ip().is_loopback() {
+            continue;
+        }
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+        let reader_stream = stream
+            .try_clone()
+            .map_err(|_| "GameAtlas could not read the Nexus sign-in callback.".to_string())?;
+        let reader = BufReader::new(reader_stream);
+        let mut request_line = String::new();
+        reader
+            .take(8 * 1024 + 1)
+            .read_line(&mut request_line)
+            .map_err(|_| "GameAtlas could not read the Nexus sign-in callback.".to_string())?;
+        if request_line.len() > 8 * 1024 {
+            write_oauth_browser_response(
+                &mut stream,
+                "400 Bad Request",
+                "The callback was invalid. Return to GameAtlas and try again.",
+            );
+            continue;
+        }
+        let mut parts = request_line.split_whitespace();
+        if parts.next() != Some("GET") {
+            write_oauth_browser_response(
+                &mut stream,
+                "405 Method Not Allowed",
+                "The callback was invalid. Return to GameAtlas and try again.",
+            );
+            continue;
+        }
+        let Some(target) = parts.next() else {
+            continue;
+        };
+        let callback = Url::parse(&format!("http://127.0.0.1{target}"))
+            .map_err(|_| "Nexus returned an invalid sign-in callback.".to_string())?;
+        if callback.path() != "/callback" {
+            write_oauth_browser_response(
+                &mut stream,
+                "404 Not Found",
+                "This local page is only used for the GameAtlas Nexus callback.",
+            );
+            continue;
+        }
+        let parameters: HashMap<String, String> = callback.query_pairs().into_owned().collect();
+        let received_state = parameters
+            .get("state")
+            .map(String::as_str)
+            .unwrap_or_default();
+        if !constant_time_eq(received_state, &pending.state) {
+            write_oauth_browser_response(&mut stream, "400 Bad Request", "The callback could not be verified. You can close this tab and return to GameAtlas.");
+            return Err(
+                "Nexus returned a callback that could not be verified. Start the connection again."
+                    .to_string(),
+            );
+        }
+        if let Some(error) = parameters.get("error") {
+            write_oauth_browser_response(
+                &mut stream,
+                "400 Bad Request",
+                "Nexus sign-in was not completed. You can close this tab and return to GameAtlas.",
+            );
+            return Err(match error.as_str() {
+                "access_denied" => "Nexus sign-in was canceled.".to_string(),
+                _ => "Nexus Mods could not authorize GameAtlas. Start the connection again."
+                    .to_string(),
+            });
+        }
+        let code = parameters
+            .get("code")
+            .filter(|code| !code.is_empty() && code.len() <= 4096)
+            .cloned()
+            .ok_or_else(|| "Nexus did not return an authorization code.".to_string())?;
+        write_oauth_browser_response(
+            &mut stream,
+            "200 OK",
+            "Authorization received. You can close this tab and return to GameAtlas.",
+        );
+        return Ok(code);
+    }
+}
+
+async fn request_oauth_token(form: &[(&str, &str)]) -> Result<NexusOAuthTokenResponse, String> {
+    let response = client()?
+        .post(format!("{NEXUS_OAUTH_ROOT}/token"))
+        .form(form)
+        .send()
+        .await
+        .map_err(|error| request_error(&error, "completing the sign-in"))?;
+    if !response.status().is_success() {
+        return Err(match response.status() {
+            StatusCode::BAD_REQUEST | StatusCode::UNAUTHORIZED => {
+                "Nexus could not complete the sign-in. The authorization may have expired; start the connection again."
+                    .to_string()
+            }
+            status if status.is_server_error() => {
+                "Nexus sign-in is temporarily unavailable. Try again later.".to_string()
+            }
+            status => format!("Nexus sign-in returned HTTP {}.", status.as_u16()),
+        });
+    }
+    let tokens = response
+        .json::<NexusOAuthTokenResponse>()
+        .await
+        .map_err(|_| "Nexus returned sign-in data GameAtlas could not interpret.".to_string())?;
+    if tokens.access_token.is_empty() || tokens.expires_in == 0 {
+        return Err("Nexus returned an incomplete sign-in session.".to_string());
+    }
+    Ok(tokens)
+}
+
+async fn refresh_oauth_session(active: NexusSession) -> Result<NexusSession, String> {
+    if active.refresh_token.is_empty() {
+        return Err(
+            "The Nexus sign-in cannot be refreshed. Disconnect and sign in again.".to_string(),
+        );
+    }
+    let tokens = request_oauth_token(&[
+        ("grant_type", "refresh_token"),
+        ("refresh_token", active.refresh_token.as_str()),
+        ("client_id", NEXUS_OAUTH_CLIENT_ID),
+    ])
     .await?;
-    account_from_json(value, quota)
+    let account = validate_oauth_account(&tokens.access_token).await?;
+    Ok(NexusSession {
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token.unwrap_or(active.refresh_token),
+        expires_at: unix_now().saturating_add(tokens.expires_in),
+        account,
+    })
 }
 
 fn current_session() -> Result<NexusSession, String> {
@@ -570,6 +808,17 @@ fn current_session() -> Result<NexusSession, String> {
         .map_err(|_| "The Nexus account session could not be accessed.".to_string())?
         .clone()
         .ok_or_else(|| "Connect a Nexus Mods account before looking up mod metadata.".to_string())
+}
+
+async fn current_oauth_session() -> Result<NexusSession, String> {
+    let _refresh_guard = refresh_lock().lock().await;
+    let active = current_session()?;
+    if active.expires_at > unix_now().saturating_add(60) {
+        return Ok(active);
+    }
+    let refreshed = refresh_oauth_session(active).await?;
+    save_session(Some(refreshed.clone()))?;
+    Ok(refreshed)
 }
 
 fn save_session(next: Option<NexusSession>) -> Result<(), String> {
@@ -979,17 +1228,62 @@ pub fn get_nexus_account_status() -> Result<NexusAccountStatus, String> {
 }
 
 #[tauri::command]
-pub async fn connect_nexus_account(
-    request: ConnectNexusRequest,
-) -> Result<NexusAccountStatus, String> {
-    let api_key = request.api_key.trim();
-    if api_key.len() < 20 || api_key.len() > 256 || api_key.chars().any(char::is_control) {
-        return Err("Enter a valid Nexus Mods personal API key.".to_string());
-    }
+pub fn begin_nexus_oauth() -> Result<NexusOAuthStart, String> {
+    let mut pending = pending_oauth()
+        .lock()
+        .map_err(|_| "The Nexus sign-in state could not be updated.".to_string())?;
+    *pending = None;
 
-    let account = validate_account(api_key).await?;
+    let listener = TcpListener::bind(NEXUS_OAUTH_CALLBACK_ADDRESS).map_err(|_| {
+        "GameAtlas could not open its local Nexus callback. Close any other GameAtlas instance and try again."
+            .to_string()
+    })?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|_| "GameAtlas could not prepare its local Nexus callback.".to_string())?;
+    let state = random_oauth_value();
+    let code_verifier = random_oauth_value();
+    let code_challenge = URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(code_verifier.as_bytes()));
+    let authorize_url = oauth_authorize_url(&state, &code_challenge)?;
+    *pending = Some(PendingNexusOAuth {
+        listener,
+        state,
+        code_verifier,
+        started: Instant::now(),
+    });
+    Ok(NexusOAuthStart { authorize_url })
+}
+
+#[tauri::command]
+pub async fn complete_nexus_oauth() -> Result<NexusAccountStatus, String> {
+    let pending = pending_oauth()
+        .lock()
+        .map_err(|_| "The Nexus sign-in state could not be accessed.".to_string())?
+        .take()
+        .ok_or_else(|| {
+            "Start the Nexus connection before waiting for authorization.".to_string()
+        })?;
+    let code_verifier = pending.code_verifier.clone();
+    let code = tauri::async_runtime::spawn_blocking(move || wait_for_oauth_callback(pending))
+        .await
+        .map_err(|_| "GameAtlas could not finish the local Nexus callback.".to_string())??;
+    let tokens = request_oauth_token(&[
+        ("grant_type", "authorization_code"),
+        ("redirect_uri", NEXUS_OAUTH_REDIRECT_URI),
+        ("client_id", NEXUS_OAUTH_CLIENT_ID),
+        ("code", code.as_str()),
+        ("code_verifier", code_verifier.as_str()),
+    ])
+    .await?;
+    let account = validate_oauth_account(&tokens.access_token).await?;
+    let refresh_token = tokens.refresh_token.ok_or_else(|| {
+        "Nexus did not return a refresh token. Disconnect and start the connection again."
+            .to_string()
+    })?;
     save_session(Some(NexusSession {
-        api_key: api_key.to_string(),
+        access_token: tokens.access_token,
+        refresh_token,
+        expires_at: unix_now().saturating_add(tokens.expires_in),
         account: account.clone(),
     }))?;
     Ok(account)
@@ -997,18 +1291,20 @@ pub async fn connect_nexus_account(
 
 #[tauri::command]
 pub async fn refresh_nexus_account() -> Result<NexusAccountStatus, String> {
+    let _refresh_guard = refresh_lock().lock().await;
     let active = current_session()?;
-    let account = validate_account(&active.api_key).await?;
-    save_session(Some(NexusSession {
-        api_key: active.api_key,
-        account: account.clone(),
-    }))?;
+    let refreshed = refresh_oauth_session(active).await?;
+    let account = refreshed.account.clone();
+    save_session(Some(refreshed))?;
     Ok(account)
 }
 
 #[tauri::command]
 pub fn disconnect_nexus_account() -> Result<NexusAccountStatus, String> {
     save_session(None)?;
+    if let Ok(mut pending) = pending_oauth().lock() {
+        *pending = None;
+    }
     Ok(NexusAccountStatus::default())
 }
 
@@ -1039,19 +1335,19 @@ pub fn dismiss_nxm_link(request: NxmLinkRequest) -> Result<(), String> {
 #[tauri::command]
 pub async fn lookup_nexus_mod(request: NexusLookupRequest) -> Result<NexusModMetadata, String> {
     let (game_domain, mod_id) = parse_nexus_mod_url(&request.nexus_url)?;
-    let active = current_session()?;
+    let active = current_oauth_session().await?;
     ensure_quota_capacity(&active.account, 2, "look up this mod")?;
     let client = client()?;
     let (mod_data, _) = get_json::<ModResponse>(
         &client,
         format!("{NEXUS_API_ROOT}/games/{game_domain}/mods/{mod_id}.json"),
-        &active.api_key,
+        &active.access_token,
     )
     .await?;
     let (file_data, quota) = get_json::<FilesResponse>(
         &client,
         format!("{NEXUS_API_ROOT}/games/{game_domain}/mods/{mod_id}/files.json"),
-        &active.api_key,
+        &active.access_token,
     )
     .await?;
     update_quota(&quota)?;
@@ -1087,7 +1383,7 @@ pub async fn check_nexus_mod_updates(
     if request.mods.len() > 100 {
         return Err("At most 100 managed Nexus mods can be checked at once.".to_string());
     }
-    let active = current_session()?;
+    let active = current_oauth_session().await?;
     let required_requests = request
         .mods
         .iter()
@@ -1120,7 +1416,7 @@ pub async fn check_nexus_mod_updates(
                     "{NEXUS_API_ROOT}/games/{domain}/mods/{}/files.json",
                     tracked.mod_id
                 ),
-                &active.api_key,
+                &active.access_token,
             )
             .await?;
             update_quota(&quota)?;
@@ -1218,7 +1514,7 @@ pub async fn download_nexus_file(
         let domain = validate_game_domain(&request.game_domain)?;
         let file_name = safe_archive_name(&request.file_name, request.mod_id, request.file_id)?;
         emit_download_progress(&app, &download_id, &file_name, "", "resolving", 0, None, 0);
-        let active = current_session()?;
+        let active = current_oauth_session().await?;
         ensure_quota_capacity(&active.account, 1, "resolve this download")?;
         let nxm = request.nxm_url.as_deref().map(parse_nxm_url).transpose()?;
         if let Some(link) = nxm.as_ref() {
@@ -1267,7 +1563,7 @@ pub async fn download_nexus_file(
         let (links, quota) = get_json::<Vec<DownloadLinkResponse>>(
             &api_client,
             download_link_url.to_string(),
-            &active.api_key,
+            &active.access_token,
         )
         .await?;
         update_quota(&quota)?;
@@ -1565,29 +1861,54 @@ mod tests {
     }
 
     #[test]
-    fn accepts_account_field_variations() {
-        let account = account_from_json(
+    fn reads_oauth_account_identity_and_membership() {
+        let account = oauth_account_from_json(
             serde_json::from_str(
-                r#"{"user_id":"42","name":"AtlasUser","is_premium?":1,"is_supporter":"false","profile_url":false}"#,
+                r#"{"sub":"42","name":"AtlasUser","membership_roles":["premium"],"picture":"https://example.invalid/avatar.png"}"#,
             )
             .unwrap(),
-            NexusQuota::default(),
         )
         .unwrap();
         assert_eq!(account.user_id, Some(42));
         assert_eq!(account.name.as_deref(), Some("AtlasUser"));
-        assert_eq!(account.profile_url, None);
+        assert_eq!(
+            account.profile_url.as_deref(),
+            Some("https://example.invalid/avatar.png")
+        );
         assert!(account.is_premium);
         assert!(!account.is_supporter);
     }
 
     #[test]
-    fn rejects_account_payload_without_an_identity() {
-        assert!(account_from_json(
-            serde_json::json!({ "is_premium": true }),
-            NexusQuota::default()
-        )
+    fn rejects_oauth_account_payload_without_an_identity() {
+        assert!(oauth_account_from_json(serde_json::json!({
+            "membership_roles": ["premium"]
+        }))
         .is_err());
+    }
+
+    #[test]
+    fn builds_pkce_authorization_url_with_registered_callback() {
+        let url =
+            Url::parse(&oauth_authorize_url("state-value", "challenge-value").unwrap()).unwrap();
+        let query: HashMap<String, String> = url.query_pairs().into_owned().collect();
+        assert_eq!(
+            url.as_str().split('?').next(),
+            Some("https://users.nexusmods.com/oauth/authorize")
+        );
+        assert_eq!(
+            query.get("client_id").map(String::as_str),
+            Some("gameatlas")
+        );
+        assert_eq!(
+            query.get("redirect_uri").map(String::as_str),
+            Some("http://127.0.0.1:48931/callback")
+        );
+        assert_eq!(query.get("state").map(String::as_str), Some("state-value"));
+        assert_eq!(
+            query.get("code_challenge_method").map(String::as_str),
+            Some("S256")
+        );
     }
 
     #[test]

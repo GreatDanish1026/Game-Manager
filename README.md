@@ -119,9 +119,9 @@ FOMOD installers and Nexus Collections are not currently supported.
 
 ### Nexus Mods connection
 
-The testing integration supports:
+The integration supports:
 
-- Session-only connection with a personal Nexus Mods API key.
+- Nexus-approved browser sign-in using OAuth 2.0 Authorization Code with PKCE.
 - Mod-page metadata and file-catalog lookup.
 - `nxm://` Mod Manager Download links.
 - Direct eligible archive downloads into the selected game's staging folder.
@@ -129,9 +129,9 @@ The testing integration supports:
 - Automatic update detection and guided download-and-upgrade actions.
 - Hourly and daily quota display, low-quota protection, and reset guidance.
 
-API keys and short-lived NXM credentials are held in memory and are not written to disk. See the [privacy notice](PRIVACY.md) for details.
+OAuth tokens and short-lived NXM credentials are held in memory and are not written to disk. See the [privacy notice](PRIVACY.md) for details.
 
-GameAtlas is an independent third-party application and is not affiliated with, endorsed by, or sponsored by Nexus Mods. The personal-key interface is intended for development and approval testing; a public Nexus-approved connection flow will replace it before general distribution of the integration.
+GameAtlas is an independent third-party application and is not affiliated with, endorsed by, or sponsored by Nexus Mods.
 
 ## Platform-specific behavior
 
